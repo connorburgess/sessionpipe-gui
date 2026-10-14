@@ -349,7 +349,7 @@ export interface SetupStatus {
   viewers: { phones: number };
   /** Control messages that reached `delivered` (step 5 turns green after the first one). */
   tried: { delivered: number };
-  platform: NodeJS.Platform | string;
+  platform: string | string;
   uiKey: string;
 }
 

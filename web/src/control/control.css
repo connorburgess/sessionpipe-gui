@@ -40,6 +40,11 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* Why the pair is gone or disabled, beside it, in muted text. */
+.ctl-answer-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
 .ctl-cancel {
   margin-left: auto;
 }

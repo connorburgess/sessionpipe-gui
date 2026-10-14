@@ -376,15 +376,21 @@ test("Allow on an open permission sends a permission.answer naming the attention
   await events.post(
     events.ev("turn.started", { turn_id: "t2", prompt_chars: 20 }),
     events.ev("attention.needed", {
-      attention_id: "att_1",
+      attention_id: "perm-1",
       kind: "permission",
       tool: "Bash",
       message: "rm -rf dist && npm run build",
     }),
   );
-  const answer = page.locator('.ctl-answer[data-attention="att_1"]');
+  const answer = page.locator('.ctl-answer[data-attention="perm-1"]');
   await expect(answer).toBeVisible();
   await expect(answer).toContainText("Bash");
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  // Claude Code also raises a Notification about the same prompt a few seconds later:
+  // nobody can answer that one, so it adds no row of its own.
+  await events.post(events.ev("attention.needed", { attention_id: "notif-1", kind: "permission" }));
+  await expect(page.locator(".ctl-answer")).toHaveCount(1);
+  await expect(page.locator('.ctl-answer[data-attention="notif-1"]')).toHaveCount(0);
   await shot(page, "strip-permission-desktop");
   await answer.getByRole("button", { name: "Allow" }).click();
 
@@ -392,7 +398,7 @@ test("Allow on an open permission sends a permission.answer naming the attention
   expect(msg.cmd).toMatchObject({
     kind: "permission.answer",
     session: `claude-code:${SID}`,
-    for: "att_1",
+    for: "perm-1",
     decision: "allow",
   });
   expect(msg.cmd).not.toHaveProperty("text");
@@ -404,7 +410,7 @@ test("Allow on an open permission sends a permission.answer naming the attention
 });
 
 test("Cancel on a working turn sends a cancel", async () => {
-  await events.post(events.ev("attention.cleared", { attention_id: "att_1", how: "answered" }));
+  await events.post(events.ev("attention.cleared", { attention_id: "perm-1", how: "answered" }));
   await expect(page.locator(".ctl-answer")).toHaveCount(0);
   const cancel = page.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toBeVisible();
@@ -415,6 +421,60 @@ test("Cancel on a working turn sends a cancel", async () => {
   const row = page.locator(`li[data-message="${msg.id}"]`);
   await expect(row).toHaveAttribute("data-outcome", "refused");
   await expect(row).toContainText("no such session");
+});
+
+test("a refused no_attention closes the prompt here: the pair goes, the words stay, nothing is sent twice", async () => {
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-2", kind: "permission", tool: "Write", message: "notes.md" }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="perm-2"]');
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  await answer.getByRole("button", { name: "Allow" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-2", decision: "allow" });
+  // While the answer is out the pair stays, disabled, and a second click goes nowhere.
+  await expect(answer).toHaveAttribute("data-answer", "sent");
+  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
+  await expect(answer).toContainText("answer sent");
+  // The terminal had answered first: the daemon says the prompt is no longer open.
+  await daemon.ack(msg.id, "refused", { code: "no_attention" });
+  await expect(answer).toHaveAttribute("data-answer", "closed");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(answer).toContainText("answered in the terminal, or expired");
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toContainText("no longer open");
+  expect(await daemon.poll(0)).toEqual([]);
+  await events.post(events.ev("attention.cleared", { attention_id: "perm-2", how: "answered" }));
+  await expect(answer).toHaveCount(0);
+});
+
+test("a prompt raised before the daemon's hello cannot be answered here; a tier-0 copy still has a label", async () => {
+  // Raised an hour ago, long before this daemon said hello; and with no tool or message.
+  const old = events.ev("attention.needed", { attention_id: "perm-3", kind: "permission" });
+  old.time = new Date(Date.now() - 3600_000).toISOString();
+  await events.post(old);
+  const answer = page.locator('.ctl-answer[data-attention="perm-3"]');
+  await expect(answer).toBeVisible();
+  await expect(answer).toHaveAttribute("data-answer", "pre-hello");
+  await expect(answer).toContainText("Allow this?");
+  await expect(answer).toContainText("a permission request");
+  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
+  await expect(answer.getByRole("button", { name: "Deny" })).toBeDisabled();
+  await expect(answer).toContainText("raised before this machine was paired; answer it in its terminal");
+  expect(await daemon.poll(0)).toEqual([]);
+  await events.post(events.ev("attention.cleared", { attention_id: "perm-3", how: "answered" }));
+  await expect(answer).toHaveCount(0);
+});
+
+test("a notification-only permission (nothing the daemon can answer) says so, with no buttons", async () => {
+  await events.post(events.ev("attention.needed", { attention_id: "notif-9", kind: "permission" }));
+  const row = page.locator('.ctl-answer[data-attention="notif-9"]');
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute("data-answer", "terminal");
+  await expect(row.getByRole("button")).toHaveCount(0);
+  await expect(row).toContainText("waiting in the terminal");
+  expect(await daemon.poll(0)).toEqual([]);
+  await events.post(events.ev("attention.cleared", { attention_id: "notif-9", how: "answered" }));
+  await expect(row).toHaveCount(0);
 });
 
 test("a session is started from /machines in one of the machine's folders", async () => {
