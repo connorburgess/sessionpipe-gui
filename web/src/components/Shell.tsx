@@ -3,13 +3,39 @@
 // connection indicator, the theme switch, and one entry per installed theme plugin
 // (web/src/themes/host), routed to /t/<id>.
 import type { InstalledTheme } from "@shared/theme-api";
-import { Fragment, type ReactNode } from "react";
+import { type CSSProperties, Fragment, type ReactNode, useEffect, useState } from "react";
 import { useAppState } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
 import { Link, type Route } from "../lib/router";
+import { useSplitKey, useSplitWidth } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
 import { QuickSettings } from "./QuickSettings";
+import { SessionPanel } from "./SessionPanel";
+
+/** Whether a media query matches, live. */
+function useMedia(query: string): boolean {
+  const [on, setOn] = useState(() => window.matchMedia?.(query).matches ?? false);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const update = () => setOn(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [query]);
+  return on;
+}
+
+/** Re-renders on window resize (the panel width is clamped to the viewport). */
+function useResize(): void {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const on = () => bump((n) => n + 1);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+}
 
 /* Thin 1.5 px line icons on a 20 px grid. */
 const ICON: Record<string, ReactNode> = {
@@ -113,6 +139,11 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = [...useAppState().sessions.values()].filter((s) => s.state === "needs_you" && !s.parentId).length;
   const nav = navItems(useThemes().themes);
+  const phone = useMedia("(max-width: 839px)");
+  useResize();
+  const splitOpen = useSplitKey() !== null;
+  const splitWidth = useSplitWidth();
+  const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
   const links = nav.map((n) => (
     <Link
       key={n.key}
@@ -148,7 +179,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     </Link>
   ));
   return (
-    <div className="shell">
+    <div className={`shell ${splitOpen && !phone ? "shell--split" : ""}`} style={shellStyle}>
       <nav className="rail" aria-label="Pages">
         <Link to="/" className="rail-brand" title="sessionpipe">
           <span className="rail-mark" aria-hidden="true" />
@@ -158,10 +189,13 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           {nav.map((n, i) => (
             <Fragment key={n.key}>
               {n.experimental && !nav[i - 1]?.experimental ? (
-                /* "labs" fits the rail; data-nav keeps the divider's name for the tests. */
-                <span className="rail-group" data-nav="experimental" title="Experimental views">
-                  labs
-                </span>
+                /* A hairline only; the word lives in the tooltip. data-nav keeps the divider's name for the tests. */
+                <hr
+                  className="rail-group"
+                  data-nav="experimental"
+                  title="Experimental views"
+                  aria-label="Experimental views"
+                />
               ) : null}
               {links[i]}
             </Fragment>
@@ -200,6 +234,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {links}
         <QuickSettings placement="tabbar" />
       </nav>
+      <SessionPanel phone={phone} />
     </div>
   );
 }

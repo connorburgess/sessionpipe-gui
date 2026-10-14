@@ -4,10 +4,12 @@
 import type { FeedQuery, StoredEvent } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Redacted, SearchInput, Spinner } from "../components/bits";
+import { BesideButton } from "../components/SessionCard";
 import { useAppState, useStore } from "../data/hooks";
 import { eventSummary, sessionTitle, storedKey } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { Link, sessionPath } from "../lib/router";
+import { openSplit } from "../lib/split";
 import { clock, dayLabel, useNow } from "../lib/time";
 
 const CAP = 1500;
@@ -132,7 +134,8 @@ export function Feed() {
   }, [store, filter, cursor]);
 
   const hrefs = useMemo(() => rows.map((e) => sessionPath(e.harness.name, e.session.id)), [rows]);
-  const { cursor: cur } = useListNav(hrefs);
+  const keys = useMemo(() => rows.map(storedKey), [rows]);
+  const { cursor: cur } = useListNav(hrefs, true, keys);
   const now = useNow();
 
   let lastDay = "";
@@ -190,7 +193,14 @@ export function Feed() {
                 {clock(e.time)}
               </span>
               <HarnessGlyph name={e.harness.name} size="sm" />
-              <Link to={sessionPath(e.harness.name, e.session.id)} className="ev-session ellipsis" title={e.session.id}>
+              <Link
+                to={sessionPath(e.harness.name, e.session.id)}
+                className="ev-session ellipsis"
+                title={e.session.id}
+                modClick={() =>
+                  openSplit(storedKey(e), document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect())
+                }
+              >
                 {s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
               </Link>
               {e.session.machine && <span className="ev-machine ellipsis">{e.session.machine}</span>}
@@ -201,6 +211,12 @@ export function Feed() {
               <span className="ev-tier num" title={`tier ${e.tier} · ${e.source}`}>
                 t{e.tier}
               </span>
+              <BesideButton
+                className="ev-beside"
+                onClick={() =>
+                  openSplit(storedKey(e), document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect())
+                }
+              />
             </li>
           );
         })}

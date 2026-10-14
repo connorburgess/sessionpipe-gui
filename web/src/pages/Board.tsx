@@ -68,7 +68,8 @@ export function Board() {
     return list;
   }, [groups, showDone]);
   const hrefs = useMemo(() => ordered.map((s) => sessionPath(s.harness, s.id)), [ordered]);
-  const { cursor } = useListNav(hrefs);
+  const keys = useMemo(() => ordered.map((s) => s.key), [ordered]);
+  const { cursor } = useListNav(hrefs, true, keys);
   const cursorKey = ordered[cursor]?.key;
 
   if (snapshotAt && all.length === 0) return <EmptyBoard />;

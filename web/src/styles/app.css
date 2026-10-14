@@ -1895,3 +1895,242 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---------- split: a session beside the page ---------- */
+
+/* The page makes room for the panel; the panel itself is fixed on the right. */
+.shell {
+  --split-width: 0px;
+  padding-right: var(--split-width);
+  transition: padding-right 240ms var(--ease-out);
+}
+.split-dragging .shell,
+.split-dragging .panel {
+  transition: none;
+}
+.split-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  width: var(--split-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 240ms var(--ease-out),
+    visibility 0s linear 240ms;
+}
+.panel--open {
+  transform: none;
+  visibility: visible;
+  transition: transform 240ms var(--ease-out);
+}
+/* The header reads first but sits last in the DOM, so Esc reaches a confirm inside the
+   body before the panel's own close (see lib/keys.ts: the first [data-dismiss] wins). */
+.panel-head {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 8px 6px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.panel-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.panel-btn {
+  flex: none;
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  transition: opacity 120ms var(--ease-out);
+}
+.panel-body--fading {
+  opacity: 0;
+}
+.panel-grip {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 1;
+  touch-action: none;
+}
+.panel-grip::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.panel-grip:hover::after,
+.split-dragging .panel-grip::after {
+  background: var(--fg-4);
+}
+
+/* Inside the panel the view scrolls its own element: the strip sits at its bottom and
+   the gutters are the panel's. */
+.panel .session {
+  --gutter: 16px;
+  min-height: 100%;
+}
+.panel .session .sess-ctl {
+  bottom: 0;
+}
+.panel .session .sess-head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* Phones: a full-height sheet that slides up over everything, tab bar included. */
+.panel--sheet {
+  inset: 0;
+  width: auto;
+  border-left: 0;
+  transform: translateY(100%);
+}
+.panel--sheet.panel--open {
+  transform: none;
+}
+.panel--sheet .panel-body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The ghost that morphs a card (or a canvas window) into the panel. */
+.split-ghost {
+  position: fixed;
+  z-index: 26;
+  pointer-events: none;
+  transform-origin: 0 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.18);
+  will-change: transform, opacity;
+}
+
+/* "Open beside": hover affordance at a card's and a feed row's top-right. */
+.card {
+  position: relative;
+}
+.card-beside,
+.ev-beside {
+  position: absolute;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-4);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+  z-index: 1;
+}
+.card-beside {
+  top: 10px;
+  right: 10px;
+}
+.ev {
+  position: relative;
+}
+.ev-beside {
+  top: 50%;
+  right: -2px;
+  transform: translateY(-50%);
+}
+.card:hover .card-beside,
+.ev:hover .ev-beside,
+.card-beside:focus-visible,
+.ev-beside:focus-visible,
+.card[aria-current="true"] .card-beside,
+.ev[aria-current="true"] .ev-beside {
+  opacity: 1;
+}
+.card-beside:hover,
+.ev-beside:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+@media (hover: none) {
+  .card-beside,
+  .ev-beside {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .panel,
+  .panel-body {
+    transition: none;
+  }
+}
+
+/* Inside the panel the header is narrow whatever the screen: title row (the panel's own),
+   then the facts and the counts each on one line that scrolls sideways. */
+.panel .session .sess-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+.panel .session .sess-facts,
+.panel .session .sess-counts {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 1px;
+}
+.panel .session .sess-facts::-webkit-scrollbar,
+.panel .session .sess-counts::-webkit-scrollbar {
+  display: none;
+}
+.panel .session .sess-facts > *,
+.panel .session .sess-counts > * {
+  white-space: nowrap;
+  flex: none;
+}
+.panel .session .sess-counts-ev {
+  margin-left: 0;
+}
+
+/* The "open beside" icon takes the elapsed time's spot while the card is hovered. */
+.card-elapsed {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.card:hover .card-elapsed,
+.card[aria-current="true"] .card-elapsed {
+  opacity: 0;
+}
+
+/* The rail is sticky, so it is a stacking context of its own: it must sit above the page
+   content (cards are positioned now) for its popover to be reachable. */
+@media (min-width: 840px) {
+  .rail {
+    z-index: 20;
+  }
+}

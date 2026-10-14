@@ -55,19 +55,50 @@ export function usePath(): string {
   return useSyncExternalStore(subscribe, current, current);
 }
 
-/** Keep `?mock=1` across navigations so a mock session survives a reload on any page. */
-function keepMock(to: string): string {
+/** The query parameter that holds the session open in the side panel (`<harness>:<id>`). */
+export const SPLIT_PARAM = "s";
+
+/** Keep `?mock=1` across navigations so a mock session survives a reload on any page, and
+ *  the side panel (`?s=`) across page changes, except onto a session page of its own. */
+function keepParams(to: string): string {
   const q = new URLSearchParams(location.search);
-  if (q.get("mock") !== "1" || to.includes("mock=1")) return to;
-  return `${to}${to.includes("?") ? "&" : "?"}mock=1`;
+  const extra = new URLSearchParams();
+  if (q.get("mock") === "1" && !to.includes("mock=1")) extra.set("mock", "1");
+  const split = q.get(SPLIT_PARAM);
+  if (split && !to.startsWith("/s/") && !/[?&]s=/.test(to)) extra.set(SPLIT_PARAM, split);
+  const qs = extra.toString();
+  if (!qs) return to;
+  return `${to}${to.includes("?") ? "&" : "?"}${qs}`;
 }
+const keepMock = keepParams;
 
 export function navigate(to: string, opts: { replace?: boolean } = {}) {
-  const target = keepMock(to);
+  const target = keepParams(to);
   if (target === current()) return;
   if (opts.replace) history.replaceState(null, "", target);
   else history.pushState(null, "", target);
   emit();
+}
+
+/** Sets or removes one query parameter on the current URL (a history entry each time, so
+ *  back and forward walk through it). */
+export function setSearchParam(name: string, value: string | null, opts: { replace?: boolean } = {}) {
+  const q = new URLSearchParams(location.search);
+  if (value === null) q.delete(name);
+  else q.set(name, value);
+  const qs = q.toString();
+  const target = `${location.pathname}${qs ? `?${qs}` : ""}`;
+  if (target === current()) return;
+  if (opts.replace) history.replaceState(null, "", target);
+  else history.pushState(null, "", target);
+  emit();
+}
+
+/** The current value of a query parameter, live. */
+export function useSearchParam(name: string): string | null {
+  const p = useSyncExternalStore(subscribe, current, current);
+  const i = p.indexOf("?");
+  return i < 0 ? null : new URLSearchParams(p.slice(i)).get(name);
 }
 
 export function back(fallback = "/") {
@@ -84,6 +115,7 @@ export function Link({
   children,
   className,
   title,
+  modClick,
   ...rest
 }: {
   to: string;
@@ -95,9 +127,17 @@ export function Link({
   "aria-label"?: string;
   style?: CSSProperties;
   tabIndex?: number;
+  /** Shift- or Alt-click: open beside instead (the side panel). Plain clicks navigate. */
+  modClick?: () => void;
 }) {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+    if (e.shiftKey || e.altKey) {
+      if (!modClick) return;
+      e.preventDefault();
+      modClick();
+      return;
+    }
     e.preventDefault();
     navigate(to);
   };

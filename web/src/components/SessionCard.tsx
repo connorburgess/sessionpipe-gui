@@ -2,9 +2,10 @@
 // One session on the board: the title, one line of where it is, one line of what it is
 // doing, and the last thing it said. Subagents nest as small rows at the bottom.
 import type { SessionSummary } from "@shared/api";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useRef } from "react";
 import { ATTENTION_LABEL, modelShort, oneLine, repoBranch, STATE_LABEL, sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
+import { openSplit } from "../lib/split";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 
 /** Children joined by a real " · ", so the line reads the same way it looks. */
@@ -39,13 +40,17 @@ export function SessionCard({
     (s.progress?.user ? `“${s.progress.user}”` : s.lastUser ? `“${s.lastUser}”` : "");
   const isLiveText = !!s.progress?.assistant?.trim();
   const tool = s.currentTool && s.state === "working" ? s.currentTool : undefined;
+  const ref = useRef<HTMLElement>(null);
+  const beside = () => openSplit(s.key, ref.current?.getBoundingClientRect());
   return (
     <article
+      ref={ref}
       className={`card card--${s.state}`}
       data-cursor={cursor !== undefined ? String(cursor) : undefined}
       aria-current={cursor !== undefined ? "true" : undefined}
     >
-      <Link to={sessionPath(s.harness, s.id)} className="card-link" title={sessionTitle(s)}>
+      <BesideButton onClick={beside} />
+      <Link to={sessionPath(s.harness, s.id)} className="card-link" title={sessionTitle(s)} modClick={beside}>
         <header className="card-head">
           <h3 className="card-title ellipsis">{sessionTitle(s)}</h3>
           {live && (
@@ -129,6 +134,37 @@ export function SessionCard({
         </ul>
       )}
     </article>
+  );
+}
+
+/** "Open beside": two panes. Shown on hover at a card's or a row's top-right. */
+export function BesideButton({ onClick, className = "card-beside" }: { onClick: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-label="Open beside"
+      title="Open beside (shift+click)"
+    >
+      <svg
+        viewBox="0 0 20 20"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="2.5" y="4" width="15" height="12" rx="1.5" />
+        <path d="M11 4v12" />
+      </svg>
+    </button>
   );
 }
 

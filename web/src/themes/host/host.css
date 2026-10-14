@@ -87,20 +87,14 @@
   text-underline-offset: 2px;
 }
 
-/* The divider on the rail above the first experimental theme: a hairline and a short
-   word ("labs") that fits the rail at every text size. */
+/* The divider on the rail above the first experimental view: a hairline, nothing else
+   (the word is in the tooltip; a label here ate the narrow rail). */
 .rail-group {
   display: block;
-  margin: 8px 0 0;
-  padding: 12px 0 4px;
+  height: 0;
+  margin: 12px 12px;
+  border: 0;
   border-top: 1px solid var(--line);
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  line-height: 1.2;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */

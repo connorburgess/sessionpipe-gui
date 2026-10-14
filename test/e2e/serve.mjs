@@ -25,6 +25,7 @@ const COUNTER_JS = `export default {
       <p>stored <code data-stored>…</code></p>
       <p><input data-note placeholder="note"> <button type="button" data-save>save</button></p>
       <p>tokens <b data-tokens></b> · react <b data-react></b></p>
+      <p><button type="button" data-open-split>open beside</button></p>
       <p>viewers <b data-viewers>0</b> · me <code data-me></code> · <b data-current></b> · ids <code data-ids></code></p>\`;
     const render = (s) => {
       el.querySelector("[data-sessions]").textContent = String(s.sessions.size);
@@ -47,6 +48,10 @@ const COUNTER_JS = `export default {
     el.querySelector("[data-save]").addEventListener("click", async () => {
       await api.storage.set({ note: el.querySelector("[data-note]").value });
       await show();
+    });
+    el.querySelector("[data-open-split]").addEventListener("click", () => {
+      const key = [...api.state.get().sessions.keys()][0];
+      api.openSession(key, { split: true, from: { x: 10, y: 10, width: 200, height: 100 } });
     });
     window.__e2eThemeMounted = (window.__e2eThemeMounted ?? 0) + 1;
     return () => { unsubscribe(); window.__e2eThemeUnmounted = (window.__e2eThemeUnmounted ?? 0) + 1; };

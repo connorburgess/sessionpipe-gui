@@ -19,6 +19,7 @@ import { createControlApi } from "../../control/themeControl";
 import type { AppState, Store } from "../../data/store";
 import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
 import { navigate, sessionPath } from "../../lib/router";
+import { openSplit } from "../../lib/split";
 import { ago, dur } from "../../lib/time";
 import tokensCss from "../../styles/tokens.css?raw";
 
@@ -140,7 +141,11 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
       },
     },
     navigate: (path) => navigate(path),
-    openSession(key: SessionKey) {
+    openSession(key: SessionKey, opts) {
+      if (opts?.split) {
+        openSplit(key, opts.from);
+        return;
+      }
       const { harness, id: sid } = splitKey(key);
       navigate(sessionPath(harness, sid));
     },

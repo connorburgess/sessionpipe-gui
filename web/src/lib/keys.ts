@@ -3,6 +3,7 @@
 // opens the item under it, Esc goes back (or blurs the search).
 import { useCallback, useEffect, useState } from "react";
 import { back, navigate } from "./router";
+import { openSplit } from "./split";
 
 /** Whether a key press belongs to a text field (so `/` and Esc leave it alone). A radio,
  *  a checkbox or a button is focusable but not typed into. */
@@ -51,8 +52,9 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
   }, [onBack]);
 }
 
-/** j/k over a list of hrefs; Enter opens the one under the cursor. */
-export function useListNav(hrefs: string[], enabled = true) {
+/** j/k over a list of hrefs; Enter opens the one under the cursor, shift+Enter opens it
+ *  beside the page when `keys` (session keys, same order) are given. */
+export function useListNav(hrefs: string[], enabled = true, keys?: string[]) {
   const [cursor, setCursor] = useState(-1);
   useEffect(() => {
     if (cursor >= hrefs.length) setCursor(hrefs.length - 1);
@@ -70,15 +72,17 @@ export function useListNav(hrefs: string[], enabled = true) {
         setCursor((c) => Math.max(0, c - 1));
       } else if (e.key === "Enter") {
         const href = hrefs[cursor];
-        if (href) {
-          e.preventDefault();
-          navigate(href);
-        }
+        if (!href) return;
+        e.preventDefault();
+        const key = keys?.[cursor];
+        if (e.shiftKey && key)
+          openSplit(key, document.querySelector(`[data-cursor="${cursor}"]`)?.getBoundingClientRect());
+        else navigate(href);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hrefs, cursor, enabled]);
+  }, [hrefs, cursor, enabled, keys]);
 
   useEffect(() => {
     if (cursor < 0) return;
