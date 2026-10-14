@@ -17,7 +17,7 @@ export const INSECURE_HINT = "passkeys need https or localhost: open this page o
 export function insecureHint(): string {
   const tls = tlsInfo();
   if (!tls?.on) return INSECURE_HINT;
-  return `passkeys work only on ${tls.httpsUrl} here (TLS mode, rp id ${tls.hostname}): open that address, after the trust steps on the Connect page`;
+  return `passkeys work only at ${tls.httpsUrl} (TLS mode); trust steps are on the Connect page`;
 }
 
 /** Is `location.hostname` the rp id or under it (CONTROL.md §3.2)? True when `rp` is unknown. */

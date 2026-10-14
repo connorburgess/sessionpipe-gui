@@ -5,6 +5,7 @@
 // through props.
 import type { Attention, MachineControl, SessionSummary } from "@shared/api";
 import { type KeyboardEvent, useState } from "react";
+import { httpsHere } from "../control/api";
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -44,6 +45,7 @@ export function ControlStrip({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const paired = !!control;
+  const httpsHref = blocked ? httpsHere() : null;
   const enabled = paired && !!onSend && !blocked;
   const hint = blocked
     ? blocked
@@ -142,7 +144,14 @@ export function ControlStrip({
           </button>
         )}
       </div>
-      <p className="ctl-hint">{hint}</p>
+      <p className="ctl-hint">
+        {hint}
+        {blocked && httpsHref ? (
+          <a className="ctl-open-https" href={httpsHref}>
+            Open on {new URL(httpsHref).host} →
+          </a>
+        ) : null}
+      </p>
       {note && <p className={`ctl-note ctl-note--${noteKind}`}>{note}</p>}
     </form>
   );

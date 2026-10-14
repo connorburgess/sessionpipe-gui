@@ -1268,6 +1268,13 @@
   font-size: var(--text-sm);
   color: var(--fg-3);
 }
+.ctl-open-https {
+  margin-left: 12px;
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
 
 /* ---------- feed ---------- */
 

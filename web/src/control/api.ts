@@ -117,6 +117,7 @@ export const controlApi = {
 
 let rpIdPromise: Promise<string> | null = null;
 let tlsCache: TlsInfo | null | undefined;
+let uiKeyCache: string | undefined;
 
 /** The rp id this receiver makes passkeys for (Info.control.rpId), fetched once. The
  *  same read remembers Info.tls for `tlsInfo()`. */
@@ -126,6 +127,7 @@ export function rpId(): Promise<string> {
       .then((r) => r.json() as Promise<Info>)
       .then((i) => {
         tlsCache = i.tls ?? null;
+        uiKeyCache = i.uiKey || undefined;
         return i.control?.rpId ?? "localhost";
       })
       .catch((e) => {
@@ -141,4 +143,17 @@ export function rpId(): Promise<string> {
 export function tlsInfo(): TlsInfo | null | undefined {
   if (tlsCache === undefined) void rpId().catch(() => {});
   return tlsCache;
+}
+
+/** This very page on the https origin passkeys work at (TLS mode), with the UI key so
+ *  the Mac's own browser is let in when the `.local` name resolves to its LAN address.
+ *  Null when TLS is off or we are already there. */
+export function httpsHere(): string | null {
+  const tls = tlsInfo();
+  if (!tls?.on || typeof location === "undefined") return null;
+  const base = new URL(tls.httpsUrl);
+  if (location.host === base.host && location.protocol === "https:") return null;
+  const u = new URL(location.pathname + location.search + location.hash, base);
+  if (uiKeyCache && !u.searchParams.has("k")) u.searchParams.set("k", uiKeyCache);
+  return u.toString();
 }
