@@ -71,7 +71,9 @@ export function durCoarse(msTotal: number | undefined): string {
   if (msTotal < 60_000) return dur(msTotal);
   const m = Math.floor(msTotal / 60_000);
   if (m < 60) return `${m} m`;
-  return dur(msTotal);
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ${String(m % 60).padStart(2, "0")} m`;
+  return `${Math.floor(h / 24)} d`;
 }
 
 /** A short duration for dense rows: "0.4s", "12s", "4m12s", "2h05m". */

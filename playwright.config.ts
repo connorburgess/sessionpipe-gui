@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+// End-to-end suite: a built server (node scripts/build.mjs + vite build) started with
+// demo mode on a fresh state dir, driven through Chromium on a desktop and a phone.
+// Port 7311 is ours alone; 7373 may be a person's running instance and is never used.
+import os from "node:os";
+import path from "node:path";
+import { defineConfig, devices } from "@playwright/test";
+
+export const E2E_PORT = 7311;
+export const E2E_BASE = `http://127.0.0.1:${E2E_PORT}`;
+
+const stateDir = path.join(os.tmpdir(), `spgui-e2e-${Date.now()}-${process.pid}`);
+process.env.SPGUI_E2E_STATE = stateDir;
+
+export default defineConfig({
+  testDir: "test/e2e",
+  globalTeardown: "./test/e2e/global-teardown.ts",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: 1,
+  workers: process.env.CI ? 2 : 4,
+  timeout: 45_000,
+  expect: { timeout: 10_000 },
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
+  outputDir: "test-results",
+  use: {
+    baseURL: E2E_BASE,
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    locale: "en-US",
+    timezoneId: "UTC",
+  },
+  projects: [
+    {
+      name: "desktop",
+      testIgnore: /mobile\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "phone",
+      testMatch: /(mobile|screenshots)\.spec\.ts/,
+      use: {
+        ...devices["iPhone 13"],
+        browserName: "chromium",
+        defaultBrowserType: "chromium",
+        viewport: { width: 390, height: 844 },
+      },
+    },
+  ],
+  webServer: {
+    command: `node dist/cli.js --port ${E2E_PORT} --state "${stateDir}" --no-outbox --demo --speed 20 --quiet`,
+    url: `${E2E_BASE}/api/ui/info`,
+    reuseExistingServer: false,
+    timeout: 30_000,
+    stdout: "ignore",
+    stderr: "pipe",
+  },
+});

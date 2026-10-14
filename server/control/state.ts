@@ -150,6 +150,7 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.detail) a.detail = m.detail;
   if (m.reply !== undefined) a.reply = m.reply;
   if (m.replySeq !== undefined) a.replySeq = m.replySeq;
+  if (m.ackSession) a.ackSession = m.ackSession;
   if (m.takenAt) a.takenAt = m.takenAt;
   if (m.ackedAt) a.ackedAt = m.ackedAt;
   return a;
@@ -172,6 +173,10 @@ export class ControlState {
   private sweeper: NodeJS.Timeout | null = null;
   /** Called with every message whose state changed (queued, acked, expired). */
   onMessage: (m: MessageRow) => void = () => {};
+  /** Called when any machine row changed (pairing, hello, poll, removal) or a machine's
+   *  online reading flipped, so the UI can refresh its machine list without an event. */
+  onMachines: () => void = () => {};
+  private onlineSig = "";
 
   constructor(readonly dir: string) {
     const mf = readJson<MachinesFile>(this.machinesFile);
@@ -203,6 +208,8 @@ export class ControlState {
         return now - dead < PAIRING_TTL_MS;
       });
     writeAtomic(this.machinesFile, { v: 1, machines: [...this.machinesById.values()] } satisfies MachinesFile);
+    this.checkOnline();
+    this.onMachines();
   }
   private saveQueue(id: string): void {
     const q = this.queues.get(id);
@@ -524,6 +531,20 @@ export class ControlState {
 
   sweep(): void {
     for (const id of this.queues.keys()) this.expireQueue(id);
+    this.checkOnline();
+  }
+
+  /** Fires onMachines when the set of online machines changed since the last look. */
+  private checkOnline(): void {
+    const now = Date.now();
+    const sig = [...this.machinesById.values()]
+      .filter((m) => !!m.lastPollAt && now - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS)
+      .map((m) => m.id)
+      .sort()
+      .join(",");
+    if (sig === this.onlineSig) return;
+    this.onlineSig = sig;
+    this.onMachines();
   }
 
   /** The long-poll: what is deliverable now, or what arrives within `waitMs`, or []. */

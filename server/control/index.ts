@@ -10,7 +10,13 @@
 //   testdoor.ts  {control}/_test/* when deps.testDoor, loopback only
 //   parse.ts     body parsers; testkeys.ts  a test-only authenticator
 import path from "node:path";
-import { type ControlActivity, type MachineControl, ROUTES, type StreamMessage } from "../../shared/api.js";
+import {
+  type ControlActivity,
+  type MachineControl,
+  type MachineSummary,
+  ROUTES,
+  type StreamMessage,
+} from "../../shared/api.js";
 import type { Ctx, Router } from "../http/router.js";
 import { registerMachineRoutes } from "./routes.js";
 import { ControlState, toActivity, WAIT_MAX_S } from "./state.js";
@@ -53,6 +59,31 @@ export interface Control {
 export function createControl(deps: ControlDeps): Control {
   const state = new ControlState(path.join(deps.stateDir, "control"));
   const listeners = new Set<(m: StreamMessage) => void>();
+  let machinesTimer: NodeJS.Timeout | null = null;
+  state.onMachines = () => {
+    if (machinesTimer) return;
+    machinesTimer = setTimeout(() => {
+      machinesTimer = null;
+      for (const m of state.allMachines()) {
+        if (!m.tokenHash && !m.keys.length) continue;
+        const control = state.machineControl(m);
+        const machine: MachineSummary = {
+          name: m.name,
+          lastAt: control.lastPollAt ?? control.lastHelloAt ?? new Date().toISOString(),
+          harnesses: Object.fromEntries((control.harnesses ?? []).map((h) => [h, undefined])),
+          sessions: 0,
+          working: 0,
+          needsYou: 0,
+          control,
+        };
+        for (const l of listeners)
+          try {
+            l({ kind: "machine", machine });
+          } catch {}
+      }
+    }, 300);
+    machinesTimer.unref();
+  };
   state.onMessage = (row) => {
     const message = toActivity(row);
     for (const l of listeners)
@@ -82,6 +113,9 @@ export function createControl(deps: ControlDeps): Control {
       session_tools: [],
       signing: { rp_id: deps.rpId, algs: [-7, -257] },
     }),
-    close: () => state.close(),
+    close: () => {
+      if (machinesTimer) clearTimeout(machinesTimer);
+      state.close();
+    },
   };
 }

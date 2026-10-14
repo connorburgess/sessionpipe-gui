@@ -1,0 +1,741 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The office (DESIGN.md). Neutrals everywhere; amber only on a needs_you lamp and its
+   bubble. All motion lives in the no-preference block at the end; nothing else moves. */
+
+/* ---------- page ---------- */
+
+.office {
+  gap: 18px;
+}
+.office-head {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.office-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.office-xp {
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+}
+.office-sum {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.office-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.rooms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 26px 24px;
+}
+
+/* ---------- room ---------- */
+
+.room {
+  --o-scale: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+/* the scene is drawn on a 96 × 80 logical grid; wide screens see it at 1.4× */
+@media (min-width: 1024px) {
+  .room {
+    --o-scale: 1.4;
+  }
+}
+.room-plate {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 0 2px;
+  min-height: 20px;
+}
+.room-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.room-pair {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.room-pair b {
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.room-dot {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--fg-4);
+}
+.room-dot--on {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.room-more {
+  font-size: 11px;
+  color: var(--fg-3);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.room-box {
+  position: relative;
+  zoom: var(--o-scale);
+  width: calc(var(--cols) * 96px + 24px);
+  max-width: 100%;
+  padding: 0 12px 12px;
+  border: 1px solid var(--line);
+  /* wall above, floor below: the bottom 40 % of the room is floor */
+  background: linear-gradient(to bottom, var(--bg-2) 60%, var(--bg-3) 60%);
+}
+.room-window {
+  height: 14px;
+  margin: 0 -12px 10px;
+  background: var(--o-window);
+  transition: background-color 60s linear;
+}
+.room-floor {
+  position: relative;
+  width: calc(var(--cols) * 96px);
+  height: calc(var(--rows) * 80px);
+}
+.room-door {
+  position: absolute;
+  left: 16px;
+  bottom: -1px;
+  width: 18px;
+  height: 1px;
+  background: var(--bg);
+}
+.room-door::before,
+.room-door::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 5px;
+  background: var(--line-2);
+}
+.room-door::before {
+  left: -1px;
+}
+.room-door::after {
+  right: -1px;
+}
+.room-home {
+  position: absolute;
+  left: 40px;
+  top: 100%;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+
+/* the window, by the viewer's hour */
+.window--morning {
+  --o-window: oklch(0.93 0.02 230);
+}
+.window--day {
+  --o-window: oklch(0.95 0.015 85);
+}
+.window--evening {
+  --o-window: oklch(0.88 0.05 60);
+}
+.window--night {
+  --o-window: oklch(0.3 0.03 250);
+}
+:root[data-theme="dark"] .window--morning {
+  --o-window: oklch(0.56 0.02 230);
+}
+:root[data-theme="dark"] .window--day {
+  --o-window: oklch(0.57 0.015 85);
+}
+:root[data-theme="dark"] .window--evening {
+  --o-window: oklch(0.53 0.05 60);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .window--morning {
+    --o-window: oklch(0.56 0.02 230);
+  }
+  :root:not([data-theme="light"]) .window--day {
+    --o-window: oklch(0.57 0.015 85);
+  }
+  :root:not([data-theme="light"]) .window--evening {
+    --o-window: oklch(0.53 0.05 60);
+  }
+}
+
+/* ---------- desk cell ---------- */
+
+.cell {
+  position: absolute;
+  left: calc(var(--col) * 96px);
+  bottom: calc(var(--row) * 80px);
+  width: 96px;
+  height: 80px;
+}
+.cell--arriving,
+.cell--leaving {
+  z-index: 2;
+}
+.cell-link {
+  position: relative;
+  display: block;
+  width: 96px;
+  height: 80px;
+  border-radius: 6px;
+}
+.cell-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+.cell[data-cursor] .cell-link {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+.cell-title {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  right: 2px;
+  font-size: 11px;
+  line-height: 12px;
+  color: var(--fg);
+}
+
+/* the drawing's palette: figure tone, furniture, bezel, desk, sheet, lamp */
+.cell-art,
+.legend-art,
+.helper-art {
+  display: block;
+  overflow: visible;
+  --o-tone: var(--fg-2);
+  --o-wood: var(--fg-4);
+  --o-bezel: var(--bg-4);
+  --o-desk: var(--bg-4);
+  --o-sheet: var(--bg-2);
+  --o-needs: var(--needs);
+}
+.cell--stale .cell-art,
+.cell--idle .cell-art,
+.cell--leaving .cell-art,
+.cell--arriving .cell-art,
+.legend-art--stale,
+.legend-art--idle,
+.cell-helper--stale .helper-art,
+.cell-helper--idle .helper-art {
+  --o-tone: var(--fg-3);
+}
+
+/* screens: lit (working) · dim (needs you) · pale (stale) · off (idle) */
+.cell-screen {
+  transition: fill 120ms linear;
+}
+.cell-screen--lit {
+  fill: var(--fg-2);
+}
+.cell-screen--dim {
+  fill: var(--bg-4);
+}
+.cell-screen--pale {
+  fill: var(--line-2);
+}
+.cell-screen--off {
+  fill: var(--bg-2);
+  stroke: var(--line);
+  stroke-width: 0.75;
+}
+.cell-tool {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--bg);
+}
+.cell-mono {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  fill: var(--fg-3);
+}
+.cell-front {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--fg-2);
+}
+.cell-elapsed {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--fg-3);
+}
+.cell-lamp {
+  opacity: 0;
+  transition: opacity 600ms linear;
+}
+.cell-lamp--on {
+  opacity: 1;
+  transition-duration: 300ms;
+}
+
+/* the attention bubble: above the figure's head, left of the monitor */
+.cell-bubble {
+  position: absolute;
+  top: 11px;
+  left: 2px;
+  height: 12px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid var(--needs-line);
+  background: var(--needs-bg);
+  color: var(--needs-fg);
+  font-size: 9px;
+  line-height: 10px;
+  white-space: nowrap;
+  transform-origin: 20px 100%;
+}
+.cell-bubble::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  bottom: -4px;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid var(--needs-line);
+  border-bottom: 1px solid var(--needs-line);
+  background: var(--needs-bg);
+  transform: rotate(45deg);
+}
+
+/* helpers standing right of the desk */
+.cell-helper {
+  position: absolute;
+  left: calc(78.5px + var(--i) * 6px);
+  top: 55px;
+  width: 10px;
+  height: 20px;
+  border-radius: 3px;
+}
+.cell-helper:focus-visible,
+.cell-helper[data-cursor] {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.cell-more {
+  position: absolute;
+  left: calc(80px + var(--i) * 6px);
+  top: 60px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--fg-3);
+}
+
+/* the walk sprite is hidden unless a phase animation shows it */
+.walker {
+  opacity: 0;
+}
+.legs-b {
+  opacity: 0;
+}
+.cell--leaving .seated {
+  opacity: 0;
+}
+.cell--leaving .cell-title,
+.cell--leaving .cell-bubble,
+.cell--leaving .cell-helper,
+.cell--leaving .cell-more {
+  opacity: 0;
+}
+
+/* ---------- tooltip ---------- */
+
+.cell-tip {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  width: max-content;
+  min-width: 160px;
+  max-width: 260px;
+  margin-top: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+.cell-tip b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.cell-tip code {
+  color: var(--fg);
+}
+.cell-tip-attn {
+  color: var(--needs-fg);
+}
+.cell-helper .cell-tip {
+  left: -40px;
+}
+.cell-link:hover .cell-tip,
+.cell-link:focus-visible .cell-tip,
+.cell-helper:hover .cell-tip,
+.cell-helper:focus-visible .cell-tip {
+  visibility: visible;
+  transition: visibility 0s 150ms;
+}
+
+/* ---------- legend ---------- */
+
+.legend-btn {
+  margin-left: auto;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+.legend-btn:hover,
+.legend-btn[aria-expanded="true"] {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.legend {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: 100%;
+  margin-top: 8px;
+  width: min(380px, 100%);
+  padding: 10px 14px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.legend-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--fg-3);
+  font-size: 16px;
+}
+.legend-close:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+.legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-xs);
+  color: var(--fg-2);
+}
+.legend-list li > :first-child {
+  flex: none;
+  width: 34px;
+  display: flex;
+  justify-content: center;
+}
+.legend-list b {
+  color: var(--fg);
+  font-weight: 600;
+  margin-right: 3px;
+}
+.legend-bubble {
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid var(--needs-line);
+  background: var(--needs-bg);
+  color: var(--needs-fg);
+  font-size: 9px;
+  line-height: 12px;
+}
+.legend-mono {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.legend-num {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-3);
+}
+
+/* ---------- empty office ---------- */
+
+.office-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+.office-ways {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+}
+.office-ways strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* ---------- phone ---------- */
+
+@media (max-width: 480px) {
+  .room,
+  .room-box {
+    width: 100%;
+  }
+  .room-window {
+    height: 6px;
+  }
+  .room-home {
+    top: auto;
+    left: auto;
+    right: 10px;
+    bottom: 3px;
+    margin: 0;
+  }
+}
+
+/* ---------- motion (DESIGN.md §4) ---------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .arm--typing {
+    animation: o-type 500ms steps(2, jump-none) infinite;
+    animation-delay: calc(var(--slot4) * 125ms);
+  }
+  .breath {
+    transform-box: view-box;
+    transform-origin: 18px 56px;
+    animation: o-breathe 4s ease-in-out infinite;
+  }
+  .office--crowded .breath {
+    animation: none;
+  }
+  .arm--raise {
+    transform-box: view-box;
+    transform-origin: 28px 42px;
+    animation: o-raise 240ms var(--ease-out);
+  }
+  .cell-bubble {
+    animation: o-pop 160ms var(--ease-out);
+  }
+  .cell-sheet--top {
+    animation: o-sheet 200ms var(--ease-out);
+  }
+  .cell-tool {
+    animation: o-fade 120ms linear;
+  }
+
+  /* arriving: walk from the door along the bottom row, step up, sit */
+  .cell--arriving .walker {
+    animation:
+      o-walk-in 750ms linear both,
+      o-vanish 1ms linear 750ms forwards;
+  }
+  .cell--arriving .seated {
+    animation: o-sit 200ms var(--ease-out) 750ms both;
+  }
+  /* leaving: stand for 200 ms, walk to the door, fade at the jamb */
+  .cell--leaving .walker {
+    animation:
+      o-walk-out 600ms linear 200ms both,
+      o-fadeout 200ms linear 800ms forwards;
+  }
+  /* the calm budget is spent: appear seated instead */
+  .cell--arriving.cell--nowalk .walker {
+    display: none;
+  }
+  .cell--arriving.cell--nowalk .seated {
+    animation: o-fade 200ms linear both;
+  }
+  .cell--arriving .legs-a,
+  .cell--leaving .legs-a {
+    animation: o-legs-a 500ms steps(2, jump-none) infinite;
+  }
+  .cell--arriving .legs-b,
+  .cell--leaving .legs-b {
+    animation: o-legs-b 500ms steps(2, jump-none) infinite;
+  }
+
+  .office--paused .arm--typing,
+  .office--paused .breath,
+  .office--paused .legs-a,
+  .office--paused .legs-b {
+    animation-play-state: paused;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walker {
+    display: none;
+  }
+  .cell--arriving .seated {
+    animation: none;
+  }
+  .cell--leaving {
+    opacity: 0;
+  }
+}
+
+@keyframes o-type {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1px);
+  }
+}
+@keyframes o-breathe {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.03);
+  }
+}
+@keyframes o-raise {
+  from {
+    transform: rotate(60deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+@keyframes o-pop {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes o-sheet {
+  from {
+    transform: translateY(-3px);
+    opacity: 0;
+  }
+}
+@keyframes o-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes o-fadeout {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes o-vanish {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes o-walk-in {
+  0% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 1;
+  }
+  80% {
+    transform: translate(0, var(--dy));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+@keyframes o-walk-out {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  20% {
+    transform: translate(0, var(--dy));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 1;
+  }
+}
+@keyframes o-sit {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes o-legs-a {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes o-legs-b {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

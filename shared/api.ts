@@ -263,6 +263,8 @@ export interface ControlActivity {
   detail?: string;
   reply?: string;
   replySeq?: number;
+  /** The session the final ack named (a fork, or the session a start created), when it differs. */
+  ackSession?: string;
   takenAt?: string;
   ackedAt?: string;
 }

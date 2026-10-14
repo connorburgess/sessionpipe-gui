@@ -70,7 +70,7 @@ export function Connect() {
       <section className="sect sect--phone">
         <header className="sect-head">
           <h2>A phone on this network</h2>
-          <p>Scan, or open the address. The key in it signs the phone in; nothing to type.</p>
+          <p>Scan, or open the address. The key in it signs the phone in.</p>
         </header>
         <div className="phone">
           <div className="qr">
@@ -113,7 +113,7 @@ export function Connect() {
         <header className="sect-head">
           <h2>Another machine</h2>
           <p>
-            On it, after <code>npx sessionpipe install</code>, add this receiver as a sink:
+            After <code>npx sessionpipe install</code> there, add this receiver as a sink.
           </p>
         </header>
         <div className="cmd">
@@ -130,11 +130,11 @@ export function Connect() {
         </div>
         <p className="tiers">
           <span>
-            <strong>--tier</strong> is how much leaves that machine:
+            <code>--tier</code> is how much leaves that machine:
           </span>
           {([0, 1, 2, 3] as const).map((t) => (
             <span key={t} className="tier" title={TIER_HINT[t]}>
-              <b className="num">{t}</b> {TIER_LABEL[t]}
+              <span className="num">{t}</span> {TIER_LABEL[t]}
             </span>
           ))}
         </p>
@@ -143,10 +143,7 @@ export function Connect() {
       <section className="sect">
         <header className="sect-head">
           <h2>Sink token</h2>
-          <p>
-            Every event batch carries it as a bearer.{" "}
-            {loopback ? "" : "Shown and rotated from this machine only (loopback)."}
-          </p>
+          <p>Sent as a bearer with every batch.{loopback ? "" : " Shown and rotated on the receiver machine only."}</p>
         </header>
         <div className="token">
           <code className="token-text">{info ? (reveal ? info.sinkToken : mask(info.sinkToken)) : "…"}</code>
@@ -173,8 +170,7 @@ export function Connect() {
         </div>
         {!loopback && (
           <p className="sect-note">
-            You are on the LAN address; open <code>{info?.urls.local ?? "http://localhost:7373"}</code> on the receiver
-            machine to rotate.
+            To rotate, open <code>{info?.urls.local ?? "http://localhost:7373"}</code> on the receiver machine.
           </p>
         )}
       </section>

@@ -134,11 +134,10 @@ export function Board() {
             className={`group group--${st}`}
             aria-label={`${list.length} ${STATE_HEADING[st](list.length)}`}
           >
-            <header className="group-head">
+            <h2 className="group-head" title={STATE_HINT[st]}>
+              {STATE_HEADING[st](list.length)}
               <span className="group-count num">{list.length}</span>
-              <h2 className="group-title">{STATE_HEADING[st](list.length)}</h2>
-              <span className="group-hint">{STATE_HINT[st]}</span>
-            </header>
+            </h2>
             <div className="grid">
               {list.map((s) => (
                 <SessionCard
@@ -155,21 +154,21 @@ export function Board() {
 
       {doneCount > 0 && (
         <section className="group group--done" aria-label={`${doneCount} done`}>
-          <header className="group-head group-head--toggle">
+          <h2 className="group-head">
             <button
               type="button"
               className="group-toggle"
               onClick={() => setShowDone((v) => !v)}
               aria-expanded={showDone}
+              title={STATE_HINT.done}
             >
+              Done
               <span className="group-count num">{doneCount}</span>
-              <h2 className="group-title">done</h2>
               <span className="group-caret" aria-hidden="true">
                 {showDone ? "▾" : "▸"}
               </span>
             </button>
-            <span className="group-hint">{STATE_HINT.done}</span>
-          </header>
+          </h2>
           {showDone && (
             <div className="grid grid--done">
               {groups.get("done")!.map((s) => (
@@ -191,9 +190,8 @@ export function Board() {
 function EmptyBoard() {
   return (
     <div className="page empty">
-      <p className="empty-kicker">Nothing here yet</p>
-      <h1 className="empty-title">Sessions appear the moment an agent fires a hook.</h1>
-      <p className="empty-lede">Three ways to get the first one on this board:</p>
+      <h1 className="empty-title">Nothing here yet</h1>
+      <p className="empty-lede">Sessions appear the moment an agent fires a hook. Three ways to get the first one:</p>
       <ol className="empty-ways">
         <li>
           <strong>This machine.</strong> Run <code>npx sessionpipe install</code> once; the GUI tails the local outbox

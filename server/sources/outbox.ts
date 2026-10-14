@@ -99,7 +99,13 @@ export function startOutboxSource(store: Store, opts: OutboxSourceOptions = {}):
     timer.unref();
   };
 
-  tick();
+  // The first drain is history, not live traffic.
+  store.setLoading(true);
+  try {
+    tick();
+  } finally {
+    store.setLoading(false);
+  }
   schedule();
 
   return {

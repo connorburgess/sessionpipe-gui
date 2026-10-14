@@ -119,7 +119,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       uiKey: config.uiKey,
       sources: {
         http: true,
-        outbox: ob ? { path: ob.path, sessions: ob.sessions, enabled: true } : null,
+        outbox: ob ? { path: ob.path, sessions: ob.sessions, enabled: true, events: ob.events } : null,
         demo: demo !== null,
       },
       storage: { dir: stateDir, bytes: stats.storageBytes },

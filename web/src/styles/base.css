@@ -17,9 +17,8 @@ body {
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-md);
-  line-height: 1.45;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "tnum" 0;
   overscroll-behavior-y: none;
 }
 
@@ -28,6 +27,7 @@ h2,
 h3,
 p {
   margin: 0;
+  font-weight: inherit;
 }
 
 a {
@@ -37,7 +37,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -55,13 +56,18 @@ pre,
 kbd,
 .mono {
   font-family: var(--font-mono);
-  font-size: 0.86em;
+  font-size: 0.875em;
 }
 
 pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+strong,
+b {
+  font-weight: 600;
 }
 
 mark {

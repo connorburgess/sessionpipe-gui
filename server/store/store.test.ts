@@ -297,12 +297,19 @@ describe("detail and feed", () => {
     expect(store.sessionDetail("claude-code:nope")).toBeUndefined();
   });
 
-  it("feeds newest first with a cursor and filters", () => {
+  it("feeds newest event time first with an opaque cursor and filters", () => {
     const a = new Session("a");
-    const b = new Session("b", "codex");
+    const b = new Session("b", "codex", Date.now() - 90_000);
     store.ingest([a.ev("session.started", {}, { session: { title: "Alpha work" } })], "http");
     store.ingest([b.ev("session.started", {}, { session: { machine: "box-2" } })], "http");
     for (let i = 0; i < 5; i++) store.ingest([a.ev("tool.ended", { tool: i % 2 ? "Bash" : "Read", ok: true })], "http");
+    // History that arrives late (a backfill, an outbox drain) sorts by its own time, not by arrival.
+    const old = new Session("old");
+    old.clock = Date.now() - 86_400_000;
+    store.ingest(
+      [old.ev("session.backfill", { started_at: "2026-09-01T00:00:00.000Z", last_at: "2026-09-02T00:00:00.000Z" })],
+      "outbox",
+    );
     store.ingest(
       [
         b.ev(
@@ -315,14 +322,18 @@ describe("detail and feed", () => {
     );
     const all = store.feed({ limit: 3 });
     expect(all.events).toHaveLength(3);
-    expect(all.events[0]!.type).toBe("turn.transcript");
+    // b's transcript arrived last but its clock is 30 s behind a's: a's last tools come first.
+    expect(all.events.map((e) => e.type)).toEqual(["tool.ended", "tool.ended", "tool.ended"]);
     expect(all.cursor).toBeDefined();
+    expect(all.cursor).not.toMatch(/^\d+$/);
     const next = store.feed({ limit: 3, before: all.cursor });
-    expect(next.events).toHaveLength(3);
-    expect(next.events.every((e) => e.type === "tool.ended")).toBe(true);
+    expect(next.events.map((e) => e.type)).toEqual(["tool.ended", "tool.ended", "session.started"]);
     const rest = store.feed({ limit: 10, before: next.cursor });
-    expect(rest.events.map((e) => e.type)).toEqual(["session.started", "session.started"]);
+    expect(rest.events.map((e) => e.type)).toEqual(["turn.transcript", "session.started", "session.backfill"]);
     expect(rest.cursor).toBeUndefined();
+    const times = store.feed({ limit: 20 }).events.map((e) => e.time);
+    expect([...times].sort().reverse()).toEqual(times);
+    expect(store.feed({ before: "garbage" }).events).toHaveLength(9);
     expect(store.feed({ harness: "codex" }).events).toHaveLength(2);
     expect(store.feed({ machine: "box-2" }).events).toHaveLength(2);
     expect(store.feed({ type: "tool.ended" }).events).toHaveLength(5);
@@ -330,6 +341,18 @@ describe("detail and feed", () => {
     expect(store.feed({ q: "bash" }).events).toHaveLength(2);
     expect(store.feed({ q: "needle" }).events).toHaveLength(1);
     expect(store.feed({ q: "alpha" }).events).toHaveLength(6);
+  });
+
+  it("does not count an initial load as live traffic", () => {
+    const s = new Session();
+    store.setLoading(true);
+    store.ingest([s.ev("session.started"), s.ev("turn.started")], "http");
+    store.setLoading(false);
+    expect(store.stats()).toMatchObject({ events: 2, eventsLastMinute: 0 });
+    expect(store.stats().latencyP50Ms).toBeUndefined();
+    store.ingest([s.ev("tool.started", { tool: "Bash" })], "http");
+    expect(store.stats()).toMatchObject({ events: 3, eventsLastMinute: 1 });
+    expect(store.stats().latencyP50Ms).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -401,7 +424,12 @@ describe("reboot", () => {
     store = new Store(tmp.dir);
     const after = store.snapshot();
     expect(after.sessions).toEqual(before.sessions);
-    expect(after.stats).toMatchObject({ events: 5, sessions: 2, storageBytes: before.stats.storageBytes });
+    expect(after.stats).toMatchObject({
+      events: 5,
+      sessions: 2,
+      storageBytes: before.stats.storageBytes,
+      eventsLastMinute: 0,
+    });
     expect(store.feed().events.map((e) => e.id)).toEqual(feedBefore);
     expect(store.ingest([s.ev("turn.ended", {}, { seq: 1 })], "http").duplicates).toBe(1);
     const detail = store.sessionDetail(KEY)!;

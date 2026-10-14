@@ -2,12 +2,12 @@
 // One session: a sticky header with its facts, then the timeline grouped by turn, fed by
 // GET /api/ui/sessions/:harness/:id in pages and then by the live stream. The tier lens
 // hides what a lower-tier receiver would never have got.
-import type { Attention, SessionSummary, StoredEvent, Tier } from "@shared/api";
+import type { SessionSummary, StoredEvent, Tier } from "@shared/api";
 import { sessionKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chip, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateBadge, TierBadge } from "../components/bits";
-import { ControlStrip } from "../components/ControlStrip";
 import { plural } from "../components/SessionCard";
+import { SessionControl } from "../control/SessionControl";
 import { useAppState, useStore } from "../data/hooks";
 import { ATTENTION_LABEL, eventSummary, modelShort, repoBranch, sessionTitle } from "../lib/format";
 import { back, Link, navigate, sessionPath } from "../lib/router";
@@ -223,7 +223,6 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
 
   const parent = s.parentId ? `${s.harness}:${s.parentId}` : null;
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
-  const attention: Attention | undefined = s.openAttentions[0];
   const kids = children.length ? children : childrenFromStore(store, key);
 
   return (
@@ -344,7 +343,7 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
       <div ref={endRef} />
 
       <div className="sess-ctl">
-        <ControlStrip session={s} control={control} attention={attention} />
+        <SessionControl session={s} control={control} attentions={s.openAttentions} />
       </div>
     </div>
   );
@@ -578,10 +577,12 @@ function ToolRow({
               <Cut e={item.ended!} field="output" fill={fill} />
             </div>
           )}
-          {error && input === undefined && output === undefined && (
+          {error && (
             <div>
               <span className="tool-io-label">error</span>
-              <pre>{error}</pre>
+              <pre className="is-err">
+                <Redacted text={error} />
+              </pre>
             </div>
           )}
         </div>

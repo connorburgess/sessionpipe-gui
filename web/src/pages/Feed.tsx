@@ -13,6 +13,14 @@ import { clock, dayLabel, useNow } from "../lib/time";
 const CAP = 1500;
 const TYPES = ["session", "turn", "tool", "files", "attention", "subagent", "context"];
 
+/** Rows are newest first by event time (a backfilled event lands under its own day, not
+ *  under today), so a live event goes where its time says, not on top. */
+const insertByTime = (rows: StoredEvent[], e: StoredEvent): StoredEvent[] => {
+  let i = 0;
+  while (i < rows.length && rows[i]!.time > e.time) i++;
+  return [...rows.slice(0, i), e, ...rows.slice(i)];
+};
+
 const applyFilter = (e: StoredEvent, f: FeedQuery) =>
   (!f.harness || e.harness.name === f.harness) &&
   (!f.machine || e.session.machine === f.machine) &&
@@ -88,7 +96,7 @@ export function Feed() {
           setPendingCount(pending.current.length);
           return;
         }
-        setRows((prev) => (prev.some((p) => p.id === e.id) ? prev : [e, ...prev].slice(0, CAP)));
+        setRows((prev) => (prev.some((p) => p.id === e.id) ? prev : insertByTime(prev, e).slice(0, CAP)));
       }),
     [store, paused],
   );
@@ -99,7 +107,10 @@ export function Feed() {
     setPendingCount(0);
     setRows((prev) => {
       const seen = new Set(prev.map((e) => e.id));
-      return [...p.filter((e) => !seen.has(e.id)), ...prev].slice(0, CAP);
+      return p
+        .filter((e) => !seen.has(e.id))
+        .reduce(insertByTime, prev)
+        .slice(0, CAP);
     });
     setPaused(false);
   }, []);
@@ -149,7 +160,7 @@ export function Feed() {
           </label>
           <button
             type="button"
-            className={`btn btn--sm ${paused ? "btn--on" : "btn--ghost"}`}
+            className={`btn btn--sm feed-pause ${paused ? "btn--on" : "btn--ghost"}`}
             aria-pressed={paused}
             onClick={() => (paused ? resume() : setPaused(true))}
           >

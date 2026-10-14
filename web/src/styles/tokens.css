@@ -1,157 +1,131 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Design tokens. Light is warm paper, dark is ink with a cold cast; both tint every
-   neutral so nothing is pure grey. State colours are the one thing the eye reads first:
-   amber for "needs you", glacier blue for "working", the same blue drained for "stale". */
+/* Design tokens. One typeface (the system sans) and one mono. Neutrals carry the whole
+   interface; every neutral is tinted a little so nothing is pure grey. One accent: amber,
+   for "needs you" and nothing else. Working is the foreground with a live dot; stale,
+   idle and done are shades of muted text. Red only where there is an error. */
 
 :root {
   color-scheme: light dark;
 
-  --font-ui: "Avenir Next", Avenir, "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
-  --font-display:
-    "Avenir Next Condensed", "Avenir Next", "Segoe UI Variable Display", "Helvetica Neue", system-ui, sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, ui-monospace, monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* Kept for other owners' styles; there is no display face any more. */
+  --font-display: var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 
-  --text-xs: 0.72rem;
+  --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-md: 0.9375rem;
-  --text-lg: 1.125rem;
-  --text-xl: clamp(1.35rem, 1.1rem + 1vw, 1.75rem);
-  --text-2xl: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
+  --text-lg: 1.0625rem;
+  /* Kept for other owners' styles; headings are body size now. */
+  --text-xl: 1.0625rem;
 
-  --radius: 10px;
+  --radius: 6px;
   --radius-sm: 6px;
   --radius-pill: 999px;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --dur-fast: 120ms;
-  --dur: 220ms;
-  --dur-slow: 420ms;
+  --dur: 200ms;
+  --dur-slow: 360ms;
 
   --tap: 44px;
-  --gutter: clamp(14px, 2.5vw, 32px);
+  --gutter: clamp(16px, 2.5vw, 32px);
   --rail: 72px;
-  --tabbar: 58px;
+  --tabbar: 56px;
   --max: 1480px;
 
-  /* light */
-  --bg: oklch(0.975 0.007 85);
-  --bg-2: oklch(0.992 0.004 85);
-  --bg-3: oklch(0.95 0.009 85);
-  --bg-4: oklch(0.92 0.012 85);
-  --line: oklch(0.89 0.011 85);
-  --line-2: oklch(0.82 0.014 85);
-  --fg: oklch(0.23 0.022 265);
-  --fg-2: oklch(0.47 0.022 265);
-  --fg-3: oklch(0.62 0.018 265);
-  --fg-4: oklch(0.74 0.014 265);
+  /* light: paper */
+  --bg: oklch(0.985 0.004 85);
+  --bg-2: oklch(0.998 0.002 85);
+  --bg-3: oklch(0.955 0.006 85);
+  --bg-4: oklch(0.925 0.008 85);
+  --line: oklch(0.905 0.008 85);
+  --line-2: oklch(0.84 0.01 85);
+  --fg: oklch(0.22 0.014 265);
+  --fg-2: oklch(0.44 0.016 265);
+  --fg-3: oklch(0.58 0.014 265);
+  --fg-4: oklch(0.7 0.01 265);
 
-  --needs: oklch(0.72 0.17 62);
-  --needs-fg: oklch(0.44 0.13 55);
-  --needs-bg: oklch(0.955 0.045 78);
-  --needs-line: oklch(0.86 0.1 72);
+  --needs: oklch(0.72 0.15 65);
+  --needs-fg: oklch(0.5 0.12 60);
+  --needs-bg: oklch(0.965 0.03 82);
+  --needs-line: oklch(0.86 0.08 75);
 
-  --work: oklch(0.6 0.12 222);
-  --work-fg: oklch(0.4 0.1 228);
-  --work-bg: oklch(0.945 0.03 222);
-  --work-line: oklch(0.85 0.06 222);
+  --work: var(--fg);
+  --work-fg: var(--fg-2);
+  --work-bg: var(--bg-3);
+  --work-line: var(--line-2);
 
-  --stale: oklch(0.68 0.03 222);
-  --stale-fg: oklch(0.5 0.03 228);
-  --stale-bg: oklch(0.95 0.008 222);
+  --stale: var(--fg-4);
+  --stale-fg: var(--fg-3);
+  --stale-bg: var(--bg);
 
-  --idle: oklch(0.6 0.012 265);
-  --idle-fg: oklch(0.47 0.02 265);
-  --done: oklch(0.78 0.008 265);
-  --done-fg: oklch(0.62 0.014 265);
+  --idle: var(--fg-4);
+  --idle-fg: var(--fg-3);
+  --done: var(--line-2);
+  --done-fg: var(--fg-4);
 
-  --ok: oklch(0.6 0.14 150);
-  --err: oklch(0.58 0.19 25);
-  --err-bg: oklch(0.96 0.03 25);
-  --focus: oklch(0.62 0.15 222);
-  --mark: oklch(0.9 0.12 95);
-  --mark-fg: oklch(0.4 0.1 70);
-  --shadow: 0 1px 0 oklch(0 0 0 / 0.03);
+  --ok: oklch(0.6 0.1 150);
+  --err: oklch(0.55 0.16 25);
+  --err-soft: oklch(0.6 0.09 25);
+  --err-bg: oklch(0.965 0.02 25);
+  --focus: oklch(0.5 0.02 265);
+  --mark: oklch(0.93 0.07 90);
+  --mark-fg: oklch(0.4 0.09 70);
+  --shadow: none;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: oklch(0.175 0.012 255);
-    --bg-2: oklch(0.21 0.013 255);
-    --bg-3: oklch(0.245 0.014 255);
-    --bg-4: oklch(0.29 0.016 255);
-    --line: oklch(0.28 0.015 255);
-    --line-2: oklch(0.36 0.018 255);
-    --fg: oklch(0.93 0.01 85);
-    --fg-2: oklch(0.72 0.012 85);
-    --fg-3: oklch(0.57 0.012 85);
-    --fg-4: oklch(0.45 0.012 255);
+    --bg: oklch(0.165 0.008 255);
+    --bg-2: oklch(0.195 0.009 255);
+    --bg-3: oklch(0.225 0.01 255);
+    --bg-4: oklch(0.27 0.011 255);
+    --line: oklch(0.255 0.01 255);
+    --line-2: oklch(0.33 0.012 255);
+    --fg: oklch(0.92 0.006 85);
+    --fg-2: oklch(0.72 0.008 85);
+    --fg-3: oklch(0.56 0.008 85);
+    --fg-4: oklch(0.43 0.008 255);
 
-    --needs: oklch(0.8 0.15 70);
-    --needs-fg: oklch(0.86 0.12 75);
-    --needs-bg: oklch(0.26 0.045 65);
-    --needs-line: oklch(0.42 0.09 65);
+    --needs: oklch(0.78 0.13 70);
+    --needs-fg: oklch(0.84 0.11 75);
+    --needs-bg: oklch(0.235 0.03 65);
+    --needs-line: oklch(0.4 0.07 65);
 
-    --work: oklch(0.76 0.1 218);
-    --work-fg: oklch(0.82 0.08 218);
-    --work-bg: oklch(0.245 0.035 225);
-    --work-line: oklch(0.38 0.06 222);
-
-    --stale: oklch(0.55 0.03 222);
-    --stale-fg: oklch(0.68 0.03 222);
-    --stale-bg: oklch(0.225 0.012 240);
-
-    --idle: oklch(0.55 0.012 255);
-    --idle-fg: oklch(0.7 0.012 85);
-    --done: oklch(0.4 0.01 255);
-    --done-fg: oklch(0.55 0.012 255);
-
-    --ok: oklch(0.72 0.14 150);
-    --err: oklch(0.72 0.17 25);
-    --err-bg: oklch(0.27 0.04 25);
-    --focus: oklch(0.76 0.12 218);
-    --mark: oklch(0.42 0.1 85);
-    --mark-fg: oklch(0.92 0.1 90);
-    --shadow: none;
+    --ok: oklch(0.7 0.1 150);
+    --err: oklch(0.7 0.14 25);
+    --err-soft: oklch(0.64 0.08 25);
+    --err-bg: oklch(0.25 0.03 25);
+    --focus: oklch(0.72 0.01 85);
+    --mark: oklch(0.38 0.07 85);
+    --mark-fg: oklch(0.92 0.08 90);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: oklch(0.175 0.012 255);
-  --bg-2: oklch(0.21 0.013 255);
-  --bg-3: oklch(0.245 0.014 255);
-  --bg-4: oklch(0.29 0.016 255);
-  --line: oklch(0.28 0.015 255);
-  --line-2: oklch(0.36 0.018 255);
-  --fg: oklch(0.93 0.01 85);
-  --fg-2: oklch(0.72 0.012 85);
-  --fg-3: oklch(0.57 0.012 85);
-  --fg-4: oklch(0.45 0.012 255);
+  --bg: oklch(0.165 0.008 255);
+  --bg-2: oklch(0.195 0.009 255);
+  --bg-3: oklch(0.225 0.01 255);
+  --bg-4: oklch(0.27 0.011 255);
+  --line: oklch(0.255 0.01 255);
+  --line-2: oklch(0.33 0.012 255);
+  --fg: oklch(0.92 0.006 85);
+  --fg-2: oklch(0.72 0.008 85);
+  --fg-3: oklch(0.56 0.008 85);
+  --fg-4: oklch(0.43 0.008 255);
 
-  --needs: oklch(0.8 0.15 70);
-  --needs-fg: oklch(0.86 0.12 75);
-  --needs-bg: oklch(0.26 0.045 65);
-  --needs-line: oklch(0.42 0.09 65);
+  --needs: oklch(0.78 0.13 70);
+  --needs-fg: oklch(0.84 0.11 75);
+  --needs-bg: oklch(0.235 0.03 65);
+  --needs-line: oklch(0.4 0.07 65);
 
-  --work: oklch(0.76 0.1 218);
-  --work-fg: oklch(0.82 0.08 218);
-  --work-bg: oklch(0.245 0.035 225);
-  --work-line: oklch(0.38 0.06 222);
-
-  --stale: oklch(0.55 0.03 222);
-  --stale-fg: oklch(0.68 0.03 222);
-  --stale-bg: oklch(0.225 0.012 240);
-
-  --idle: oklch(0.55 0.012 255);
-  --idle-fg: oklch(0.7 0.012 85);
-  --done: oklch(0.4 0.01 255);
-  --done-fg: oklch(0.55 0.012 255);
-
-  --ok: oklch(0.72 0.14 150);
-  --err: oklch(0.72 0.17 25);
-  --err-bg: oklch(0.27 0.04 25);
-  --focus: oklch(0.76 0.12 218);
-  --mark: oklch(0.42 0.1 85);
-  --mark-fg: oklch(0.92 0.1 90);
-  --shadow: none;
+  --ok: oklch(0.7 0.1 150);
+  --err: oklch(0.7 0.14 25);
+  --err-soft: oklch(0.64 0.08 25);
+  --err-bg: oklch(0.25 0.03 25);
+  --focus: oklch(0.72 0.01 85);
+  --mark: oklch(0.38 0.07 85);
+  --mark-fg: oklch(0.92 0.08 90);
 }

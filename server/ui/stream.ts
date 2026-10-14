@@ -36,7 +36,14 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
       write({ kind: "machine", machine: control ? { ...m.machine, control } : m.machine });
     } else write(m);
   });
-  const offControl = deps.control.subscribe(write);
+  // A machine message from control carries only what the daemon told it; the store's
+  // reading of that machine (sessions, versions) wins when it has one.
+  const offControl = deps.control.subscribe((m) => {
+    if (m.kind === "machine") {
+      const known = deps.snapshot().machines.find((x) => x.name === m.machine.name);
+      write({ kind: "machine", machine: known ?? m.machine });
+    } else write(m);
+  });
   const ping = setInterval(() => {
     if (!res.destroyed && !res.writableEnded) res.write(": ping\n\n");
   }, deps.pingMs ?? PING_MS);

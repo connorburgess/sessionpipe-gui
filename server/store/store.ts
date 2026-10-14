@@ -40,14 +40,24 @@ export interface StoreOptions {
   statsMs?: number;
 }
 
-/** One indexed event: the slim copy, where its full line is on disk, and its place in
- *  arrival order (the feed cursor). */
+/** One indexed event: the slim copy, where its full line is on disk, its event time
+ *  (ms, clamped to arrival) and its arrival number. The feed orders by (t, no). */
 interface Rec {
   ev: SlimEvent;
   offset: number;
   bytes: number;
+  t: number;
   no: number;
 }
+
+/** The feed cursor: event time and arrival number, opaque to the client. */
+const encodeCursor = (r: Rec): string => Buffer.from(`${r.t}.${r.no}`).toString("base64url");
+const decodeCursor = (c: string): { t: number; no: number } | null => {
+  const m = /^(\d+)\.(\d+)$/.exec(Buffer.from(c, "base64url").toString());
+  return m ? { t: Number(m[1]), no: Number(m[2]) } : null;
+};
+const before = (a: { t: number; no: number }, b: { t: number; no: number }): boolean =>
+  a.t < b.t || (a.t === b.t && a.no < b.no);
 
 interface Entry extends SessionRecord {
   /** Ordered by seq. */
@@ -66,9 +76,11 @@ const LATENCY_WINDOW = 200;
 export class Store {
   private readonly files: EventFiles;
   private readonly sessions = new Map<SessionKey, Entry>();
-  /** Every event in arrival order (ascending `no`). */
-  private byArrival: Rec[] = [];
+  /** Every event by event time, then arrival (ascending). */
+  private byTime: Rec[] = [];
   private nextNo = 1;
+  /** While an initial load runs (boot, the outbox's first drain) arrivals are not live traffic. */
+  private loading = false;
   private readonly childrenOf = new Map<SessionKey, Set<SessionKey>>();
   private readonly listeners = new Set<StoreListener>();
   private latencies: number[] = [];
@@ -116,7 +128,6 @@ export class Store {
       if (entry.seqs.has(ev.session.seq)) continue;
       this.index(entry, ev, line.offset, line.bytes);
       applyEvent(entry, ev, ev.arrivedAt, ev.source ?? "http");
-      this.noteArrival(ev);
     }
     for (const entry of this.sessions.values()) refreshState(entry, now);
   }
@@ -139,7 +150,10 @@ export class Store {
   }
 
   private index(entry: Entry, ev: StoredEvent, offset: number, bytes: number): Rec {
-    const rec: Rec = { ev: slimEvent(ev), offset, bytes, no: this.nextNo++ };
+    const arrived = Date.parse(ev.arrivedAt);
+    const time = Date.parse(ev.time);
+    const t = Number.isFinite(time) ? Math.min(time, arrived) : arrived;
+    const rec: Rec = { ev: slimEvent(ev), offset, bytes, t, no: this.nextNo++ };
     const seq = ev.session.seq;
     entry.seqs.add(seq);
     // Insert by seq; appends are the common case.
@@ -155,11 +169,29 @@ export class Store {
       }
       recs.splice(lo, 0, rec);
     }
-    this.byArrival.push(rec);
+    const all = this.byTime;
+    if (!all.length || !before(rec, all[all.length - 1]!)) all.push(rec);
+    else {
+      let lo = 0;
+      let hi = all.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (before(all[mid]!, rec)) lo = mid + 1;
+        else hi = mid;
+      }
+      all.splice(lo, 0, rec);
+    }
     return rec;
   }
 
+  /** Live traffic only: events that arrive during an initial load are not counted in
+   *  eventsLastMinute or the latency window. */
+  setLoading(on: boolean): void {
+    this.loading = on;
+  }
+
   private noteArrival(ev: StoredEvent): void {
+    if (this.loading) return;
     const arrived = Date.parse(ev.arrivedAt);
     this.arrivals.push(arrived);
     if (ev.source === "http") {
@@ -357,27 +389,27 @@ export class Store {
     return { session: entry.summary, events, total: entry.recs.length, children };
   }
 
-  /** Newest first. `before` is the cursor of a previous page. */
+  /** Newest event time first (arrival breaks ties). `before` is the cursor of a previous page. */
   feed(q: FeedQuery = {}): FeedPage {
     const limit = Math.max(1, Math.min(FEED_MAX, q.limit ?? FEED_DEFAULT));
-    const before = q.before ? Number(q.before) : Number.POSITIVE_INFINITY;
+    const cursor = q.before ? decodeCursor(q.before) : null;
     const needle = q.q?.trim().toLowerCase();
     const events: StoredEvent[] = [];
-    let i = this.byArrival.length - 1;
-    if (Number.isFinite(before)) {
-      // First index with no < before (byArrival ascends by no).
+    let i = this.byTime.length - 1;
+    if (cursor) {
+      // First index at or past the cursor (byTime ascends by (t, no)); start just before it.
       let lo = 0;
-      let hi = this.byArrival.length;
+      let hi = this.byTime.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (this.byArrival[mid]!.no < before) lo = mid + 1;
+        if (before(this.byTime[mid]!, cursor)) lo = mid + 1;
         else hi = mid;
       }
       i = lo - 1;
     }
     let last: Rec | undefined;
     for (; i >= 0 && events.length < limit; i--) {
-      const rec = this.byArrival[i]!;
+      const rec = this.byTime[i]!;
       const ev = rec.ev;
       if (q.harness && ev.harness.name !== q.harness) continue;
       if (q.type && ev.type !== q.type) continue;
@@ -390,7 +422,7 @@ export class Store {
       last = rec;
     }
     const page: FeedPage = { events };
-    if (last && i >= 0) page.cursor = String(last.no);
+    if (last && i >= 0) page.cursor = encodeCursor(last);
     return page;
   }
 
@@ -402,7 +434,7 @@ export class Store {
     this.files.remove(harness, id);
     this.sessions.delete(key);
     this.storageBytes -= entry.size;
-    this.byArrival = this.byArrival.filter((r) => !(r.ev.session.id === id && r.ev.harness.name === harness));
+    this.byTime = this.byTime.filter((r) => !(r.ev.session.id === id && r.ev.harness.name === harness));
     if (entry.summary.parentId) {
       const parentKey = sessionKey(harness, entry.summary.parentId);
       const kids = this.childrenOf.get(parentKey);
@@ -445,7 +477,7 @@ export class Store {
     const machines = new Set<string>();
     for (const e of this.sessions.values()) if (e.summary.machine) machines.add(e.summary.machine);
     const stats: Stats = {
-      events: this.byArrival.length,
+      events: this.byTime.length,
       sessions: this.sessions.size,
       machines: machines.size,
       eventsLastMinute: this.arrivals.length,

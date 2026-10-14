@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // A history router: pushState, no hash. `useRoute()` gives the parsed location; `navigate`
 // and `<Link>` move; the browser's back button works because we listen to popstate.
-import { type MouseEvent, type ReactNode, useSyncExternalStore } from "react";
+import { type CSSProperties, type MouseEvent, type ReactNode, useSyncExternalStore } from "react";
 
 export type Route =
   | { name: "board" }
@@ -9,6 +9,8 @@ export type Route =
   | { name: "feed" }
   | { name: "machines" }
   | { name: "connect" }
+  | { name: "office" }
+  | { name: "pair"; code: string }
   | { name: "missing"; path: string };
 
 const listeners = new Set<() => void>();
@@ -31,6 +33,11 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/feed") return { name: "feed" };
   if (path === "/machines") return { name: "machines" };
   if (path === "/connect") return { name: "connect" };
+  if (path === "/office") return { name: "office" };
+  if (path === "/pair") {
+    const q = pathWithSearch.indexOf("?");
+    return { name: "pair", code: q >= 0 ? (new URLSearchParams(pathWithSearch.slice(q)).get("code") ?? "") : "" };
+  }
   const m = /^\/s\/([^/]+)\/(.+)$/.exec(path);
   if (m?.[1] && m[2]) return { name: "session", harness: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) };
   return { name: "missing", path };
@@ -82,6 +89,8 @@ export function Link({
   title?: string;
   "aria-current"?: "page" | undefined;
   "data-cursor"?: string;
+  "aria-label"?: string;
+  style?: CSSProperties;
   tabIndex?: number;
 }) {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {

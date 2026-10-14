@@ -4,6 +4,8 @@
 import type { MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
 import { Ago, HarnessGlyph } from "../components/bits";
+import { PendingPairings } from "../control/PendingPairings";
+import { StartSession } from "../control/StartSession";
 import { useMachines, useStore } from "../data/hooks";
 import { harnessMark } from "../lib/format";
 import { Link } from "../lib/router";
@@ -24,6 +26,7 @@ export function Machines() {
   if (machines.length === 0) {
     return (
       <div className="page">
+        <PendingPairings />
         <p className="page-note">
           No machine has sent anything yet. <Link to="/connect">Connect one.</Link>
         </p>
@@ -32,6 +35,7 @@ export function Machines() {
   }
   return (
     <div className="page machines">
+      <PendingPairings />
       {machines.map((m) => (
         <MachineBlock key={m.name} m={m} now={now} lanUrl={lanUrl} />
       ))}
@@ -107,6 +111,7 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
             </dd>
           )}
         </div>
+        {c && <StartSession m={m} c={c} />}
       </dl>
     </section>
   );

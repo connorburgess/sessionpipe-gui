@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: Apache-2.0
+// Owned by: control-web. The control channel end to end, in one browser with a virtual
+// passkey (CDP WebAuthn) against the built server on a free port, with the machine's
+// daemon played by fetch: pair → approve on /pair → the daemon collects key, proof and
+// token → hello → a session's events → a prompt from the Session page reaches the
+// daemon's poll as a verified command → taken / delivered acks show under the strip;
+// then Allow on an open permission, and Cancel on a working turn.
+//
+//   node scripts/build.mjs && npx vite build --config web/vite.config.ts
+//   npx playwright test -c web/e2e/playwright.config.ts
+//
+// CONTROL_SHOTS=<dir> also writes screenshots of /pair and the strip (desktop + 390 px).
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { type Browser, type BrowserContext, type CDPSession, expect, type Page, test } from "@playwright/test";
+
+const root = fileURLToPath(new URL("../..", import.meta.url));
+const CONTROL = "/api/sessionpipe/v1/control";
+const EVENTS = "/api/sessionpipe/v1/events";
+const SHOTS = process.env.CONTROL_SHOTS;
+
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const p = (s.address() as net.AddressInfo).port;
+      s.close(() => resolve(p));
+    });
+  });
+
+const B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+function ulid(t = Date.now()): string {
+  let time = "";
+  let n = t;
+  for (let i = 0; i < 10; i++) {
+    time = B32[n % 32] + time;
+    n = Math.floor(n / 32);
+  }
+  let rand = "";
+  for (let i = 0; i < 16; i++) rand += B32[Math.floor(Math.random() * 32)];
+  return time + rand;
+}
+
+/** The machine's daemon, as far as this test needs it. */
+class Daemon {
+  machine = "";
+  token = "";
+  constructor(
+    readonly base: string,
+    readonly sinkToken: string,
+    readonly name: string,
+  ) {}
+  private facts() {
+    return {
+      name: this.name,
+      harnesses: ["claude-code"],
+      modes: ["sdk", "resume"],
+      version: "0.7.0",
+      folders: ["/tmp/proj"],
+      mode: "safe",
+      accounts: [{ harness: "claude-code", id: "acc_1", email: "dev@example.com" }],
+    };
+  }
+  async pair(): Promise<{ machine: string; code: string; check: string; url: string }> {
+    const res = await fetch(`${this.base}${CONTROL}/pair`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.sinkToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...this.facts(), ...(this.machine ? { machine: this.machine } : {}) }),
+    });
+    expect(res.status).toBe(201);
+    const j = (await res.json()) as { machine: string; code: string; check: string; url: string };
+    this.machine = j.machine;
+    return j;
+  }
+  async pairStatus(code: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.base}${CONTROL}/pair?code=${encodeURIComponent(code)}`, {
+      headers: { authorization: `Bearer ${this.sinkToken}` },
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Record<string, unknown>;
+  }
+  async hello(waiting: string[] = []): Promise<void> {
+    const res = await fetch(`${this.base}${CONTROL}/hello`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...this.facts(), waiting }),
+    });
+    expect(res.status).toBe(204);
+  }
+  async poll(waitS = 1): Promise<Record<string, unknown>[]> {
+    const res = await fetch(`${this.base}${CONTROL}?machine=${this.machine}&wait=${waitS}`, {
+      headers: { authorization: `Bearer ${this.token}` },
+    });
+    if (res.status === 204) return [];
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { messages: Record<string, unknown>[] }).messages;
+  }
+  /** Poll until a message arrives (the queue hands it out at once once it is there). */
+  async next(): Promise<{ id: string; cmd: Record<string, unknown>; raw: Record<string, unknown> }> {
+    for (let i = 0; i < 20; i++) {
+      const msgs = await this.poll(1);
+      if (msgs.length) {
+        const m = msgs[msgs.length - 1]!;
+        return { id: m.id as string, cmd: JSON.parse(m.cmd as string) as Record<string, unknown>, raw: m };
+      }
+    }
+    throw new Error("no message reached the daemon");
+  }
+  async ack(id: string, outcome: string, extra: Record<string, unknown> = {}): Promise<void> {
+    const res = await fetch(`${this.base}${CONTROL}/ack`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ acks: [{ id, outcome, at: new Date().toISOString(), mode: "sdk", ...extra }] }),
+    });
+    expect(res.status).toBe(202);
+  }
+}
+
+/** One session's events, posted to the receiver like a sink would. */
+class Events {
+  seq = 0;
+  constructor(
+    readonly base: string,
+    readonly sinkToken: string,
+    readonly sid: string,
+    readonly machine: string,
+  ) {}
+  ev(type: string, data: Record<string, unknown> = {}) {
+    const t = Date.now() - 5000 + this.seq;
+    return {
+      protocol: 1,
+      id: ulid(t),
+      type,
+      time: new Date(t).toISOString(),
+      tier: 3,
+      harness: { name: "claude-code", version: "2.1.296", event: "Hook" },
+      session: { id: this.sid, seq: this.seq++, machine: this.machine, cwd: "/tmp/proj", title: "Control e2e" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  }
+  async post(...events: ReturnType<Events["ev"]>[]): Promise<void> {
+    const res = await fetch(`${this.base}${EVENTS}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.sinkToken}`,
+        "content-type": "application/json",
+        "sessionpipe-protocol": "1",
+      },
+      body: JSON.stringify({ events }),
+    });
+    expect([200, 202]).toContain(res.status);
+  }
+}
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
+}
+
+async function virtualPasskey(context: BrowserContext, page: Page): Promise<CDPSession> {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  return cdp;
+}
+
+test.describe.configure({ mode: "serial" });
+
+let server: ChildProcess;
+let base: string;
+let stateDir: string;
+let sinkToken: string;
+let context: BrowserContext;
+let page: Page;
+let daemon: Daemon;
+let events: Events;
+const SID = "7d1a6b1e-2f7c-4c2a-9a3e-5b1c2d3e4f50";
+const MACHINE = "e2e-mac";
+
+test.beforeAll(async ({ browser }: { browser: Browser }) => {
+  for (const f of ["dist/cli.js", "dist/web/index.html"])
+    if (!existsSync(path.join(root, f)))
+      throw new Error(`${f} is missing: run node scripts/build.mjs && npx vite build --config web/vite.config.ts`);
+  const port = await freePort();
+  base = `http://localhost:${port}`;
+  stateDir = mkdtempSync(path.join(os.tmpdir(), "spgui-control-e2e-"));
+  server = spawn(
+    process.execPath,
+    ["dist/cli.js", "--port", String(port), "--state", stateDir, "--no-outbox", "--test-door", "--quiet"],
+    { cwd: root, stdio: ["ignore", "ignore", "pipe"] },
+  );
+  server.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));
+  const deadline = Date.now() + 20_000;
+  let info: { sinkToken: string } | null = null;
+  while (!info && Date.now() < deadline) {
+    try {
+      const r = await fetch(`${base}/api/ui/info`);
+      if (r.ok) info = (await r.json()) as { sinkToken: string };
+    } catch {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  if (!info) throw new Error("the server did not come up");
+  sinkToken = info.sinkToken;
+  daemon = new Daemon(base, sinkToken, MACHINE);
+  events = new Events(base, sinkToken, SID, MACHINE);
+  context = await browser.newContext({ viewport: { width: 1280, height: 900 }, baseURL: base });
+  page = await context.newPage();
+  await virtualPasskey(context, page);
+});
+
+test.afterAll(async () => {
+  await context?.close();
+  server?.kill("SIGTERM");
+  await new Promise((r) => setTimeout(r, 200));
+  if (stateDir) rmSync(stateDir, { recursive: true, force: true });
+});
+
+test("a terminal's pairing is approved with a passkey and the daemon collects its token", async () => {
+  const started = await daemon.pair();
+  expect(started.url).toContain(`/pair?code=${encodeURIComponent(started.code)}`);
+  expect(await daemon.pairStatus(started.code)).toEqual({ status: "pending" });
+
+  // /machines lists the pending pairing with a link to the approval page.
+  await page.goto("/machines");
+  const pending = page.locator(`.pending-item[data-code="${started.code}"]`);
+  await expect(pending).toBeVisible();
+  await expect(pending).toContainText(MACHINE);
+  await expect(pending).toContainText(`${started.check.slice(0, 3)} ${started.check.slice(3)}`);
+  await shot(page, "machines-pending-desktop");
+  await pending.getByRole("link", { name: /Approve/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/pair\\?code=${started.code}`));
+
+  // The six digits match the terminal's; the facts are there.
+  await expect(page.locator("[data-check]")).toHaveAttribute("data-check", started.check);
+  await expect(page.getByText("first pairing", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("127.0.0.1").first()).toBeVisible();
+  await shot(page, "pair-desktop");
+
+  await page.getByRole("button", { name: "Approve with passkey" }).click();
+  const status = page.locator(".pair-note--ok");
+  await expect(status).toContainText("Approved", { timeout: 20_000 });
+  await expect(status).toContainText("finish by itself");
+  await shot(page, "pair-approved-desktop");
+
+  // The daemon's status poll now carries key, proof and the machine's token.
+  const paired = (await daemon.pairStatus(started.code)) as {
+    status: string;
+    key: { id: string; alg: number; spki: string };
+    proof: { cred: string; ad: string; cd: string; sig: string };
+    token: string;
+  };
+  expect(paired.status).toBe("paired");
+  expect(paired.key.alg).toBe(-7);
+  expect(paired.key.id).toBe(paired.proof.cred);
+  expect(paired.key.spki.length).toBeGreaterThan(40);
+  expect(paired.token).toMatch(/^mt_/);
+  daemon.token = paired.token;
+  await daemon.hello();
+  expect(await daemon.poll(0)).toEqual([]);
+
+  // A spent code answers 404 from then on.
+  const again = await fetch(`${base}${CONTROL}/pair?code=${started.code}`, {
+    headers: { authorization: `Bearer ${sinkToken}` },
+  });
+  expect(again.status).toBe(404);
+});
+
+test("a prompt from the Session page reaches the daemon signed, and its reply comes back", async () => {
+  await events.post(
+    events.ev("session.started", { source: "startup" }),
+    events.ev("turn.started", { turn_id: "t1", prompt_chars: 12 }),
+    events.ev("turn.ended", { reason: "stop", ms: 1200 }),
+  );
+  await page.goto(`/s/claude-code/${SID}`);
+  const box = page.getByLabel("Message for the next turn");
+  await expect(box).toBeEnabled();
+  await expect(page.locator(".ctl-hint")).toContainText(`${MACHINE} is listening`);
+  await expect(page.locator(".ctl-note")).toContainText("asks for your passkey once");
+  await shot(page, "strip-ready-desktop");
+
+  await box.fill("Add the Oct 8 row");
+  await box.press("Shift+Enter");
+  await box.type("and run the tests");
+  await box.press("Enter");
+
+  const row = page.locator("li[data-message]").first();
+  await expect(row).toHaveAttribute("data-outcome", "queued", { timeout: 20_000 });
+  await expect(row).toContainText("waiting for e2e-mac");
+  await expect(box).toHaveValue("");
+  await shot(page, "strip-queued-desktop");
+
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({
+    v: 1,
+    t: "sessionpipe.control",
+    machine: daemon.machine,
+    kind: "prompt",
+    session: `claude-code:${SID}`,
+    text: "Add the Oct 8 row\nand run the tests",
+  });
+  expect(String(msg.cmd.nonce)).toMatch(/^[A-Za-z0-9_-]{22,64}$/);
+  expect(typeof msg.cmd.iat).toBe("number");
+  expect(Object.keys(msg.cmd)).toEqual(["v", "t", "machine", "kind", "session", "text", "nonce", "iat"]);
+  // Signed by the day key under a passkey grant, and carried byte for byte.
+  expect(typeof msg.raw.csig).toBe("string");
+  const grant = msg.raw.grant as { str: string; cred: string; ad: string; cd: string; sig: string };
+  expect(JSON.parse(grant.str)).toMatchObject({ v: 1, t: "sessionpipe.grant", rp: "localhost" });
+  expect(grant.cred).toBeTruthy();
+
+  await daemon.ack(msg.id, "taken");
+  await expect(row).toHaveAttribute("data-outcome", "taken");
+  await expect(row).toContainText("delivering");
+  await daemon.ack(msg.id, "progress", { reply: "Adding the row", seq: 1 });
+  await expect(row).toHaveAttribute("data-outcome", "progress");
+  await expect(row.locator(".ctl-act-reply")).toContainText("Adding the row");
+  await daemon.ack(msg.id, "delivered", { reply: "Added the Oct 8 row; 14 tests pass." });
+  await expect(row).toHaveAttribute("data-outcome", "delivered");
+  await expect(row).toContainText("delivered · sdk");
+  await expect(row.locator(".ctl-act-reply")).toContainText("14 tests pass");
+  await shot(page, "strip-delivered-desktop");
+
+  // The second send of the day signs by itself: no passkey hint, same grant.
+  await expect(page.locator(".ctl-note")).toHaveCount(0);
+});
+
+test("Allow on an open permission sends a permission.answer naming the attention", async () => {
+  await events.post(
+    events.ev("turn.started", { turn_id: "t2", prompt_chars: 20 }),
+    events.ev("attention.needed", {
+      attention_id: "att_1",
+      kind: "permission",
+      tool: "Bash",
+      message: "rm -rf dist && npm run build",
+    }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="att_1"]');
+  await expect(answer).toBeVisible();
+  await expect(answer).toContainText("Bash");
+  await shot(page, "strip-permission-desktop");
+  await answer.getByRole("button", { name: "Allow" }).click();
+
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({
+    kind: "permission.answer",
+    session: `claude-code:${SID}`,
+    for: "att_1",
+    decision: "allow",
+  });
+  expect(msg.cmd).not.toHaveProperty("text");
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  const row = page.locator(`li[data-message="${msg.id}"]`);
+  await expect(row).toContainText("answer");
+  await expect(row).toContainText("allow");
+  await expect(row).toHaveAttribute("data-outcome", "delivered");
+});
+
+test("Cancel on a working turn sends a cancel", async () => {
+  await events.post(events.ev("attention.cleared", { attention_id: "att_1", how: "answered" }));
+  await expect(page.locator(".ctl-answer")).toHaveCount(0);
+  const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+  await expect(cancel).toBeVisible();
+  await cancel.click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "cancel", session: `claude-code:${SID}` });
+  await daemon.ack(msg.id, "refused", { code: "no_session", detail: "gone" });
+  const row = page.locator(`li[data-message="${msg.id}"]`);
+  await expect(row).toHaveAttribute("data-outcome", "refused");
+  await expect(row).toContainText("no such session");
+});
+
+test("a session is started from /machines in one of the machine's folders", async () => {
+  await page.goto("/machines");
+  const block = page.getByRole("region", { name: MACHINE });
+  await expect(block).toContainText("paired");
+  await expect(block).toContainText("daemon online");
+  const form = block.getByRole("form", { name: `Start a session on ${MACHINE}` });
+  await expect(form.getByLabel("harness")).toHaveValue("claude-code");
+  await expect(form.getByLabel("folder")).toHaveValue("/tmp/proj");
+  await form.getByLabel("first message").fill("Set up the Oct release branch");
+  await shot(page, "machines-start-desktop");
+  await form.getByRole("button", { name: "Start session" }).click();
+
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "start", text: "Set up the Oct release branch", cwd: "/tmp/proj" });
+  const session = String(msg.cmd.session);
+  expect(session).toMatch(/^claude-code:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(Object.keys(msg.cmd)).toEqual(["v", "t", "machine", "kind", "session", "text", "cwd", "nonce", "iat"]);
+  await daemon.ack(msg.id, "taken");
+  await expect(block.locator(`li[data-message="${msg.id}"]`)).toHaveAttribute("data-outcome", "taken");
+  await daemon.ack(msg.id, "delivered", { session, reply: "Session started." });
+  const link = block.getByRole("link", { name: /Open the new session/ });
+  await expect(link).toBeVisible();
+  const sid = session.slice("claude-code:".length);
+  await expect(link).toHaveAttribute("href", `/s/claude-code/${sid}`);
+  await shot(page, "machines-started-desktop");
+});
+
+test("over plain LAN http every control affordance says passkeys need https or localhost", async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  const info = (await (await fetch(`${base}/api/ui/info`)).json()) as { uiKey: string; urls: { lan: string[] } };
+  const lan = info.urls.lan[0];
+  test.skip(!lan, "no LAN address on this machine");
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const p = await ctx.newPage();
+  // ?k= sets the cookie and redirects; the origin is a LAN ip, so isSecureContext is false.
+  await p.goto(`${lan}/s/claude-code/${SID}?k=${info.uiKey}`);
+  expect(await p.evaluate(() => window.isSecureContext)).toBe(false);
+  await expect(p.getByLabel("Message for the next turn")).toBeDisabled();
+  await expect(p.locator(".ctl-hint")).toContainText("passkeys need https or localhost");
+  await shot(p, "strip-insecure-desktop");
+  const renewed = await daemon.pair();
+  await p.goto(`${lan}/pair?code=${encodeURIComponent(renewed.code)}`);
+  await expect(p.locator("[data-check]")).toHaveAttribute("data-check", renewed.check);
+  await expect(p.getByRole("button", { name: "Approve with passkey" })).toBeDisabled();
+  await expect(p.locator(".pair-note--err")).toContainText("passkeys need https or localhost");
+  await p.goto(`${lan}/machines`);
+  await expect(p.getByRole("region", { name: MACHINE })).toContainText("passkeys need https or localhost");
+  await ctx.close();
+});
+
+test("a 390 px phone sees the same pages", async ({ browser }: { browser: Browser }) => {
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
+  const p = await phone.newPage();
+  await p.goto(`/s/claude-code/${SID}`);
+  await expect(p.getByLabel("Message for the next turn")).toBeEnabled();
+  await expect(p.locator("li[data-message]").first()).toBeVisible();
+  await shot(p, "strip-phone");
+  // A renewed code from the same terminal: the pair page at phone width.
+  const renewed = await daemon.pair();
+  await p.goto(`/pair?code=${encodeURIComponent(renewed.code)}`);
+  await expect(p.locator("[data-check]")).toHaveAttribute("data-check", renewed.check);
+  await expect(p.getByRole("button", { name: /Approve with passkey/ })).toBeVisible();
+  await shot(p, "pair-phone");
+  await p.getByRole("button", { name: "Reject" }).click();
+  await expect(p.locator(".pair-note--quiet")).toContainText("Rejected");
+  const gone = await fetch(`${base}${CONTROL}/pair?code=${renewed.code}`, {
+    headers: { authorization: `Bearer ${sinkToken}` },
+  });
+  expect(gone.status).toBe(404);
+  await phone.close();
+});

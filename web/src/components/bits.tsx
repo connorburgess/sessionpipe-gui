@@ -6,11 +6,22 @@ import { type ReactNode, useEffect, useId, useState } from "react";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { ago, durCoarse, ms, since, useNow } from "../lib/time";
 
-export function StateDot({ state, size = 10 }: { state: SessionState; size?: number }) {
+/** `decorative` when the state's word is already visible beside it. */
+export function StateDot({
+  state,
+  size = 6,
+  decorative = false,
+}: {
+  state: SessionState;
+  size?: number;
+  decorative?: boolean;
+}) {
+  const style = { width: size, height: size };
+  if (decorative) return <span className={`dot dot--${state}`} style={style} aria-hidden="true" />;
   return (
     <span
       className={`dot dot--${state}`}
-      style={{ width: size, height: size }}
+      style={style}
       role="img"
       aria-label={STATE_LABEL[state]}
       title={STATE_HINT[state]}
@@ -18,17 +29,19 @@ export function StateDot({ state, size = 10 }: { state: SessionState; size?: num
   );
 }
 
+/** "● working · 12 s": the state as text, no box. */
 export function StateBadge({ state, since: sinceIso }: { state: SessionState; since?: string }) {
   const now = useNow();
   return (
     <span className={`badge badge--${state}`} title={STATE_HINT[state]}>
-      <StateDot state={state} size={8} />
+      <StateDot state={state} decorative />
       {STATE_LABEL[state]}
       {sinceIso && <span className="badge-since num">{since(sinceIso, now)}</span>}
     </span>
   );
 }
 
+/** The harness as a two-letter monogram in plain small text: "Cl", "Cx". */
 export function HarnessGlyph({
   name,
   size = "md",
@@ -41,7 +54,7 @@ export function HarnessGlyph({
   const m = harnessMark(name);
   return (
     <span className={`glyph-wrap ${withLabel ? "glyph-wrap--label" : ""}`} title={m.label}>
-      <span className={`glyph glyph--${size}`} style={{ "--h": m.hue } as React.CSSProperties} aria-hidden="true">
+      <span className={`glyph glyph--${size}`} aria-hidden="true">
         {m.glyph}
       </span>
       {withLabel ? <span className="glyph-label">{m.label}</span> : <span className="sr-only">{m.label}</span>}
@@ -166,9 +179,10 @@ export function SearchInput({
 }) {
   return (
     <label className="search">
-      <span className="search-icon" aria-hidden="true">
-        ⌕
-      </span>
+      <svg className="search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
       <input
         data-search
         type="search"
@@ -216,7 +230,7 @@ export function Segmented<T extends string | number>({
   );
 }
 
-/** A select rendered as a chip. */
+/** A select rendered as quiet text with a caret. */
 export function ChipSelect({
   value,
   options,
@@ -242,7 +256,7 @@ export function ChipSelect({
           </option>
         ))}
       </select>
-      <span className="chipsel-text">{value || all}</span>
+      <span className="chipsel-text ellipsis">{value || all}</span>
       <span aria-hidden="true" className="chipsel-caret">
         ▾
       </span>

@@ -11,13 +11,13 @@ export const STATE_LABEL: Record<SessionState, string> = {
   done: "done",
 };
 
-/** Plural group headings on the board: "2 need you", "3 working". */
+/** Group headings on the board: "Needs you · 1", "Working · 3". */
 export const STATE_HEADING: Record<SessionState, (n: number) => string> = {
-  needs_you: (n) => (n === 1 ? "needs you" : "need you"),
-  working: () => "working",
-  stale: () => "stale",
-  idle: () => "idle",
-  done: () => "done",
+  needs_you: (n) => (n === 1 ? "Needs you" : "Need you"),
+  working: () => "Working",
+  stale: () => "Stale",
+  idle: () => "Idle",
+  done: () => "Done",
 };
 
 export const STATE_HINT: Record<SessionState, string> = {
@@ -117,7 +117,9 @@ export function eventSummary(e: ProtocolEvent): string {
     case "session.ended":
       return `reason=${str(d.reason) || "other"}`;
     case "session.backfill":
-      return `backfill${d.turns !== undefined ? ` · ${str(d.turns)} turns` : ""}`;
+      return ["backfill", span(str(d.started_at), str(d.last_at)), d.turns !== undefined ? `${str(d.turns)} turns` : ""]
+        .filter(Boolean)
+        .join(" · ");
     case "session.forgotten":
       return "forgotten";
     case "session.heartbeat":
@@ -131,9 +133,10 @@ export function eventSummary(e: ProtocolEvent): string {
       return bits.join(" · ");
     }
     case "turn.transcript":
-      return `turn ${str(d.turn)} · ${oneLine(str(d.assistant), 120)}`;
-    case "turn.progress":
-      return `turn ${str(d.turn)} · ${oneLine(str(d.assistant), 120)}`;
+    case "turn.progress": {
+      const text = oneLine(str(d.assistant), 120);
+      return text ? `turn ${str(d.turn)} · ${text}` : `turn ${str(d.turn)}`;
+    }
     case "tool.started":
       return `${str(d.tool)}${d.agent_id ? " · subagent" : ""}`;
     case "tool.ended": {
@@ -163,6 +166,17 @@ export function eventSummary(e: ProtocolEvent): string {
     default:
       return Object.keys(d).slice(0, 3).join(", ");
   }
+}
+
+/** "3 Oct 14:02 → 16:40", or across days "3 Oct → 5 Oct". */
+function span(from: string, to: string): string {
+  const a = from ? new Date(from) : null;
+  const b = to ? new Date(to) : null;
+  if (!a || Number.isNaN(a.getTime())) return "";
+  const day = (d: Date) => d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const hm = (d: Date) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (!b || Number.isNaN(b.getTime())) return `${day(a)} ${hm(a)}`;
+  return a.toDateString() === b.toDateString() ? `${day(a)} ${hm(a)} → ${hm(b)}` : `${day(a)} → ${day(b)}`;
 }
 
 export function oneLine(s: string, max: number): string {
