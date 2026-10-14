@@ -110,6 +110,136 @@ test.describe("split panel", () => {
     });
   });
 
+  test.describe("tabs (desktop)", () => {
+    test.skip(({ isMobile }) => !!isMobile, "desktop project only");
+
+    const tabs = (page: Page) => panel(page).locator("[role='tablist'] [role='tab']");
+    const tabKeys = (page: Page) => tabs(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-tab-key")));
+    const activeKey = (page: Page) => panel(page).getAttribute("data-split");
+    const splitParams = (page: Page) => {
+      const u = new URL(page.url());
+      return { s: u.searchParams.get("s"), t: u.searchParams.get("t") };
+    };
+    /** The first three distinct board cards: href, key and title, read once (cards re-sort live). */
+    const cards = async (page: Page, n: number) => {
+      await openBoard(page);
+      const links = page.locator("article.card a.card-link");
+      await expect.poll(() => links.count()).toBeGreaterThanOrEqual(n);
+      const out: { href: string; key: string; title: string }[] = [];
+      for (let i = 0; i < n; i++) {
+        const href = (await links.nth(i).getAttribute("href"))!;
+        const [, h, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
+        out.push({ href, key: `${h}:${id}`, title: (await links.nth(i).locator(".card-title").textContent())! });
+      }
+      return out;
+    };
+    const click = (page: Page, href: string, modifiers: ("Shift" | "Meta" | "Control")[]) =>
+      page.locator(`a.card-link[href="${href}"]`).click({ modifiers });
+
+    test("shift-clicks add tabs, ⌘-click adds one in the background; the URL round-trips", async ({ page }) => {
+      const [a, b, c] = await cards(page, 3);
+      await click(page, a!.href, ["Shift"]);
+      await click(page, b!.href, ["Shift"]);
+      await expect(tabs(page)).toHaveCount(2);
+      expect(await tabKeys(page)).toEqual([a!.key, b!.key]);
+      await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+      await expect(panel(page).locator(".panel-title")).toHaveText(b!.title);
+      expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key}`, t: "1" });
+
+      await click(page, c!.href, [process.platform === "darwin" ? "Meta" : "Control"]);
+      await expect(tabs(page)).toHaveCount(3);
+      expect(await tabKeys(page)).toEqual([a!.key, b!.key, c!.key]);
+      await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+      expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key},${c!.key}`, t: "1" });
+      // Shift-click on an open one activates it instead of adding another.
+      await click(page, c!.href, ["Shift"]);
+      await expect(tabs(page)).toHaveCount(3);
+      await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+
+      // Reload keeps all three and the active one; ctrl+tab cycles.
+      await page.reload();
+      await live(page);
+      await expect(tabs(page)).toHaveCount(3);
+      expect(await activeKey(page)).toBe(c!.key);
+      await page.keyboard.press("Control+Tab");
+      expect(await activeKey(page)).toBe(a!.key);
+      await page.keyboard.press("Control+Shift+Tab");
+      expect(await activeKey(page)).toBe(c!.key);
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+2" : "Control+2");
+      expect(await activeKey(page)).toBe(b!.key);
+      // Each tab's body stays mounted with its own scroller.
+      await expect(panel(page).locator("[data-body]")).toHaveCount(3);
+    });
+
+    test("tabs reorder by drag; closing the middle one keeps the neighbours; the last close shuts the panel", async ({
+      page,
+    }) => {
+      const [a, b, c] = await cards(page, 3);
+      await click(page, a!.href, ["Shift"]);
+      await click(page, b!.href, ["Shift"]);
+      await click(page, c!.href, ["Shift"]);
+      await expect(tabs(page)).toHaveCount(3);
+      // Drag the third tab to the front.
+      const third = (await tabs(page).nth(2).boundingBox())!;
+      const first = (await tabs(page).nth(0).boundingBox())!;
+      await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(third.x + third.width / 2 - 20, third.y + third.height / 2, { steps: 3 });
+      await page.mouse.move(first.x + 4, first.y + first.height / 2, { steps: 8 });
+      await page.mouse.up();
+      await expect.poll(() => tabKeys(page)).toEqual([c!.key, a!.key, b!.key]);
+      expect(await activeKey(page)).toBe(c!.key);
+      expect(splitParams(page).t).toBe("0");
+
+      // Close the middle tab (a) through its ×; c stays active.
+      await tabs(page).nth(1).hover();
+      await tabs(page).nth(1).locator(".tab-close").click();
+      await expect.poll(() => tabKeys(page)).toEqual([c!.key, b!.key]);
+      expect(await activeKey(page)).toBe(c!.key);
+      // Close the active one: its neighbour takes over.
+      await tabs(page).nth(0).locator(".tab-close").click();
+      await expect.poll(() => tabKeys(page)).toEqual([b!.key]);
+      expect(await activeKey(page)).toBe(b!.key);
+      expect(splitParams(page)).toEqual({ s: b!.key, t: null });
+      // The last one closes the panel.
+      await tabs(page).nth(0).locator(".tab-close").click();
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect(page).not.toHaveURL(/[?&]s=/);
+    });
+
+    test("a plain reload of / without params restores the tabs from this device", async ({ page }) => {
+      const [a, b] = await cards(page, 2);
+      await click(page, a!.href, ["Shift"]);
+      await click(page, b!.href, ["Shift"]);
+      await expect(tabs(page)).toHaveCount(2);
+      await page.goto("/");
+      await live(page);
+      await expect(tabs(page)).toHaveCount(2);
+      expect(await tabKeys(page)).toEqual([a!.key, b!.key]);
+      expect(await activeKey(page)).toBe(b!.key);
+      expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key}`, t: "1" });
+      // Closing clears the mirror: a later plain load stays closed.
+      await page.keyboard.press("Escape");
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await page.goto("/");
+      await live(page);
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+    });
+
+    test("a theme opens a background tab through api.openSession({ split, background })", async ({ page }) => {
+      await page.goto("/t/e2e-counter");
+      await live(page);
+      await page.locator("[data-open-split]").click();
+      await expect(tabs(page)).toHaveCount(1);
+      const first = await activeKey(page);
+      await page.locator("[data-open-split-bg]").click();
+      await expect(tabs(page)).toHaveCount(2);
+      expect(await activeKey(page)).toBe(first);
+      await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+      expect(splitParams(page).t).toBe("0");
+    });
+  });
+
   test.describe("phone", () => {
     test.skip(({ isMobile }) => !isMobile, "phone project only");
 

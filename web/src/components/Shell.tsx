@@ -7,7 +7,7 @@ import { type CSSProperties, Fragment, type ReactNode, useEffect, useState } fro
 import { useAppState } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
 import { Link, type Route } from "../lib/router";
-import { useSplitKey, useSplitWidth } from "../lib/split";
+import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
 import { QuickSettings } from "./QuickSettings";
@@ -141,6 +141,10 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const nav = navItems(useThemes().themes);
   const phone = useMedia("(max-width: 839px)");
   useResize();
+  // Boot: the last visit's tabs when the URL carries none.
+  useEffect(() => {
+    restoreSplit();
+  }, []);
   const splitOpen = useSplitKey() !== null;
   const splitWidth = useSplitWidth();
   const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;

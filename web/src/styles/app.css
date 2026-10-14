@@ -1956,15 +1956,21 @@
 .panel-btn {
   flex: none;
 }
-.panel-body {
+.panel-bodies {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+.panel-body {
+  position: absolute;
+  inset: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  transition: opacity 120ms var(--ease-out);
 }
-.panel-body--fading {
-  opacity: 0;
+/* Hidden in place (not display:none) so the scroll position survives a tab switch. */
+.panel-body--off {
+  visibility: hidden;
+  pointer-events: none;
 }
 .panel-grip {
   position: absolute;
@@ -2133,4 +2139,116 @@
   .rail {
     z-index: 20;
   }
+}
+
+/* ---------- the tab strip ---------- */
+
+/* Part of the panel header, not a browser chrome: text tabs, a 6 px state dot, a 2 px
+   underline on the active one; nothing filled, no borders between tabs. Reads first on
+   wide screens (order -2), under the header on the phone sheet. */
+.tabs {
+  order: -2;
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  height: 36px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  background: var(--bg);
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+.tabs--overflow {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+}
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 6px 0 10px;
+  font-size: var(--text-md);
+  font-weight: 400;
+  color: var(--fg-3);
+  cursor: default;
+  user-select: none;
+  touch-action: pan-x;
+}
+.tab:hover {
+  color: var(--fg-2);
+}
+.tab--active {
+  color: var(--fg);
+  font-weight: 500;
+}
+.tab--active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 6px;
+  bottom: 0;
+  height: 2px;
+  background: var(--fg);
+}
+.tab--dragging {
+  opacity: 0.6;
+}
+.tab-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-4);
+}
+.tab-dot--working {
+  background: var(--fg);
+}
+.tab-dot--needs_you {
+  background: var(--needs);
+}
+.tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-close {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--fg-4);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.tab:hover .tab-close,
+.tab--active .tab-close,
+.tab-close:focus-visible {
+  opacity: 1;
+}
+.tab-close:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+@media (hover: none) {
+  .tab-close {
+    opacity: 1;
+  }
+}
+/* Phone sheet: the header first, the strip right under it, then the bodies. */
+.panel--sheet .tabs {
+  order: -1;
+}
+.panel--sheet .panel-head {
+  order: -2;
 }

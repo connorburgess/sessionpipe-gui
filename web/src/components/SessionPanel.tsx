@@ -1,22 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
-// The side panel: a session open beside the current page (`?s=<harness>:<id>`), 44 % of
-// the width by default, resizable at its left edge, remembered per device; a full-height
-// sheet on phones. Opening from a rectangle (a card, a canvas window) morphs a ghost of
-// it into the panel while the panel slides in and the page makes room; closing reverses.
-import type { SessionSummary } from "@shared/api";
+// The side panel: sessions open beside the current page, as tabs (`?s=<key>,…&t=<i>`).
+// 44 % of the width by default, resizable at its left edge, remembered per device; a
+// full-height sheet on phones. A tab strip (text tabs, a state dot, an underline on the
+// active one), then the active session's header, then the bodies: every tab keeps its
+// own scroller mounted up to MOUNTED_MAX, so its scroll position and loaded pages
+// survive a switch. Opening from a rectangle morphs a ghost of it into the panel.
+import type { SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  createRef,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useAppState } from "../data/hooks";
 import { sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
 import {
+  activateTab,
   closeSplit,
+  closeTab,
+  cycleTab,
+  MOUNTED_MAX,
+  moveTab,
   PAGE_MIN,
   type Rect,
   SPLIT_MIN,
   setSplitWidth,
   takeFrom,
-  useSplitKey,
+  useSplit,
   useSplitWidth,
 } from "../lib/split";
 import { HarnessGlyph, StateBadge } from "./bits";
@@ -43,20 +59,50 @@ function morph(from: Rect, to: Rect, opts: { fadeIn?: boolean } = {}): void {
   anim.finished.then(() => el.remove()).catch(() => el.remove());
 }
 
+/** Tab labels: the session title, plus " · machine" only where two tabs share a title. */
+function tabLabels(tabs: SessionKey[], summary: (k: SessionKey) => SessionSummary | undefined): string[] {
+  const titles = tabs.map((k) => {
+    const s = summary(k);
+    return s ? sessionTitle(s) : splitKey(k).id.slice(0, 8);
+  });
+  return titles.map((t, i) => {
+    const dup = titles.some((o, j) => j !== i && o === t);
+    const m = summary(tabs[i]!)?.machine;
+    return dup && m ? `${t} · ${m}` : t;
+  });
+}
+
 export function SessionPanel({ phone }: { phone: boolean }) {
-  const key = useSplitKey();
+  const { tabs, active } = useSplit();
+  const activeKey = tabs[active] ?? null;
   const width = useSplitWidth();
   const sessions = useAppState().sessions;
-  /** What the body shows: lags `key` by a crossfade when one session replaces another,
-   *  and by the slide-out when the panel closes. */
-  const [shown, setShown] = useState<string | null>(key);
-  const [fading, setFading] = useState(false);
-  const [known, setKnown] = useState<SessionSummary | undefined>();
-  const bodyRef = useRef<HTMLDivElement>(null);
+  /** Summaries the views learned, for tabs whose session is not in the snapshot. */
+  const [known, setKnown] = useState<ReadonlyMap<SessionKey, SessionSummary>>(new Map());
+  const summary = useCallback((k: SessionKey) => sessions.get(k) ?? known.get(k), [sessions, known]);
+  const onSession = useCallback(
+    (s: SessionSummary) => setKnown((m) => (m.get(s.key) === s ? m : new Map(m).set(s.key, s))),
+    [],
+  );
+
+  /** Tabs whose SessionView is mounted, least recently used first. */
+  const [mounted, setMounted] = useState<SessionKey[]>(activeKey ? [activeKey] : []);
+  /** What the panel shows while it slides out: the tabs lag the URL by one animation. */
+  const [shownTabs, setShownTabs] = useState<SessionKey[]>(tabs);
+  const bodyRefs = useRef(new Map<SessionKey, RefObject<HTMLDivElement>>());
+  const bodyRef = (k: SessionKey) => {
+    let r = bodyRefs.current.get(k);
+    if (!r) {
+      r = createRef<HTMLDivElement>();
+      bodyRefs.current.set(k, r);
+    }
+    return r;
+  };
   const panelRef = useRef<HTMLElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const lastFrom = useRef<Rect | null>(null);
-  const prevKey = useRef<string | null>(key);
-  const open = key !== null;
+  const wasOpen = useRef(tabs.length > 0);
+  const open = tabs.length > 0;
 
   const panelRect = useCallback(
     (): Rect =>
@@ -66,39 +112,89 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     [phone, width],
   );
 
-  // Open, close, or replace.
+  // Open and close: the morph in and out, and the body kept until the slide-out ends.
   useEffect(() => {
-    const was = prevKey.current;
-    prevKey.current = key;
-    if (key && !was) {
-      const from = takeFrom();
-      lastFrom.current = from;
-      if (from) morph(from, panelRect());
-      setShown(key);
-      setFading(false);
+    const was = wasOpen.current;
+    wasOpen.current = open;
+    if (open) {
+      setShownTabs(tabs);
+      if (!was) {
+        const from = takeFrom();
+        lastFrom.current = from;
+        if (from) morph(from, panelRect());
+      } else takeFrom();
       return;
     }
-    if (!key && was) {
+    if (was) {
       const from = lastFrom.current;
       lastFrom.current = null;
-      if (from) morph(panelRect(), from, { fadeIn: false });
-      const t = setTimeout(() => setShown(null), reduced() ? 0 : MOTION_MS);
+      if (from) morph(panelRect(), from);
+      const t = setTimeout(
+        () => {
+          setShownTabs([]);
+          setMounted([]);
+          bodyRefs.current.clear();
+        },
+        reduced() ? 0 : MOTION_MS,
+      );
       return () => clearTimeout(t);
     }
-    if (key && was && key !== was) {
-      takeFrom();
-      if (reduced()) {
-        setShown(key);
+  }, [open, tabs, panelRect]);
+
+  // Which views stay mounted: the active one joins (most recent last); closed tabs leave;
+  // past MOUNTED_MAX the least recently used goes.
+  useEffect(() => {
+    if (!activeKey) return;
+    setMounted((prev) => {
+      const next = prev.filter((k) => k !== activeKey && tabs.includes(k));
+      next.push(activeKey);
+      while (next.length > MOUNTED_MAX) {
+        const drop = next.shift()!;
+        bodyRefs.current.delete(drop);
+      }
+      return next;
+    });
+  }, [activeKey, tabs]);
+
+  // The active tab scrolls into view in the strip.
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || !activeKey) return;
+    const el = strip.querySelector<HTMLElement>(`[data-tab-key="${CSS.escape(activeKey)}"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reduced() ? "auto" : "smooth" });
+    const overflow = strip.scrollWidth > strip.clientWidth + 1;
+    strip.classList.toggle("tabs--overflow", overflow);
+  }, [activeKey, tabs, width]);
+
+  // Keyboard: ctrl+tab cycles, ⌘/ctrl+1…9 jump, ⌘/ctrl+w closes the active tab when the
+  // panel has focus. (Browsers reserve some of these for their own tabs; they work where
+  // the page is allowed to take them.)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        cycleTab(e.shiftKey ? -1 : 1);
         return;
       }
-      setFading(true);
-      const t = setTimeout(() => {
-        setShown(key);
-        setFading(false);
-      }, 120);
-      return () => clearTimeout(t);
-    }
-  }, [key, panelRect]);
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      if (/^[1-9]$/.test(e.key)) {
+        const i = Number(e.key) - 1;
+        if (i < tabs.length) {
+          e.preventDefault();
+          activateTab(i);
+        }
+        return;
+      }
+      if (e.key === "w" && panelRef.current?.contains(document.activeElement)) {
+        e.preventDefault();
+        closeTab(active);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, tabs.length, active]);
 
   // The divider: drag to resize; the page keeps PAGE_MIN, the panel keeps SPLIT_MIN.
   const onGrip = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -121,9 +217,62 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     grip.addEventListener("pointercancel", up);
   };
 
-  const s = shown ? (sessions.get(shown) ?? (known?.key === shown ? known : undefined)) : undefined;
-  const { harness, id } = shown ? splitKey(shown) : { harness: "", id: "" };
+  // Tabs reorder by drag: past 6 px the tab follows the pointer across its neighbours'
+  // midpoints; a click that never moved activates.
+  const [dragging, setDragging] = useState<SessionKey | null>(null);
+  const onTabDown = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
+    if (e.button !== 0) return;
+    const tab = e.currentTarget;
+    const strip = stripRef.current;
+    if (!strip) return;
+    const startX = e.clientX;
+    let from = index;
+    let moved = false;
+    const pid = e.pointerId;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.abs(ev.clientX - startX) < 6) return;
+      if (!moved) {
+        moved = true;
+        tab.setPointerCapture(pid);
+        setDragging(tabs[index]!);
+      }
+      const els = [...strip.querySelectorAll<HTMLElement>("[data-tab-key]")];
+      let to = els.length - 1;
+      for (let i = 0; i < els.length; i++) {
+        const r = els[i]!.getBoundingClientRect();
+        if (ev.clientX < r.left + r.width / 2) {
+          to = i;
+          break;
+        }
+      }
+      if (to !== from) {
+        moveTab(from, to);
+        from = to;
+      }
+    };
+    const up = () => {
+      tab.removeEventListener("pointermove", move);
+      tab.removeEventListener("pointerup", up);
+      tab.removeEventListener("pointercancel", up);
+      setDragging(null);
+      if (!moved) activateTab(index);
+    };
+    tab.addEventListener("pointermove", move);
+    tab.addEventListener("pointerup", up);
+    tab.addEventListener("pointercancel", up);
+  };
+  const onTabAux = (e: ReactMouseEvent<HTMLDivElement>, index: number) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      closeTab(index);
+    }
+  };
+
+  const shown = open ? tabs : shownTabs;
+  const s = activeKey ? summary(activeKey) : undefined;
+  const labels = tabLabels(shown, summary);
   const title = s ? sessionTitle(s) : "Session";
+  const bodies = open ? mounted : [];
 
   return (
     <aside
@@ -131,7 +280,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
       className={`panel ${open ? "panel--open" : ""} ${phone ? "panel--sheet" : ""}`}
       aria-label="Session panel"
       aria-hidden={!open}
-      data-split={open ? (shown ?? key) : undefined}
+      data-split={activeKey ?? undefined}
     >
       {!phone && (
         // biome-ignore lint/a11y/useSemanticElements: a separator with pointer handling has no native element
@@ -145,18 +294,29 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           tabIndex={-1}
         />
       )}
-      <div className={`panel-body ${fading ? "panel-body--fading" : ""}`} ref={bodyRef}>
-        {shown && (
-          <SessionView
-            key={shown}
-            harness={harness}
-            id={id}
-            mode="panel"
-            scrollRef={bodyRef}
-            onSession={setKnown}
-            onForgotten={closeSplit}
-          />
-        )}
+      <div className="panel-bodies">
+        {bodies.map((k) => {
+          const { harness, id } = splitKey(k);
+          const isActive = k === activeKey;
+          return (
+            <div
+              key={k}
+              className={`panel-body ${isActive ? "" : "panel-body--off"}`}
+              ref={bodyRef(k)}
+              aria-hidden={!isActive}
+              data-body={k}
+            >
+              <SessionView
+                harness={harness}
+                id={id}
+                mode="panel"
+                scrollRef={bodyRef(k)}
+                onSession={onSession}
+                onForgotten={() => closeTab(tabs.indexOf(k))}
+              />
+            </div>
+          );
+        })}
       </div>
       <header className="panel-head">
         {s && <HarnessGlyph name={s.harness} size="sm" />}
@@ -164,9 +324,9 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           {title}
         </h2>
         {s && <StateBadge state={s.state} since={s.stateSince} />}
-        {shown && (
+        {activeKey && (
           <Link
-            to={sessionPath(harness, id)}
+            to={sessionPath(splitKey(activeKey).harness, splitKey(activeKey).id)}
             className="theme-btn panel-btn"
             aria-label="Open as page"
             title="Open as page"
@@ -210,6 +370,46 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           </svg>
         </button>
       </header>
+      <div className="tabs" role="tablist" aria-label="Open sessions" ref={stripRef}>
+        {shown.map((k, i) => {
+          const sm = summary(k);
+          const isActive = k === activeKey;
+          return (
+            <div
+              key={k}
+              className={`tab ${isActive ? "tab--active" : ""} ${dragging === k ? "tab--dragging" : ""}`}
+              role="tab"
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              data-tab-key={k}
+              title={labels[i]}
+              onPointerDown={(e) => onTabDown(e, i)}
+              onAuxClick={(e) => onTabAux(e, i)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  activateTab(i);
+                }
+              }}
+            >
+              <span className={`tab-dot tab-dot--${sm?.state ?? "idle"}`} aria-hidden="true" />
+              <span className="tab-title">{labels[i]}</span>
+              <button
+                type="button"
+                className="tab-close"
+                aria-label={`Close ${labels[i]}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(i);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </aside>
   );
 }

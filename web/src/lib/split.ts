@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// The side panel: a session open beside the current page. Which session is in the URL
-// (`?s=<harness>:<id>`, so reload and back/forward keep it); the width is per device;
-// the rectangle an open animates out of is handed over once and consumed by the panel.
+// The side panel: sessions open beside the current page, as tabs. Which tabs and which
+// is active live in the URL (`?s=<key>,<key>&t=<active>`; a lone `?s=<key>` still works),
+// mirrored to localStorage so a plain reload without params restores them (the URL wins
+// when present). The width is per device; the rectangle an open animates out of is
+// handed over once and consumed by the panel.
 import type { SessionKey } from "@shared/api";
 import { useSyncExternalStore } from "react";
-import { SPLIT_PARAM, setSearchParam, useSearchParam } from "./router";
+import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, setSearchParams, useSearchParam } from "./router";
 
 export interface Rect {
   x: number;
@@ -13,10 +15,19 @@ export interface Rect {
   height: number;
 }
 
+export interface SplitState {
+  tabs: SessionKey[];
+  active: number;
+}
+
 export const SPLIT_MIN = 420;
 /** Room the page keeps when the panel is dragged wide. */
 export const PAGE_MIN = 360;
+/** Inactive tabs kept mounted (their scroll and loaded pages); beyond this the least
+ *  recently used is unmounted and reloads at its latest turn when it comes back. */
+export const MOUNTED_MAX = 6;
 const KEY_WIDTH = "sessionpipe-gui.splitWidth";
+const KEY_TABS = "sessionpipe-gui.splitTabs";
 
 let pendingFrom: Rect | null = null;
 let width: number | null = (() => {
@@ -64,13 +75,122 @@ export function useSplitWidth(): number {
   return splitWidth();
 }
 
-export function openSplit(key: SessionKey, from?: Rect): void {
-  pendingFrom = from ?? null;
-  setSearchParam(SPLIT_PARAM, key);
+// ----- tabs -----
+
+const isKey = (k: string): k is SessionKey => k.includes(":");
+
+/** Parses `s` and `t` as the URL carries them. */
+export function parseSplit(s: string | null, t: string | null): SplitState {
+  const tabs = (s ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(isKey)
+    .filter((k, i, all) => all.indexOf(k) === i);
+  const n = Number(t);
+  const active = tabs.length === 0 ? 0 : Number.isInteger(n) ? Math.max(0, Math.min(tabs.length - 1, n)) : 0;
+  return { tabs, active };
+}
+
+function current(): SplitState {
+  const q = new URLSearchParams(location.search);
+  return parseSplit(q.get(SPLIT_PARAM), q.get(SPLIT_ACTIVE_PARAM));
+}
+
+function remember(state: SplitState): void {
+  try {
+    if (state.tabs.length === 0) localStorage.removeItem(KEY_TABS);
+    else localStorage.setItem(KEY_TABS, JSON.stringify(state));
+  } catch {
+    // per-page only
+  }
+}
+
+/** Writes the state to the URL (and the mirror). A change to the set of tabs is a
+ *  history entry; switching or reordering replaces the current one. */
+function commit(state: SplitState, opts: { replace?: boolean } = {}): void {
+  const tabs = state.tabs;
+  const active = Math.max(0, Math.min(tabs.length - 1, state.active));
+  remember({ tabs, active });
+  setSearchParams(
+    {
+      [SPLIT_PARAM]: tabs.length ? tabs.join(",") : null,
+      [SPLIT_ACTIVE_PARAM]: tabs.length > 1 || active > 0 ? String(active) : null,
+    },
+    opts,
+  );
+}
+
+/** At boot, with no `?s=` in the URL: the tabs of the last visit, if any. */
+export function restoreSplit(): void {
+  if (new URLSearchParams(location.search).has(SPLIT_PARAM)) return;
+  try {
+    const raw = localStorage.getItem(KEY_TABS);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<SplitState>;
+    const tabs = Array.isArray(parsed.tabs)
+      ? parsed.tabs.filter((k): k is string => typeof k === "string" && isKey(k))
+      : [];
+    if (tabs.length === 0) return;
+    commit({ tabs, active: typeof parsed.active === "number" ? parsed.active : 0 }, { replace: true });
+  } catch {
+    // ignore a bad mirror
+  }
+}
+
+export interface OpenSplitOptions {
+  from?: Rect;
+  /** Add the tab without switching to it (unless the panel was closed). */
+  background?: boolean;
+}
+
+export function openSplit(key: SessionKey, opts: OpenSplitOptions = {}): void {
+  const st = current();
+  const i = st.tabs.indexOf(key);
+  if (i >= 0) {
+    if (!opts.background && i !== st.active) commit({ ...st, active: i }, { replace: true });
+    return;
+  }
+  if (st.tabs.length === 0) pendingFrom = opts.from ?? null;
+  const tabs = [...st.tabs, key];
+  commit({ tabs, active: opts.background && st.tabs.length > 0 ? st.active : tabs.length - 1 });
+}
+
+export function activateTab(index: number): void {
+  const st = current();
+  if (index < 0 || index >= st.tabs.length || index === st.active) return;
+  commit({ ...st, active: index }, { replace: true });
+}
+
+export function cycleTab(delta: 1 | -1): void {
+  const st = current();
+  if (st.tabs.length < 2) return;
+  activateTab((st.active + delta + st.tabs.length) % st.tabs.length);
+}
+
+/** Closes a tab; the active one hands over to its right neighbour, else the left; the
+ *  last one closes the panel. */
+export function closeTab(index: number): void {
+  const st = current();
+  if (index < 0 || index >= st.tabs.length) return;
+  const tabs = st.tabs.filter((_, i) => i !== index);
+  let active = st.active;
+  if (index < st.active) active -= 1;
+  else if (index === st.active) active = Math.min(index, tabs.length - 1);
+  commit({ tabs, active });
+}
+
+export function moveTab(from: number, to: number): void {
+  const st = current();
+  if (from === to || from < 0 || to < 0 || from >= st.tabs.length || to >= st.tabs.length) return;
+  const tabs = [...st.tabs];
+  const [k] = tabs.splice(from, 1);
+  tabs.splice(to, 0, k!);
+  const activeKey = st.tabs[st.active]!;
+  commit({ tabs, active: tabs.indexOf(activeKey) }, { replace: true });
 }
 
 export function closeSplit(): void {
-  setSearchParam(SPLIT_PARAM, null);
+  commit({ tabs: [], active: 0 });
 }
 
 /** The rectangle the last `openSplit` asked to animate from, once. */
@@ -80,8 +200,15 @@ export function takeFrom(): Rect | null {
   return r;
 }
 
-/** The session key in the panel, or null. */
+/** The tabs and the active index, live from the URL. */
+export function useSplit(): SplitState {
+  const s = useSearchParam(SPLIT_PARAM);
+  const t = useSearchParam(SPLIT_ACTIVE_PARAM);
+  return parseSplit(s, t);
+}
+
+/** The active session key in the panel, or null. */
 export function useSplitKey(): SessionKey | null {
-  const v = useSearchParam(SPLIT_PARAM);
-  return v?.includes(":") ? v : null;
+  const st = useSplit();
+  return st.tabs[st.active] ?? null;
 }

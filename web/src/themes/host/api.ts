@@ -143,7 +143,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
     navigate: (path) => navigate(path),
     openSession(key: SessionKey, opts) {
       if (opts?.split) {
-        openSplit(key, opts.from);
+        openSplit(key, { from: opts.from, background: opts.background });
         return;
       }
       const { harness, id: sid } = splitKey(key);

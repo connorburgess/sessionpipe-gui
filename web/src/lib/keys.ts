@@ -63,7 +63,8 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[]) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTyping(e.target) || e.altKey) return;
+      if (e.key !== "Enter" && (e.metaKey || e.ctrlKey)) return;
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         setCursor((c) => Math.min(hrefs.length - 1, c + 1));
@@ -75,9 +76,12 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[]) {
         if (!href) return;
         e.preventDefault();
         const key = keys?.[cursor];
-        if (e.shiftKey && key)
-          openSplit(key, document.querySelector(`[data-cursor="${cursor}"]`)?.getBoundingClientRect());
-        else navigate(href);
+        if ((e.shiftKey || e.metaKey || e.ctrlKey) && key) {
+          openSplit(key, {
+            from: document.querySelector(`[data-cursor="${cursor}"]`)?.getBoundingClientRect(),
+            background: e.metaKey || e.ctrlKey,
+          });
+        } else navigate(href);
       }
     };
     window.addEventListener("keydown", onKey);

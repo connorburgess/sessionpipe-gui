@@ -55,8 +55,9 @@ export function usePath(): string {
   return useSyncExternalStore(subscribe, current, current);
 }
 
-/** The query parameter that holds the session open in the side panel (`<harness>:<id>`). */
+/** The query parameters of the side panel: its tabs (`<harness>:<id>,…`) and the active one. */
 export const SPLIT_PARAM = "s";
+export const SPLIT_ACTIVE_PARAM = "t";
 
 /** Keep `?mock=1` across navigations so a mock session survives a reload on any page, and
  *  the side panel (`?s=`) across page changes, except onto a session page of its own. */
@@ -65,7 +66,11 @@ function keepParams(to: string): string {
   const extra = new URLSearchParams();
   if (q.get("mock") === "1" && !to.includes("mock=1")) extra.set("mock", "1");
   const split = q.get(SPLIT_PARAM);
-  if (split && !to.startsWith("/s/") && !/[?&]s=/.test(to)) extra.set(SPLIT_PARAM, split);
+  if (split && !to.startsWith("/s/") && !/[?&]s=/.test(to)) {
+    extra.set(SPLIT_PARAM, split);
+    const active = q.get(SPLIT_ACTIVE_PARAM);
+    if (active) extra.set(SPLIT_ACTIVE_PARAM, active);
+  }
   const qs = extra.toString();
   if (!qs) return to;
   return `${to}${to.includes("?") ? "&" : "?"}${qs}`;
@@ -83,9 +88,16 @@ export function navigate(to: string, opts: { replace?: boolean } = {}) {
 /** Sets or removes one query parameter on the current URL (a history entry each time, so
  *  back and forward walk through it). */
 export function setSearchParam(name: string, value: string | null, opts: { replace?: boolean } = {}) {
+  setSearchParams({ [name]: value }, opts);
+}
+
+/** Sets or removes several query parameters at once, as one history entry. */
+export function setSearchParams(entries: Record<string, string | null>, opts: { replace?: boolean } = {}) {
   const q = new URLSearchParams(location.search);
-  if (value === null) q.delete(name);
-  else q.set(name, value);
+  for (const [name, value] of Object.entries(entries)) {
+    if (value === null) q.delete(name);
+    else q.set(name, value);
+  }
   const qs = q.toString();
   const target = `${location.pathname}${qs ? `?${qs}` : ""}`;
   if (target === current()) return;
@@ -127,15 +139,22 @@ export function Link({
   "aria-label"?: string;
   style?: CSSProperties;
   tabIndex?: number;
-  /** Shift- or Alt-click: open beside instead (the side panel). Plain clicks navigate. */
-  modClick?: () => void;
+  /** Shift- or Alt-click: open beside (the side panel); ⌘/ctrl-click: beside, as a
+   *  background tab. Plain clicks navigate. */
+  modClick?: (opts: { background: boolean }) => void;
 }) {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey) {
+      if (!modClick) return; // the browser's own "open in a new tab"
+      e.preventDefault();
+      modClick({ background: true });
+      return;
+    }
     if (e.shiftKey || e.altKey) {
       if (!modClick) return;
       e.preventDefault();
-      modClick();
+      modClick({ background: false });
       return;
     }
     e.preventDefault();

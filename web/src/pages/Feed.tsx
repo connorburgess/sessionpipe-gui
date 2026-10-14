@@ -197,8 +197,11 @@ export function Feed() {
                 to={sessionPath(e.harness.name, e.session.id)}
                 className="ev-session ellipsis"
                 title={e.session.id}
-                modClick={() =>
-                  openSplit(storedKey(e), document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect())
+                modClick={(o) =>
+                  openSplit(storedKey(e), {
+                    from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
+                    background: o.background,
+                  })
                 }
               >
                 {s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
@@ -214,7 +217,9 @@ export function Feed() {
               <BesideButton
                 className="ev-beside"
                 onClick={() =>
-                  openSplit(storedKey(e), document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect())
+                  openSplit(storedKey(e), {
+                    from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
+                  })
                 }
               />
             </li>

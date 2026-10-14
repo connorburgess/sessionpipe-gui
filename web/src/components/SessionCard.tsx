@@ -41,7 +41,8 @@ export function SessionCard({
   const isLiveText = !!s.progress?.assistant?.trim();
   const tool = s.currentTool && s.state === "working" ? s.currentTool : undefined;
   const ref = useRef<HTMLElement>(null);
-  const beside = () => openSplit(s.key, ref.current?.getBoundingClientRect());
+  const beside = (o: { background: boolean } = { background: false }) =>
+    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background: o.background });
   return (
     <article
       ref={ref}
@@ -49,7 +50,7 @@ export function SessionCard({
       data-cursor={cursor !== undefined ? String(cursor) : undefined}
       aria-current={cursor !== undefined ? "true" : undefined}
     >
-      <BesideButton onClick={beside} />
+      <BesideButton onClick={() => beside()} />
       <Link to={sessionPath(s.harness, s.id)} className="card-link" title={sessionTitle(s)} modClick={beside}>
         <header className="card-head">
           <h3 className="card-title ellipsis">{sessionTitle(s)}</h3>
@@ -149,7 +150,7 @@ export function BesideButton({ onClick, className = "card-beside" }: { onClick: 
         onClick();
       }}
       aria-label="Open beside"
-      title="Open beside (shift+click)"
+      title="Open beside (shift+click; ⌘/ctrl+click for a background tab)"
     >
       <svg
         viewBox="0 0 20 20"
