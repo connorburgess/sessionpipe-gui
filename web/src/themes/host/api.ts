@@ -65,6 +65,7 @@ export function toSnapshot(s: AppState, scheme: "dark" | "light"): ThemeSnapshot
     control: s.control,
     recent: s.recent,
     scheme,
+    viewers: [],
   });
 }
 
