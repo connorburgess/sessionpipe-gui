@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: Apache-2.0
+// The loopback test door the conformance runner uses (conformance/README.md: "a control
+// scenario's `enqueue` step is the receiver's own test door: the runner signs the
+// message with a test key it enrolled there"). Three routes, registered only when the
+// app was started with `testDoor: true`, and answering 404 to anything but loopback:
+//
+//   POST {control}/_test/enroll   { machine, key?, name? }        trust a key for a machine
+//                                                                 (the door's own test passkey
+//                                                                 when none is given); the row
+//                                                                 and its token are made when
+//                                                                 missing. → { machine, token, key }
+//   POST {control}/_test/enqueue  { machine, message: {...} }    build, sign and queue a command
+//                                 or { machine, sign: {...}, expires_in_s }   → { id, machine, expires_at }
+//   POST {control}/_test/approve  { code?, as? }                 approve a pending pairing with the
+//                                                                 door's passkey as `as` (test-person)
+//
+// The door's keys live in memory for the life of the process and never leave it. The
+// enqueue goes through the same verifier as the UI's send, so the door can never queue
+// what a browser could not.
+import { RECEIVER_MAX_AGE_MS, verifyCommand } from "sessionpipe-core/control";
+import type { Ctx, Reply, Router } from "../http/router.js";
+import { HttpError } from "../http/router.js";
+import { CODE_RE, type Hello, MACHINE_RE } from "./parse.js";
+import type { ControlState, MachineRow } from "./state.js";
+import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
+
+export interface TestDoorDeps {
+  state: ControlState;
+  rpId: string;
+  /** ROUTES.control */
+  base: string;
+}
+
+const DOOR_FACTS: Hello = {
+  name: "conformance",
+  harnesses: ["claude-code"],
+  modes: ["waiter"],
+  keys: [],
+  version: "0.0.0",
+  waiting: [],
+  folders: null,
+  mode: null,
+  accounts: [],
+};
+
+export function registerTestDoor(router: Router, d: TestDoorDeps): void {
+  const { state, base } = d;
+  let keys: Promise<{ passkey: TestPasskey; day: TestDayKey }> | null = null;
+  const doorKeys = () => {
+    keys ??= Promise.all([TestPasskey.create({ rpId: d.rpId }), TestDayKey.create()]).then(([passkey, day]) => ({
+      passkey,
+      day,
+    }));
+    return keys;
+  };
+  const fence = (ctx: Ctx) => {
+    if (!ctx.remote.loopback) throw new HttpError(404, { reason: "not_found" });
+  };
+  const machineOf = (v: unknown, create: boolean): MachineRow => {
+    if (typeof v !== "string" || !MACHINE_RE.test(v))
+      throw new HttpError(400, { reason: "bad_request", error: "Which machine?" });
+    const m = state.machine(v);
+    if (m) return m;
+    if (!create) throw new HttpError(404, { reason: "not_found" });
+    return state.createMachine(v, DOOR_FACTS);
+  };
+
+  router.post(`${base}/_test/enroll`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    const body = await ctx.json<{ machine?: unknown; key?: unknown; name?: unknown }>(64 * 1024);
+    const m = machineOf(body.machine, true);
+    const given = body.key as { id?: unknown; alg?: unknown; spki?: unknown } | undefined;
+    const key =
+      given && typeof given.id === "string" && typeof given.alg === "number" && typeof given.spki === "string"
+        ? { id: given.id, alg: given.alg, spki: given.spki }
+        : (await doorKeys()).passkey.key;
+    state.addKey(m, key, typeof body.name === "string" ? body.name : "test door");
+    const token = state.mintToken(m);
+    return { status: 201, json: { machine: m.id, token, key } };
+  });
+
+  router.post(`${base}/_test/enqueue`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    const body = await ctx.json<{ machine?: unknown; message?: unknown; sign?: unknown; expires_in_s?: unknown }>(
+      256 * 1024,
+    );
+    const m = machineOf(body.machine, true);
+    const msg = ((body.message ?? body.sign) as Record<string, unknown> | undefined) ?? {};
+    if (typeof msg !== "object") throw new HttpError(400, { reason: "bad_request", error: "message is an object" });
+    const { passkey, day } = await doorKeys();
+    if (!m.keys.some((k) => k.id === passkey.key.id)) state.addKey(m, passkey.key, "test door");
+    if (!m.tokenHash) state.mintToken(m);
+    const cmd = commandStr(m.id, {
+      kind: msg.kind,
+      session: msg.session,
+      text: msg.text,
+      for: msg.for,
+      decision: msg.decision,
+      note: msg.note,
+      cwd: msg.cwd,
+      key: msg.key,
+      name: msg.name,
+      ...(typeof msg.nonce === "string" ? { nonce: msg.nonce } : {}),
+      ...(typeof msg.iat === "number" ? { iat: msg.iat } : {}),
+    });
+    const signed = await signCommand(passkey, day, cmd, { confirm: msg.confirm === true });
+    const verdict = await verifyCommand(signed, {
+      machine: m.id,
+      rpId: d.rpId,
+      trusted: m.keys,
+      now: Date.now(),
+      maxAgeMs: RECEIVER_MAX_AGE_MS,
+    });
+    if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
+    const ttlS = [msg.expires_in_s, body.expires_in_s].find((v) => typeof v === "number" && v > 0) as
+      | number
+      | undefined;
+    const row = state.enqueue(m, signed, verdict.cmd, {
+      via: "test-door",
+      ...(ttlS ? { expiresInMs: ttlS * 1000 } : {}),
+    });
+    return { status: 201, json: { id: row.id, machine: m.id, expires_at: row.expiresAt } };
+  });
+
+  router.post(`${base}/_test/approve`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    const body = await ctx.json<{ code?: unknown; as?: unknown }>(16 * 1024);
+    const found =
+      typeof body.code === "string" && CODE_RE.test(body.code)
+        ? state.findPairing(body.code)
+        : state.pendingPairings()[0];
+    if (!found) throw new HttpError(404, { reason: "not_found", error: "No pending pairing." });
+    const { machine, pairing } = found;
+    if (!state.pairingPending(pairing)) throw new HttpError(409, { reason: "not_pending" });
+    const as = typeof body.as === "string" && body.as.trim() ? body.as.trim().slice(0, 200) : "test-person";
+    const { passkey } = await doorKeys();
+    const proof = await passkey.enroll(machine.id, pairing.code);
+    state.approvePairing(machine, pairing, { ...passkey.key, addedAt: new Date().toISOString(), name: as }, proof, as);
+    return { status: 200, json: { machine: machine.id, code: pairing.code, as } };
+  });
+}

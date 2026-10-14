@@ -15,6 +15,10 @@ export interface StoredEvent extends ProtocolEvent {
   arrivedAt: string;
   /** Where it came from: the HTTP events endpoint, the local outbox tailer, or demo mode. */
   source: EventSource;
+  /** Present on events from the stream and the feed, which are *slim*: data.input,
+   *  data.output, data.user and data.assistant may be cut to a preview; this maps each
+   *  cut key to its original length. The session detail route returns the full event. */
+  preview?: Record<string, number>;
 }
 
 export type EventSource = "http" | "outbox" | "demo";
@@ -231,7 +235,7 @@ export interface Info {
   uiKey: string;
   sources: {
     http: true;
-    outbox: { path: string; sessions: number; enabled: boolean } | null;
+    outbox: { path: string; sessions: number; enabled: boolean; events?: number } | null;
     demo: boolean;
   };
   storage: { dir: string; bytes: number };

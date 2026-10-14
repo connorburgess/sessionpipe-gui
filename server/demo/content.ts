@@ -1,0 +1,855 @@
+// SPDX-License-Identifier: Apache-2.0
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: tool inputs quote TypeScript and workflow source as text
+// Owned by: demo. What the pretend team works on: machines, repos, titles and the turn
+// scripts each harness plays. Tool inputs and outputs copy the shapes the real hooks
+// carry (conformance/harness/* in the sessionpipe repo). No real people, no real
+// secrets: the one secret-looking line is already `[redacted]`, as secrets@1 leaves it.
+
+export type HarnessName = "claude-code" | "codex" | "gemini-cli";
+
+export const MACHINE_NAMES = ["studio-mac", "build-box", "ci-runner", "lab-pi"] as const;
+
+export const HARNESS_VERSION: Record<HarnessName, string> = {
+  "claude-code": "2.1.296",
+  codex: "0.157.1",
+  "gemini-cli": "0.48.2",
+};
+
+export const MODELS: Record<HarnessName, readonly string[]> = {
+  "claude-code": ["claude-fable-5-1", "claude-opus-5-5"],
+  codex: ["gpt-5.4-codex"],
+  "gemini-cli": ["gemini-3-pro"],
+};
+
+export interface Repo {
+  repo: string;
+  cwd: string;
+  branches: readonly string[];
+}
+
+export const REPOS: readonly Repo[] = [
+  {
+    repo: "github.com/acme/billing",
+    cwd: "~/code/billing",
+    branches: ["main", "feat/invoice-pdf", "fix/webhook-retry"],
+  },
+  { repo: "github.com/acme/infra", cwd: "~/work/infra", branches: ["main", "chore/pnpm-cache", "tf/aws-provider-6"] },
+  { repo: "github.com/acme/docs-site", cwd: "~/code/docs-site", branches: ["main", "docs/2.4-changelog"] },
+  { repo: "github.com/acme/mobile", cwd: "~/code/mobile", branches: ["main", "feat/offline-cart"] },
+  { repo: "github.com/acme/search-api", cwd: "~/code/search-api", branches: ["main", "perf/bm25-cache"] },
+  { repo: "gitlab.com/acme/data-pipeline", cwd: "~/work/data-pipeline", branches: ["main", "fix/late-events"] },
+];
+
+/** One tool call inside a turn. `say` is what the assistant has written by then
+ *  (turn.progress grows with it); `paths` makes a files.changed follow the tool. */
+export interface ToolStep {
+  tool: string;
+  input: unknown;
+  output?: unknown;
+  ms: number;
+  ok?: boolean;
+  error?: string;
+  paths?: string[];
+  say?: string;
+  /** Claude Code asks before running this one: an attention.needed stays open first. */
+  permission?: string;
+  /** The Agent tool: a subagent runs these steps in a child session before the next step. */
+  subagent?: { type: string; steps: ToolStep[] };
+  /** The context fills up right after this step: context.compacted, then a compact restart. */
+  compactAfter?: boolean;
+}
+
+export interface TurnScript {
+  prompt: string;
+  steps: ToolStep[];
+  final: string;
+  /** The session learns a better title during this turn (title_source harness or custom). */
+  title?: { text: string; source: "harness" | "custom" };
+  /** The turn ends on an API error instead of a Stop. */
+  error?: string;
+  /** The turn never ends: the session goes quiet after its last step (a stale session). */
+  abandon?: boolean;
+}
+
+const bash = (stdout: string, stderr = "") => ({
+  stdout,
+  stderr,
+  interrupted: false,
+  isImage: false,
+  noOutputExpected: false,
+});
+const read = (filePath: string, content: string, totalLines: number) => ({
+  type: "text",
+  file: { filePath, content, numLines: content.split("\n").length, startLine: 1, totalLines },
+});
+const edit = (filePath: string, oldString: string, newString: string) => ({
+  filePath,
+  oldString,
+  newString,
+  replaceAll: false,
+  userModified: false,
+});
+const grepFiles = (filenames: string[]) => ({ mode: "files_with_matches", numFiles: filenames.length, filenames });
+const grepLines = (content: string, numLines: number) => ({ mode: "content", numLines, content });
+
+// ---------- Claude Code: github.com/acme/billing ----------
+
+export const CLAUDE_TURNS: readonly TurnScript[] = [
+  {
+    prompt:
+      "Our Stripe webhook handler keeps retrying when the signature check fails, which just hammers the queue. Find where retries are scheduled and make a bad signature a hard stop.",
+    title: { text: "Webhook retry on bad signature", source: "harness" },
+    steps: [
+      {
+        tool: "Grep",
+        input: { pattern: "scheduleRetry|retryWebhook", path: "src", output_mode: "files_with_matches" },
+        output: grepFiles(["src/webhooks/retry.ts", "src/webhooks/handler.ts", "src/queue/jobs.ts"]),
+        ms: 38,
+        say: "I'll start from where retries are scheduled.",
+      },
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/src/webhooks/retry.ts" },
+        output: read(
+          "/Users/dev/code/billing/src/webhooks/retry.ts",
+          "export function scheduleRetry(job: WebhookJob, err: unknown) {\n  const attempt = job.attempt + 1;\n  const delay = Math.min(2 ** attempt * 1000, 15 * 60_000);\n  return queue.enqueue({ ...job, attempt }, { delay });\n}\n",
+          41,
+        ),
+        ms: 4,
+        say: "I'll start from where retries are scheduled. `scheduleRetry` backs off exponentially but never looks at *why* the delivery failed.",
+      },
+      {
+        tool: "Grep",
+        input: { pattern: "SignatureVerificationError", path: "src", output_mode: "content", "-n": true },
+        output: grepLines(
+          "src/webhooks/verify.ts:12:export class SignatureVerificationError extends Error {}\nsrc/webhooks/handler.ts:44:    } catch (err) {\nsrc/webhooks/handler.ts:45:      await scheduleRetry(job, err);",
+          3,
+        ),
+        ms: 29,
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/webhooks/handler.ts",
+          old_string: "    } catch (err) {\n      await scheduleRetry(job, err);",
+          new_string:
+            "    } catch (err) {\n      if (err instanceof SignatureVerificationError) {\n        log.warn({ jobId: job.id }, 'webhook signature rejected; not retrying');\n        return;\n      }\n      await scheduleRetry(job, err);",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/webhooks/handler.ts",
+          "    } catch (err) {\n      await scheduleRetry(job, err);",
+          "    } catch (err) {\n      if (err instanceof SignatureVerificationError) {\n        log.warn({ jobId: job.id }, 'webhook signature rejected; not retrying');\n        return;\n      }\n      await scheduleRetry(job, err);",
+        ),
+        ms: 6,
+        paths: ["src/webhooks/handler.ts"],
+        say: "I'll start from where retries are scheduled. `scheduleRetry` backs off exponentially but never looks at *why* the delivery failed. A rejected signature is now logged and dropped before any retry is queued.",
+      },
+      {
+        tool: "Bash",
+        input: { command: "npx vitest run src/webhooks", description: "Run the webhook test suite" },
+        output: bash(
+          " ✓ src/webhooks/handler.test.ts (9 tests) 212ms\n ✓ src/webhooks/retry.test.ts (4 tests) 51ms\n\n Test Files  2 passed (2)\n      Tests  13 passed (13)\n",
+        ),
+        ms: 2840,
+      },
+    ],
+    final:
+      "A webhook whose signature fails verification is no longer retried. `handler.ts` now catches `SignatureVerificationError` before `scheduleRetry`, logs the job id at warn level and returns; every other failure keeps the exponential backoff. The 13 webhook tests pass. Worth a follow-up: `scheduleRetry` caps at 15 minutes but has no attempt limit, so a permanently failing endpoint retries forever.",
+  },
+  {
+    prompt: "node_modules is in a weird state after the Node 22 bump. Reinstall from the lockfile and rerun the suite.",
+    steps: [
+      {
+        tool: "Bash",
+        input: { command: "rm -rf node_modules && npm ci", description: "Reinstall dependencies from the lockfile" },
+        permission: "rm -rf node_modules && npm ci",
+        output: bash(
+          "\nadded 412 packages, and audited 413 packages in 19s\n\n71 packages are looking for funding\n\nfound 0 vulnerabilities\n",
+        ),
+        ms: 19400,
+        say: "Reinstalling from package-lock.json.",
+      },
+      {
+        tool: "Bash",
+        input: { command: "npm test 2>&1 | tail -20", description: "Run the full test suite" },
+        output: bash(
+          " Test Files  24 passed (24)\n      Tests  188 passed (188)\n   Start at  14:02:11\n   Duration  8.41s\n",
+        ),
+        ms: 9100,
+        say: "Reinstalling from package-lock.json. Clean install done; running the suite.",
+      },
+    ],
+    final:
+      "Clean install from the lockfile (412 packages, no audit findings) and the full suite is green: 24 files, 188 tests in 8.4 s. The earlier failures were a stale `esbuild` binary built for Node 20.",
+  },
+  {
+    prompt:
+      "Where else do we format money without going through formatMoney()? Use a subagent to sweep the whole repo, then fix the ones in src/.",
+    title: { text: "Billing: money formatting sweep", source: "custom" },
+    steps: [
+      {
+        tool: "Agent",
+        input: {
+          description: "Find ad-hoc money formatting",
+          prompt:
+            "Search the repository for places that format currency amounts without calling formatMoney() from src/lib/money.ts: toFixed(2) on amounts, template strings with a currency symbol, Intl.NumberFormat with style currency. Report file:line and the expression for each.",
+          subagent_type: "Explore",
+        },
+        output: {
+          isAsync: true,
+          status: "async_launched",
+          agentId: "",
+          description: "Find ad-hoc money formatting",
+          resolvedModel: "claude-fable-5-1",
+        },
+        ms: 5,
+        say: "A subagent is sweeping the repo for ad-hoc formatting while I look at the helper itself.",
+        subagent: {
+          type: "Explore",
+          steps: [
+            {
+              tool: "Grep",
+              input: { pattern: "toFixed\\(2\\)", output_mode: "content", "-n": true },
+              output: grepLines(
+                "src/invoices/render.ts:88:    `${(line.amount / 100).toFixed(2)} ${invoice.currency}`\nsrc/reports/monthly.ts:41:  total: (sum / 100).toFixed(2),\nscripts/backfill-totals.ts:17:  console.log(row.id, (row.cents / 100).toFixed(2));",
+                3,
+              ),
+              ms: 44,
+            },
+            {
+              tool: "Grep",
+              input: { pattern: "Intl\\.NumberFormat", output_mode: "files_with_matches" },
+              output: grepFiles(["src/lib/money.ts", "web/src/components/Price.tsx"]),
+              ms: 31,
+            },
+            {
+              tool: "Read",
+              input: { file_path: "~/code/billing/web/src/components/Price.tsx", limit: 40 },
+              output: read(
+                "/Users/dev/code/billing/web/src/components/Price.tsx",
+                "const fmt = new Intl.NumberFormat(undefined, { style: 'currency', currency });\nreturn <span>{fmt.format(cents / 100)}</span>;\n",
+                38,
+              ),
+              ms: 3,
+            },
+          ],
+        },
+      },
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/src/lib/money.ts" },
+        output: read(
+          "/Users/dev/code/billing/src/lib/money.ts",
+          "export function formatMoney(cents: number, currency: string, locale = 'en-US'): string {\n  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(cents / 100);\n}\n",
+          12,
+        ),
+        ms: 3,
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/invoices/render.ts",
+          old_string: "`${(line.amount / 100).toFixed(2)} ${invoice.currency}`",
+          new_string: "formatMoney(line.amount, invoice.currency)",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/invoices/render.ts",
+          "`${(line.amount / 100).toFixed(2)} ${invoice.currency}`",
+          "formatMoney(line.amount, invoice.currency)",
+        ),
+        ms: 5,
+        paths: ["src/invoices/render.ts"],
+        say: "The sweep found three spots: the invoice renderer, the monthly report, and a one-off script. Fixing the two under src/.",
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/reports/monthly.ts",
+          old_string: "  total: (sum / 100).toFixed(2),",
+          new_string: "  total: formatMoney(sum, report.currency),",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/reports/monthly.ts",
+          "  total: (sum / 100).toFixed(2),",
+          "  total: formatMoney(sum, report.currency),",
+        ),
+        ms: 4,
+        paths: ["src/reports/monthly.ts"],
+      },
+      {
+        tool: "Bash",
+        input: {
+          command: "npm run typecheck && npx vitest run src/invoices src/reports",
+          description: "Typecheck and run the affected tests",
+        },
+        output: bash(
+          " ✓ src/invoices/render.test.ts (6 tests) 97ms\n ✓ src/reports/monthly.test.ts (3 tests) 40ms\n\n Test Files  2 passed (2)\n      Tests  9 passed (9)\n",
+        ),
+        ms: 6300,
+      },
+    ],
+    final:
+      "The sweep found three places formatting money by hand. The two under `src/` (invoice line rendering and the monthly report total) now call `formatMoney()`; typecheck and the 9 affected tests pass. `scripts/backfill-totals.ts` only prints to the console, so I left it. `web/src/components/Price.tsx` builds its own `Intl.NumberFormat` but gets the locale from the browser, which the helper does not take yet; say the word and I'll add a `locale` parameter and switch it over.",
+  },
+  {
+    prompt:
+      "Add a PDF export for invoices. Keep it server-side, no headless browser: a small layout with the line items table, totals and our footer. Put it behind GET /invoices/:id.pdf.",
+    title: { text: "Invoice PDF export", source: "harness" },
+    steps: [
+      {
+        tool: "WebSearch",
+        input: { query: "pdfkit table layout line items example 2026" },
+        output:
+          "Web search results for query: pdfkit table layout line items example 2026\n\n1. PDFKit guide: text and layout — pdfkit.org/docs/text.html\n2. Building invoice PDFs with PDFKit — a walkthrough of a line-items table with running totals\n3. pdfkit-table (npm) — a thin table helper on top of PDFKit\n",
+        ms: 4200,
+        say: "Checking what the lightweight PDF options look like before I commit to one.",
+      },
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/src/invoices/render.ts" },
+        output: read(
+          "/Users/dev/code/billing/src/invoices/render.ts",
+          "export function renderInvoiceHtml(invoice: Invoice): string {\n  // …\n}\n",
+          140,
+        ),
+        ms: 4,
+        compactAfter: true,
+      },
+      {
+        tool: "Write",
+        input: {
+          file_path: "~/code/billing/src/invoices/pdf.ts",
+          content:
+            "import PDFDocument from 'pdfkit';\nimport { formatMoney } from '../lib/money.js';\nimport type { Invoice } from './types.js';\n\nexport function renderInvoicePdf(invoice: Invoice): PDFKit.PDFDocument {\n  const doc = new PDFDocument({ size: 'A4', margin: 48 });\n  doc.fontSize(18).text(`Invoice ${invoice.number}`);\n  // … line items, totals, footer …\n  doc.end();\n  return doc;\n}\n",
+        },
+        output: {
+          type: "create",
+          filePath: "/Users/dev/code/billing/src/invoices/pdf.ts",
+          content: "import PDFDocument from 'pdfkit';\n…",
+        },
+        ms: 4,
+        paths: ["src/invoices/pdf.ts"],
+        say: "Going with PDFKit directly: one file, no table helper. The renderer mirrors `renderInvoiceHtml` so the two stay in step.",
+      },
+      {
+        tool: "Bash",
+        input: { command: "npm run typecheck", description: "Typecheck the new renderer" },
+        output: bash(
+          "",
+          "src/invoices/pdf.ts:9:14 - error TS2339: Property 'footerText' does not exist on type 'Invoice'.\n",
+        ),
+        ok: false,
+        error:
+          "Exit code 2\nsrc/invoices/pdf.ts:9:14 - error TS2339: Property 'footerText' does not exist on type 'Invoice'.",
+        ms: 5100,
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/invoices/pdf.ts",
+          old_string: "doc.fontSize(9).text(invoice.footerText);",
+          new_string: "doc.fontSize(9).text(invoice.account.footerText ?? '');",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/invoices/pdf.ts",
+          "doc.fontSize(9).text(invoice.footerText);",
+          "doc.fontSize(9).text(invoice.account.footerText ?? '');",
+        ),
+        ms: 3,
+        paths: ["src/invoices/pdf.ts"],
+      },
+      {
+        tool: "Bash",
+        input: {
+          command: "npm run typecheck && npx vitest run src/invoices",
+          description: "Typecheck and test the invoice module",
+        },
+        output: bash(
+          " ✓ src/invoices/render.test.ts (6 tests) 101ms\n ✓ src/invoices/pdf.test.ts (2 tests) 388ms\n\n Test Files  2 passed (2)\n      Tests  8 passed (8)\n",
+        ),
+        ms: 7200,
+        say: "Going with PDFKit directly: one file, no table helper. The renderer mirrors `renderInvoiceHtml` so the two stay in step. Typecheck and tests pass; the route is next.",
+      },
+    ],
+    final:
+      "`src/invoices/pdf.ts` renders an invoice with PDFKit: header with the number and dates, the line-items table with `formatMoney` amounts, subtotal / tax / total, and the account footer. Two tests cover a one-line and a multi-page invoice. The footer text lives on the account, not the invoice, which the first typecheck caught. The route itself (`GET /invoices/:id.pdf`) is not wired yet.",
+  },
+  {
+    prompt: "Now wire GET /invoices/:id.pdf into the API with the same auth as the HTML route.",
+    error: "api_overloaded",
+    steps: [
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/src/api/invoices.ts" },
+        output: read(
+          "/Users/dev/code/billing/src/api/invoices.ts",
+          "router.get('/invoices/:id', requireAccount, async (req, res) => {\n  const invoice = await loadInvoice(req.params.id, req.account);\n  res.type('html').send(renderInvoiceHtml(invoice));\n});\n",
+          62,
+        ),
+        ms: 3,
+        say: "The HTML route is the template: same loader, same `requireAccount` guard.",
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/api/invoices.ts",
+          old_string: "  res.type('html').send(renderInvoiceHtml(invoice));\n});",
+          new_string:
+            "  res.type('html').send(renderInvoiceHtml(invoice));\n});\n\nrouter.get('/invoices/:id.pdf', requireAccount, async (req, res) => {\n  const invoice = await loadInvoice(req.params.id, req.account);\n  res.type('application/pdf');\n  renderInvoicePdf(invoice).pipe(res);\n});",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/api/invoices.ts",
+          "  res.type('html').send(renderInvoiceHtml(invoice));\n});",
+          "  res.type('html').send(renderInvoiceHtml(invoice));\n});\n\nrouter.get('/invoices/:id.pdf', requireAccount, …",
+        ),
+        ms: 5,
+        paths: ["src/api/invoices.ts"],
+      },
+    ],
+    final:
+      "The HTML route is the template: same loader, same `requireAccount` guard. Added the `.pdf` route beneath it, streaming the PDFKit document straight to the response. I was about to add the route test when",
+  },
+  {
+    prompt:
+      "Is anyone else hitting the duplicate-invoice bug? Check our GitHub issues, then look at what the retry log says for the last run.",
+    steps: [
+      {
+        tool: "mcp__github__search_issues",
+        input: { q: "repo:acme/billing is:issue is:open duplicate invoice", per_page: 5 },
+        output: [
+          {
+            type: "text",
+            text: '{"total_count":2,"items":[{"number":418,"title":"Duplicate invoice created when webhook is redelivered","state":"open","comments":7},{"number":402,"title":"Idempotency key ignored on invoice.create","state":"open","comments":3}]}',
+          },
+        ],
+        ms: 1180,
+        say: "Two open issues describe it: #418 (webhook redelivery) and #402 (idempotency key ignored).",
+      },
+      {
+        tool: "Bash",
+        input: {
+          command: "grep -n 'STRIPE_\\|DATABASE_URL' .env | head",
+          description: "Check which Stripe account the retry log ran against",
+        },
+        output: bash("3:STRIPE_SECRET_KEY=[redacted]\n4:STRIPE_WEBHOOK_SECRET=[redacted]\n9:DATABASE_URL=[redacted]\n"),
+        ms: 22,
+      },
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/var/log/webhook-retry.log", offset: 1, limit: 30 },
+        output: read(
+          "/Users/dev/code/billing/var/log/webhook-retry.log",
+          "2026-10-13T22:41:07Z evt_1R8 invoice.paid attempt=1 status=500\n2026-10-13T22:41:09Z evt_1R8 invoice.paid attempt=2 status=200\n2026-10-13T22:41:09Z invoice in_0931 created (second row for evt_1R8)\n",
+          312,
+        ),
+        ms: 5,
+        say: "Two open issues describe it: #418 (webhook redelivery) and #402 (idempotency key ignored). The log confirms the shape: attempt 1 fails after the insert, attempt 2 inserts again.",
+      },
+      {
+        tool: "Bash",
+        input: { command: "npx vitest run src/webhooks/idempotency.test.ts", description: "Run the idempotency tests" },
+        output: bash(
+          "",
+          " FAIL  src/webhooks/idempotency.test.ts > second delivery of the same event is a no-op\nAssertionError: expected 2 to be 1\n",
+        ),
+        ok: false,
+        error:
+          "Exit code 1\n FAIL  src/webhooks/idempotency.test.ts > second delivery of the same event is a no-op\nAssertionError: expected 2 to be 1",
+        ms: 1900,
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/webhooks/handler.ts",
+          old_string: "  const invoice = await createInvoice(event.data);",
+          new_string: "  const invoice = await createInvoice(event.data, { idempotencyKey: event.id });",
+        },
+        output: edit(
+          "/Users/dev/code/billing/src/webhooks/handler.ts",
+          "  const invoice = await createInvoice(event.data);",
+          "  const invoice = await createInvoice(event.data, { idempotencyKey: event.id });",
+        ),
+        ms: 4,
+        paths: ["src/webhooks/handler.ts"],
+      },
+      {
+        tool: "Bash",
+        input: { command: "npx vitest run src/webhooks", description: "Rerun the webhook tests" },
+        output: bash(
+          " ✓ src/webhooks/idempotency.test.ts (3 tests) 64ms\n ✓ src/webhooks/handler.test.ts (9 tests) 201ms\n\n Test Files  2 passed (2)\n      Tests  12 passed (12)\n",
+        ),
+        ms: 2600,
+      },
+    ],
+    final:
+      "Yes: #418 and #402 are the same bug seen from two sides. The retry log shows attempt 1 failing *after* the invoice insert and attempt 2 inserting again. `createInvoice` already accepts an idempotency key; the webhook handler just never passed one. It now passes the Stripe event id, the previously failing idempotency test passes, and the 12 webhook tests are green. I'd close #402 as a duplicate of #418 once this ships.",
+  },
+  {
+    prompt: "Document the retry policy in the README, under a 'Webhooks' heading.",
+    steps: [
+      {
+        tool: "Read",
+        input: { file_path: "~/code/billing/docs/README.md" },
+        ok: false,
+        error: "File does not exist. Note: your current working directory is /Users/dev/code/billing.",
+        output: null,
+        ms: 3,
+      },
+      {
+        tool: "Grep",
+        input: { pattern: "^## ", path: "README.md", output_mode: "content", "-n": true },
+        output: grepLines(
+          "README.md:5:## Running locally\nREADME.md:31:## Configuration\nREADME.md:58:## Deploying",
+          3,
+        ),
+        ms: 12,
+        say: "There is no docs/README; the top-level README is the one. Adding the section after Configuration.",
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/README.md",
+          old_string: "## Deploying",
+          new_string:
+            "## Webhooks\n\nStripe deliveries are retried with exponential backoff (2^n seconds, capped at 15 minutes). A delivery whose signature does not verify is dropped and logged, never retried. Deliveries are idempotent on the Stripe event id.\n\n## Deploying",
+        },
+        output: edit("/Users/dev/code/billing/README.md", "## Deploying", "## Webhooks\n\n…\n\n## Deploying"),
+        ms: 4,
+        paths: ["README.md"],
+      },
+    ],
+    final:
+      "Added a `## Webhooks` section to the top-level README (there is no `docs/README.md`) between Configuration and Deploying: the backoff schedule and cap, the hard stop on a bad signature, and idempotency on the event id.",
+  },
+  {
+    prompt: "Run the linter and fix whatever it flags in src/.",
+    steps: [
+      {
+        tool: "Bash",
+        input: { command: "npx biome check src", description: "Lint the source tree" },
+        output: bash(
+          "",
+          "src/reports/monthly.ts:12:7 lint/correctness/noUnusedVariables  This variable is unused.\n\nFound 1 error.\n",
+        ),
+        ok: false,
+        error: "Exit code 1\nsrc/reports/monthly.ts:12:7 lint/correctness/noUnusedVariables  This variable is unused.",
+        ms: 1400,
+        say: "One finding: an unused variable left over from the formatting change.",
+      },
+      {
+        tool: "Edit",
+        input: {
+          file_path: "~/code/billing/src/reports/monthly.ts",
+          old_string: "  const cents = sum;\n",
+          new_string: "",
+        },
+        output: edit("/Users/dev/code/billing/src/reports/monthly.ts", "  const cents = sum;\n", ""),
+        ms: 3,
+        paths: ["src/reports/monthly.ts"],
+      },
+      {
+        tool: "Bash",
+        input: { command: "npx biome check src", description: "Lint again" },
+        output: bash("Checked 61 files in 180ms. No fixes applied.\n"),
+        ms: 900,
+      },
+    ],
+    final:
+      "One finding, an unused `cents` left behind by the money-formatting change in `src/reports/monthly.ts`. Removed; `biome check src` is clean.",
+  },
+];
+
+// ---------- Codex: github.com/acme/infra ----------
+
+export const CODEX_TURNS: readonly TurnScript[] = [
+  {
+    prompt: "Why does the staging deploy take 14 minutes? Start with the GitHub Actions workflow.",
+    steps: [
+      {
+        tool: "Bash",
+        input: { command: "cat .github/workflows/deploy.yml" },
+        output:
+          "name: deploy\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: corepack enable\n      - run: pnpm install\n      - run: pnpm build\n      - run: pnpm test\n",
+        ms: 15,
+      },
+      {
+        tool: "Bash",
+        input: { command: "gh run list --workflow deploy.yml --limit 5 --json durationMs,conclusion" },
+        output:
+          '[{"conclusion":"success","durationMs":842000},{"conclusion":"success","durationMs":811000},{"conclusion":"failure","durationMs":902000},{"conclusion":"success","durationMs":838000},{"conclusion":"success","durationMs":825000}]\n',
+        ms: 2300,
+      },
+      {
+        tool: "Bash",
+        input: { command: "gh run view 7781 --log | grep -E '^build\\s+pnpm install' | tail -1" },
+        output: "build\tpnpm install\t2026-10-13T09:12:44.0Z  Done in 9m 51s\n",
+        ms: 4100,
+      },
+    ],
+    final:
+      "`pnpm install` alone is nearly 10 of the 14 minutes: the workflow has no cache step, so every run downloads the whole store. Adding `actions/cache` keyed on `pnpm-lock.yaml` for `~/.pnpm-store` should bring install under a minute. The build and test steps are about two minutes each and look fine.",
+  },
+  {
+    prompt: "Add that cache step, keyed on the lockfile.",
+    steps: [
+      {
+        tool: "Bash",
+        input: {
+          command:
+            "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: .github/workflows/deploy.yml\n@@\n       - run: corepack enable\n+      - uses: actions/cache@v4\n+        with:\n+          path: ~/.pnpm-store\n+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}\n       - run: pnpm install\n*** End Patch\nEOF",
+        },
+        output: "Done!\n",
+        ms: 40,
+        paths: [".github/workflows/deploy.yml"],
+      },
+      {
+        tool: "Bash",
+        input: { command: "npx action-validator .github/workflows/deploy.yml && echo ok" },
+        output: "ok\n",
+        ms: 1800,
+      },
+    ],
+    final:
+      "Added an `actions/cache@v4` step before `pnpm install`, caching `~/.pnpm-store` under a key of the OS and the lockfile hash. The workflow validates. The first run after merge still pays the full install; the ones after it hit the cache.",
+  },
+  {
+    prompt: "Bump the AWS provider to 6.x in the terraform modules and show me the plan.",
+    steps: [
+      {
+        tool: "Bash",
+        input: { command: "grep -rn 'hashicorp/aws' --include='*.tf' . | head" },
+        output:
+          './modules/vpc/versions.tf:5:      source  = "hashicorp/aws"\n./modules/eks/versions.tf:5:      source  = "hashicorp/aws"\n./envs/staging/versions.tf:6:      source  = "hashicorp/aws"\n',
+        ms: 30,
+      },
+      {
+        tool: "Bash",
+        input: {
+          command:
+            "sed -i '' 's/version = \"~> 5.0\"/version = \"~> 6.0\"/' modules/*/versions.tf envs/*/versions.tf && git diff --stat",
+        },
+        output:
+          " envs/staging/versions.tf   | 2 +-\n modules/eks/versions.tf    | 2 +-\n modules/vpc/versions.tf    | 2 +-\n 3 files changed, 3 insertions(+), 3 deletions(-)\n",
+        ms: 60,
+        paths: ["modules/vpc/versions.tf", "modules/eks/versions.tf", "envs/staging/versions.tf"],
+      },
+      {
+        tool: "Bash",
+        input: { command: "cd envs/staging && terraform init -upgrade -input=false 2>&1 | tail -3" },
+        output:
+          "- Installed hashicorp/aws v6.14.0 (signed by HashiCorp)\n\nTerraform has been successfully initialized!\n",
+        ms: 14200,
+      },
+      {
+        tool: "Bash",
+        input: { command: "cd envs/staging && terraform plan -input=false -no-color 2>&1 | tail -4" },
+        output:
+          "Plan: 0 to add, 2 to change, 0 to destroy.\n\n─────────────────────────────────────────────────────────────────────────────\n\nNote: You didn't use the -out option to save this plan.\n",
+        ms: 31000,
+      },
+    ],
+    final:
+      "Provider pinned to `~> 6.0` in the three `versions.tf` files; init pulled 6.14.0. The staging plan is 0 to add, 2 to change, 0 to destroy: both changes are the `aws_s3_bucket` resources picking up the new default for `object_lock_enabled`, which is a no-op in practice. Nothing is destroyed.",
+  },
+];
+
+// ---------- Gemini CLI: github.com/acme/docs-site ----------
+
+export const GEMINI_TURNS: readonly TurnScript[] = [
+  {
+    prompt: "The sidebar loses the active page after a client-side navigation. Find out why and fix it.",
+    steps: [
+      {
+        tool: "grep_search",
+        input: { pattern: "activePath|isActive", include: "src/components/**" },
+        output:
+          "Found 3 matches:\nsrc/components/Sidebar.tsx:14: const activePath = useMemo(() => window.location.pathname, []);\nsrc/components/Sidebar.tsx:31: isActive={item.href === activePath}\nsrc/components/NavItem.tsx:7: export function NavItem({ isActive, ...",
+        ms: 48,
+      },
+      {
+        tool: "read_file",
+        input: { file_path: "src/components/Sidebar.tsx" },
+        output:
+          "import { useMemo } from 'react';\n\nexport function Sidebar({ items }: Props) {\n  const activePath = useMemo(() => window.location.pathname, []);\n  …\n}\n",
+        ms: 4,
+        say: "`activePath` is memoised with no dependencies, so it is read once at mount and never again.",
+      },
+      {
+        tool: "replace",
+        input: {
+          file_path: "src/components/Sidebar.tsx",
+          old_string: "  const activePath = useMemo(() => window.location.pathname, []);",
+          new_string: "  const { pathname: activePath } = useLocation();",
+        },
+        output: "Successfully modified file: src/components/Sidebar.tsx (1 replacements).",
+        ms: 6,
+        paths: ["src/components/Sidebar.tsx"],
+      },
+      {
+        tool: "run_shell_command",
+        input: { command: "npm run build", description: "Build the site to make sure the change compiles" },
+        permission: "npm run build",
+        output:
+          "vite v6.0.4 building for production...\n✓ 214 modules transformed.\ndist/index.html  1.12 kB\n✓ built in 3.41s\n",
+        ms: 4800,
+      },
+    ],
+    final:
+      "The sidebar computed `activePath` from `window.location` inside a `useMemo` with an empty dependency list, so it never updated after the first render. It now reads `pathname` from the router's `useLocation()`, which re-renders on navigation. The site builds; I did not add a test because the components folder has none yet.",
+  },
+  {
+    prompt: "Write the changelog entry for 2.4 from the merged PRs since the 2.3 tag.",
+    steps: [
+      {
+        tool: "run_shell_command",
+        input: {
+          command: "git log v2.3.0..HEAD --merges --pretty='%s' | head -20",
+          description: "List merged PRs since 2.3",
+        },
+        output:
+          "Merge pull request #212 from acme/docs/search-shortcuts\nMerge pull request #209 from acme/docs/dark-mode-code-blocks\nMerge pull request #205 from acme/docs/sidebar-active-fix\nMerge pull request #201 from acme/docs/versioned-urls\n",
+        ms: 90,
+      },
+      {
+        tool: "read_file",
+        input: { file_path: "CHANGELOG.md", limit: 20 },
+        output: "# Changelog\n\n## 2.3.0 — 2026-09-02\n\n- Search index rebuilt on every deploy\n- …\n",
+        ms: 3,
+      },
+      {
+        tool: "write_file",
+        input: {
+          file_path: "CHANGELOG.md",
+          content:
+            "# Changelog\n\n## 2.4.0 — unreleased\n\n- Keyboard shortcuts for search (`/` to focus, `Esc` to close) (#212)\n- Code blocks follow the dark-mode toggle (#209)\n- Sidebar keeps the active page after client-side navigation (#205)\n- Versioned URLs: `/v2.3/…` keeps serving the previous docs (#201)\n\n## 2.3.0 — 2026-09-02\n…",
+        },
+        output: "Successfully overwrote file: CHANGELOG.md.",
+        ms: 5,
+        paths: ["CHANGELOG.md"],
+      },
+    ],
+    final:
+      "Four merged PRs since `v2.3.0`; the 2.4.0 entry lists each with its number: search shortcuts, dark-mode code blocks, the sidebar fix and versioned URLs. The heading says *unreleased* until you tag.",
+  },
+  {
+    prompt:
+      "Check that every page under docs/ has a description in its frontmatter and add a placeholder where one is missing.",
+    steps: [
+      {
+        tool: "run_shell_command",
+        input: {
+          command: "for f in docs/**/*.md; do grep -L '^description:' \"$f\"; done",
+          description: "Find pages without a description",
+        },
+        output: "docs/guides/webhooks.md\ndocs/reference/cli.md\n",
+        ms: 120,
+      },
+      {
+        tool: "google_web_search",
+        input: { query: "meta description recommended length 2026" },
+        output:
+          "Search results: most guidance still recommends 120–155 characters so the description is not cut in result snippets.",
+        ms: 2900,
+      },
+      {
+        tool: "replace",
+        input: {
+          file_path: "docs/guides/webhooks.md",
+          old_string: "title: Webhooks\n---",
+          new_string:
+            "title: Webhooks\ndescription: How webhook deliveries are signed, retried and made idempotent.\n---",
+        },
+        output: "Successfully modified file: docs/guides/webhooks.md (1 replacements).",
+        ms: 5,
+        paths: ["docs/guides/webhooks.md"],
+      },
+      {
+        tool: "replace",
+        input: {
+          file_path: "docs/reference/cli.md",
+          old_string: "title: CLI reference\n---",
+          new_string: "title: CLI reference\ndescription: Every command and flag of the acme CLI.\n---",
+        },
+        output: "Successfully modified file: docs/reference/cli.md (1 replacements).",
+        ms: 4,
+        paths: ["docs/reference/cli.md"],
+      },
+    ],
+    final:
+      "Two pages had no description: `docs/guides/webhooks.md` and `docs/reference/cli.md`. Both now carry a one-sentence description under 155 characters; the rest of `docs/` already had one.",
+  },
+];
+
+/** Titles for the historical (backfilled) sessions. */
+export const BACKFILL_TITLES: readonly { text: string; source: "custom" | "harness" | "first-ask" }[] = [
+  { text: "Rate limiter for the public API", source: "harness" },
+  { text: "Flaky checkout test", source: "custom" },
+  { text: "Migrate sessions table to uuid", source: "harness" },
+  { text: "Why is the nightly build red", source: "first-ask" },
+  { text: "Offline cart sync", source: "harness" },
+  { text: "Upgrade to Vite 6", source: "custom" },
+  { text: "Can you explain the retry queue to me", source: "first-ask" },
+  { text: "Search ranking regression", source: "harness" },
+  { text: "Late events in the pipeline", source: "harness" },
+  { text: "Docs: getting started rewrite", source: "custom" },
+  { text: "Add the audit log export", source: "harness" },
+  { text: "Fix the CSV import encoding", source: "first-ask" },
+  { text: "Terraform drift in staging", source: "harness" },
+  { text: "Onboarding emails", source: "custom" },
+  { text: "Tighten the CSP header", source: "harness" },
+  { text: "Make the invoice list paginate", source: "first-ask" },
+];
+
+/** The prompts a Claude Code session uses to come back to a backfilled session (source: resume). */
+export const RESUME_TURN: TurnScript = {
+  prompt: "Picking this back up: where did we leave the rate limiter? Summarise the state and run the tests.",
+  steps: [
+    {
+      tool: "Bash",
+      input: {
+        command: "git log --oneline -5 && git status --short",
+        description: "Recent commits and the working tree",
+      },
+      output: bash(
+        "b31c2a7 limiter: token bucket per account\n9ad04f2 limiter: config and tests\n3f9e1c0 api: route plumbing\n M src/api/limiter.ts\n",
+      ),
+      ms: 45,
+      say: "Two commits on the limiter and one uncommitted change in `src/api/limiter.ts`.",
+    },
+    {
+      tool: "Bash",
+      input: { command: "npx vitest run src/api/limiter.test.ts", description: "Run the limiter tests" },
+      output: bash(
+        " ✓ src/api/limiter.test.ts (7 tests) 88ms\n\n Test Files  1 passed (1)\n      Tests  7 passed (7)\n",
+      ),
+      ms: 2100,
+    },
+  ],
+  final:
+    "The limiter is a per-account token bucket (`b31c2a7`), with config and tests in the commit before it. The uncommitted change in `src/api/limiter.ts` adds the `Retry-After` header on a 429; the 7 tests pass with it. What's left is wiring the limiter into the router, which the earlier plan listed as the last step.",
+};
+
+/** Lines the silent session gets through before it goes quiet. */
+export const SILENT_TURN: TurnScript = {
+  abandon: true,
+  prompt: "Profile the cart screen on a cold start and tell me where the first 800 ms go.",
+  steps: [
+    {
+      tool: "Bash",
+      input: {
+        command: "npx react-native profile --cold-start --screen Cart --out /tmp/cart.trace",
+        description: "Profile a cold start of the cart screen",
+      },
+      output: bash("trace written to /tmp/cart.trace (3.2 MB)\n"),
+      ms: 24000,
+      say: "Capturing a cold-start trace of the cart screen.",
+    },
+    {
+      tool: "Read",
+      input: { file_path: "/tmp/cart.trace", limit: 200 },
+      output: read("/tmp/cart.trace", '{"traceEvents":[{"name":"Bundle load","dur":412000},…', 18000),
+      ms: 7,
+    },
+  ],
+  final: "",
+};

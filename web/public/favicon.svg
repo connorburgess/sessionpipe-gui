@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>sessionpipe</title>
+  <rect width="64" height="64" rx="14" fill="#1c2030"/>
+  <rect x="14" y="30" width="22" height="5" rx="2.5" fill="#9cc3dd"/>
+  <rect x="14" y="41" width="30" height="5" rx="2.5" fill="#6f8aa3"/>
+  <circle cx="46" cy="20" r="7" fill="#f2b05a"/>
+</svg>

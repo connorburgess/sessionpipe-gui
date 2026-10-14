@@ -1,9 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: control. STUB — replace wholesale, keeping this exact contract (app.ts
-// and the UI layer code against it). Everything of spec/CONTROL.md and HTTP.md §3 on
-// the receiver side lives under server/control/.
-import type { ControlActivity, MachineControl, StreamMessage } from "../../shared/api.js";
+// Owned by: control. The receiver side of spec/CONTROL.md and HTTP.md §3: pairing, the
+// per-machine long-poll, acks, off, the queue with redelivery and the `taken` pause,
+// the UI's routes under /api/ui/control/*, and the loopback test door the conformance
+// runner needs. `createControl(deps)` is the contract app.ts and the UI code against.
+//
+//   state.ts     machines, pairings, queues; persisted under <stateDir>/control/
+//   routes.ts    the machine wire (pair, hello, poll, ack, off)
+//   ui.ts        /api/ui/control/* (README.md documents each route)
+//   testdoor.ts  {control}/_test/* when deps.testDoor, loopback only
+//   parse.ts     body parsers; testkeys.ts  a test-only authenticator
+import path from "node:path";
+import { type ControlActivity, type MachineControl, ROUTES, type StreamMessage } from "../../shared/api.js";
 import type { Ctx, Router } from "../http/router.js";
+import { registerMachineRoutes } from "./routes.js";
+import { ControlState, toActivity, WAIT_MAX_S } from "./state.js";
+import { registerTestDoor } from "./testdoor.js";
+import { registerUiRoutes } from "./ui.js";
 
 export interface ControlDeps {
   stateDir: string;
@@ -28,21 +40,48 @@ export interface Control {
   activity(limit?: number): ControlActivity[];
   subscribe(l: (m: StreamMessage) => void): () => void;
   /** The `control` member of the well-known file (HTTP.md §1). */
-  wellKnown(): { wait_max_s: number; open_pairing?: boolean; signing: { rp_id: string; algs: number[] } };
+  wellKnown(): {
+    wait_max_s: number;
+    open_pairing?: boolean;
+    /** MCP servers a session answering our message may use unasked (CONTROL.md §6); none here. */
+    session_tools?: string[];
+    signing: { rp_id: string; algs: number[] };
+  };
   close(): void;
 }
 
 export function createControl(deps: ControlDeps): Control {
+  const state = new ControlState(path.join(deps.stateDir, "control"));
   const listeners = new Set<(m: StreamMessage) => void>();
+  state.onMessage = (row) => {
+    const message = toActivity(row);
+    for (const l of listeners)
+      try {
+        l({ kind: "control", message });
+      } catch {}
+  };
   return {
-    register() {},
-    machines: () => new Map(),
-    activity: () => [],
+    register(router) {
+      registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control });
+      registerUiRoutes(router, { state, rpId: deps.rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control });
+      if (deps.testDoor) registerTestDoor(router, { state, rpId: deps.rpId, base: ROUTES.control });
+    },
+    machines() {
+      const out = new Map<string, MachineControl>();
+      for (const m of state.allMachines()) if (m.tokenHash || m.keys.length) out.set(m.name, state.machineControl(m));
+      return out;
+    },
+    activity: (limit) => state.activity(limit),
     subscribe(l) {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    wellKnown: () => ({ wait_max_s: 25, open_pairing: true, signing: { rp_id: deps.rpId, algs: [-7, -257] } }),
-    close() {},
+    wellKnown: () => ({
+      wait_max_s: WAIT_MAX_S,
+      open_pairing: true,
+      session_tools: [],
+      signing: { rp_id: deps.rpId, algs: [-7, -257] },
+    }),
+    close: () => state.close(),
   };
 }

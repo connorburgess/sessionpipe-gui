@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+// Everything that crosses the wire goes through a Transport: the real one speaks SSE and
+// fetch to our own origin, the mock one (web/src/mock) simulates a server in the page.
+import type { FeedPage, FeedQuery, Info, SessionDetail, StreamMessage } from "@shared/api";
+import { ROUTES } from "@shared/api";
+
+export interface StreamHandlers {
+  onMessage(m: StreamMessage): void;
+  onOpen(): void;
+  /** Called on each failed attempt with the delay before the next one. */
+  onError(retryInMs: number): void;
+}
+
+export interface Transport {
+  /** Opens the stream and keeps it open with backoff until the returned function is called. */
+  openStream(h: StreamHandlers): () => void;
+  info(): Promise<Info>;
+  session(harness: string, id: string, q: { after?: number; limit?: number }): Promise<SessionDetail>;
+  feed(q: FeedQuery): Promise<FeedPage>;
+  forget(harness: string, id: string): Promise<void>;
+  rotateToken(): Promise<{ sinkToken: string }>;
+  demo(on: boolean): Promise<{ on: boolean }>;
+  /** URL for the QR image, or null when there is none (mock). */
+  qrUrl(): string | null;
+}
+
+export const STREAM_KINDS = ["snapshot", "event", "session", "forgotten", "machine", "stats", "control"] as const;
+
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string; reason?: string; message?: string };
+      msg = body.message ?? body.error ?? body.reason ?? msg;
+    } catch {
+      // no body
+    }
+    throw new HttpError(res.status, msg);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+const get = <T>(url: string) => fetch(url, { headers: { accept: "application/json" } }).then((r) => json<T>(r));
+const post = <T>(url: string, body?: unknown) =>
+  fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).then((r) => json<T>(r));
+
+const enc = encodeURIComponent;
+
+export function createHttpTransport(): Transport {
+  return {
+    openStream(h) {
+      let es: EventSource | null = null;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let attempt = 0;
+      let closed = false;
+      const open = () => {
+        if (closed) return;
+        es = new EventSource(ROUTES.ui.stream);
+        for (const kind of STREAM_KINDS) {
+          es.addEventListener(kind, (ev) => {
+            try {
+              h.onMessage(JSON.parse((ev as MessageEvent).data) as StreamMessage);
+            } catch (err) {
+              console.warn("bad stream frame", kind, err);
+            }
+          });
+        }
+        es.onopen = () => {
+          attempt = 0;
+          h.onOpen();
+        };
+        es.onerror = () => {
+          // A new EventSource always starts with a fresh snapshot, so we re-sync by
+          // reopening instead of trusting the browser's own retry.
+          es?.close();
+          es = null;
+          const delay = Math.min(15_000, 1000 * 2 ** attempt) * (0.8 + Math.random() * 0.4);
+          attempt = Math.min(attempt + 1, 5);
+          h.onError(delay);
+          timer = setTimeout(open, delay);
+        };
+      };
+      open();
+      const onVisible = () => {
+        if (document.visibilityState === "visible" && !es && timer) {
+          clearTimeout(timer);
+          open();
+        }
+      };
+      document.addEventListener("visibilitychange", onVisible);
+      return () => {
+        closed = true;
+        document.removeEventListener("visibilitychange", onVisible);
+        if (timer) clearTimeout(timer);
+        es?.close();
+      };
+    },
+    info: () => get<Info>(ROUTES.ui.info),
+    session: (harness, id, q) => {
+      const p = new URLSearchParams();
+      if (q.after !== undefined) p.set("after", String(q.after));
+      if (q.limit !== undefined) p.set("limit", String(q.limit));
+      const qs = p.toString();
+      return get<SessionDetail>(`${ROUTES.ui.session}/${enc(harness)}/${enc(id)}${qs ? `?${qs}` : ""}`);
+    },
+    feed: (q) => {
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") p.set(k, String(v));
+      const qs = p.toString();
+      return get<FeedPage>(`${ROUTES.ui.feed}${qs ? `?${qs}` : ""}`);
+    },
+    forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),
+    rotateToken: () => post<{ sinkToken: string }>(ROUTES.ui.rotateToken),
+    demo: (on) => post<{ on: boolean }>(ROUTES.ui.demo, { on }),
+    qrUrl: () => ROUTES.ui.qr,
+  };
+}
