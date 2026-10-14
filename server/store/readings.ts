@@ -118,6 +118,14 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
 }
 
 /** Apply one accepted event to its session record. `now` is the arrival time. */
+/** Whether a permission attention came from the harness's permission hook (the one a
+ *  control daemon registers and can answer): Claude Code / Codex `PermissionRequest`,
+ *  or the client's `perm-` id. A `Notification` about the same prompt is not. */
+export function answerableAttention(ev: ProtocolEvent): boolean {
+  const id = String((ev.data as Record<string, unknown>).attention_id ?? "");
+  return ev.harness.event === "PermissionRequest" || id.startsWith("perm-");
+}
+
 export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: string, source: EventSource): void {
   const s = rec.summary;
   const at = clampTime(ev.time, arrivedAt);
@@ -154,8 +162,16 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
   }
   s.backfilled = !rec.live;
 
+  // A notification *about* a permission prompt (Claude Code's Notification hook,
+  // `notif-…`, no tool, no message) arriving while the prompt itself is open: the
+  // same prompt, not a new one. It neither closes nor duplicates the answerable one.
+  const twin =
+    ev.type === "attention.needed" &&
+    d.kind === "permission" &&
+    !answerableAttention(ev) &&
+    s.openAttentions.some((x) => x.kind === "permission" && x.answerable);
   // CONTROL.md §7: the session's next hook event closes whatever attention was open.
-  if (!NOT_HOOK.has(ev.type) && ev.type !== "attention.cleared" && s.openAttentions.length) {
+  if (!twin && !NOT_HOOK.has(ev.type) && ev.type !== "attention.cleared" && s.openAttentions.length) {
     if (
       ev.type !== "attention.needed" ||
       str(d.attention_id) !== s.openAttentions[s.openAttentions.length - 1]?.attentionId
@@ -243,6 +259,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       const message = str(d.message);
       if (tool) a.tool = tool;
       if (message) a.message = message.slice(0, 200);
+      if (kind === "permission" && answerableAttention(ev)) a.answerable = true;
+      if (twin) break; // folded into the open, answerable prompt
       s.openAttentions = [...s.openAttentions.filter((x) => x.attentionId !== attentionId), a];
       s.counts.attentions++;
       break;

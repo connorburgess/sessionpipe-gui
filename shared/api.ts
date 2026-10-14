@@ -73,6 +73,10 @@ export interface Attention {
   tool?: string;
   message?: string;
   at: string;
+  /** True when a control `permission.answer` can reach this prompt: it came from the
+   *  harness's permission hook (the one the daemon registers), not from a notification
+   *  about it. Claude Code raises both for one prompt; only the first is answerable. */
+  answerable?: boolean;
 }
 
 /** `${harness}:${id}` — the key everything in the UI API uses for a session. */
@@ -303,6 +307,52 @@ export interface TlsInfo {
   expiresAt: string;
 }
 
+// ---------- setup (the first-run page; GET /api/ui/setup/status, this machine only) ----------
+
+/** Live facts the /setup page polls every two seconds. Nothing here is cached. */
+export interface SetupStatus {
+  sessionpipe: {
+    /** A `sessionpipe` CLI on the PATH or at ~/.local/bin. */
+    installed: boolean;
+    path?: string;
+    version?: string;
+    outbox: { path: string; present: boolean; sessions: number };
+  };
+  events: { total: number; lastAt?: string };
+  tls: {
+    on: boolean;
+    hostname: string;
+    httpsUrl: string;
+    caFingerprint?: string;
+    /** macOS: the system trusts the CA for SSL (`security verify-cert`); null where we cannot tell. */
+    caTrusted: boolean | null;
+    opensslPresent: boolean;
+    /** Whether this machine resolves its own `.local` name (dns.lookup, 1.5 s). */
+    mdns: { resolves: boolean; address?: string };
+  };
+  daemon: {
+    /** The daemon's control socket exists and answers a status request. */
+    running: boolean;
+    /** What the daemon calls this machine, when it answered. */
+    name?: string;
+    /** Control has a paired machine with this machine's name. */
+    pairedHere: boolean;
+    online: boolean;
+    machineId?: string;
+    /** A pairing for this machine waiting for approval (from control, or from the child `control pair` started here). */
+    pendingPairing?: { code: string; check: string; expiresAt: string };
+    /** The `sessionpipe control pair` child this server started, if any. */
+    pairing: { active: boolean; exitCode?: number | null; error?: string };
+    /** Folders this machine's sessions ran in, for the pairing's allowlist (`~` expanded). */
+    suggestedFolders: string[];
+  };
+  viewers: { phones: number };
+  /** Control messages that reached `delivered` (step 5 turns green after the first one). */
+  tried: { delivered: number };
+  platform: NodeJS.Platform | string;
+  uiKey: string;
+}
+
 // ---------- control (phase 2; shapes fixed now so both sides can plan) ----------
 
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add";
@@ -361,6 +411,9 @@ export const ROUTES = {
     viewers: "/api/ui/viewers",
     /** GET → ColorThemesResponse: the JSON files under <stateDir>/color-themes. */
     colorThemes: "/api/ui/color-themes",
+    /** First-run setup, this machine only (loopback or one of its own addresses; 403 otherwise):
+     *  GET /status → SetupStatus; POST /tls/on, /tls/trust, /pair, /pair/cancel. */
+    setup: "/api/ui/setup",
   },
 } as const;
 

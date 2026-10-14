@@ -513,3 +513,90 @@ describe("tier upgrade", () => {
     await again.close();
   });
 });
+
+describe("permission twins", () => {
+  it("keeps the answerable prompt open when the notification about it arrives", async () => {
+    const { Store } = await import("./store.js");
+    const { mkdtempSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const store = new Store(mkdtempSync(path.join(os.tmpdir(), "spgui-twin-")), {
+      tickMs: 3600_000,
+      statsMs: 3600_000,
+    });
+    const base = { protocol: 1 as const, tier: 3 as const, privacy: { rulesets: ["secrets@1"], pii: false } };
+    const sess = (seq: number) => ({ id: "tw-1", seq, machine: "m1" });
+    store.ingest(
+      [
+        {
+          ...base,
+          id: "01K00000000000000000000011",
+          type: "session.started",
+          time: "2026-10-14T23:17:00.000Z",
+          harness: { name: "claude-code", event: "SessionStart" },
+          session: sess(0),
+          data: { source: "startup" },
+        },
+        {
+          ...base,
+          id: "01K00000000000000000000012",
+          type: "turn.started",
+          time: "2026-10-14T23:17:01.000Z",
+          harness: { name: "claude-code", event: "UserPromptSubmit" },
+          session: sess(1),
+          data: {},
+        },
+        {
+          ...base,
+          id: "01K00000000000000000000013",
+          type: "attention.needed",
+          time: "2026-10-14T23:17:02.000Z",
+          harness: { name: "claude-code", event: "PermissionRequest" },
+          session: sess(2),
+          data: { attention_id: "perm-273e341ed1d104b1", kind: "permission", tool: "Bash", message: "Bash cat > x" },
+        },
+        {
+          ...base,
+          id: "01K00000000000000000000014",
+          type: "attention.needed",
+          time: "2026-10-14T23:17:08.000Z",
+          harness: { name: "claude-code", event: "Notification" },
+          session: sess(3),
+          data: { attention_id: "notif-1792019828511", kind: "permission" },
+        },
+      ],
+      "outbox",
+    );
+    const s = store.session("claude-code:tw-1")!;
+    expect(s.state).toBe("needs_you");
+    expect(s.openAttentions).toHaveLength(1);
+    expect(s.openAttentions[0]).toMatchObject({ attentionId: "perm-273e341ed1d104b1", answerable: true, tool: "Bash" });
+    // A notification with no prompt open stays an (unanswerable) attention of its own.
+    store.ingest(
+      [
+        {
+          ...base,
+          id: "01K00000000000000000000015",
+          type: "tool.started",
+          time: "2026-10-14T23:17:20.000Z",
+          harness: { name: "claude-code", event: "PreToolUse" },
+          session: sess(4),
+          data: { tool: "Bash" },
+        },
+        {
+          ...base,
+          id: "01K00000000000000000000016",
+          type: "attention.needed",
+          time: "2026-10-14T23:17:30.000Z",
+          harness: { name: "claude-code", event: "Notification" },
+          session: sess(5),
+          data: { attention_id: "notif-2", kind: "permission" },
+        },
+      ],
+      "outbox",
+    );
+    expect(store.session("claude-code:tw-1")!.openAttentions).toMatchObject([{ attentionId: "notif-2" }]);
+    expect(store.session("claude-code:tw-1")!.openAttentions[0]!.answerable).toBeUndefined();
+    await store.close();
+  });
+});
