@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // React bindings for the store. One Store per page load, chosen in main.tsx (real or mock).
-import type { MachineSummary, SessionKey, SessionState, SessionSummary } from "@shared/api";
+import type { Attention, MachineSummary, SessionKey, SessionState, SessionSummary } from "@shared/api";
 import { SESSION_STATES } from "@shared/api";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+// The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
+import { answerable } from "../components/ControlStrip";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -67,4 +69,33 @@ export function useSessionTree(): {
 export function useMachines(): MachineSummary[] {
   const { machines } = useAppState();
   return useMemo(() => [...machines.values()].sort((a, b) => a.name.localeCompare(b.name)), [machines]);
+}
+
+// ----- attentions -----
+
+/** One open attention with the session it belongs to (the inbox's row). */
+export interface OpenAttention {
+  session: SessionSummary;
+  attention: Attention;
+  /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`). */
+  answerable: boolean;
+}
+
+/** Every open attention across every session, newest first. */
+export function openAttentions(sessions: ReadonlyMap<SessionKey, SessionSummary>): OpenAttention[] {
+  const out: OpenAttention[] = [];
+  for (const session of sessions.values())
+    for (const attention of session.openAttentions)
+      out.push({ session, attention, answerable: attention.kind === "permission" && answerable(attention) });
+  return out.sort((a, b) => b.attention.at.localeCompare(a.attention.at));
+}
+
+export function useOpenAttentions(): OpenAttention[] {
+  const { sessions } = useAppState();
+  return useMemo(() => openAttentions(sessions), [sessions]);
+}
+
+/** Open attentions a person can answer from here: the inbox badge and the title's "(n)". */
+export function useAnswerableCount(): number {
+  return useOpenAttentions().filter((r) => r.answerable).length;
 }

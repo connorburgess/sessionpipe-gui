@@ -18,6 +18,7 @@ import type { Store } from "../store/store.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
 import { cutPreview } from "./preview.js";
+import { registerReview } from "./review.js";
 import { serveStream } from "./stream.js";
 import { ViewerRegistry } from "./viewers.js";
 
@@ -143,6 +144,8 @@ export function registerUi(router: Router, deps: UiDeps): void {
       return { status: 200, json: deps.store.feed(q) };
     }),
   );
+
+  registerReview(router, deps.store, guard);
 
   router.post(
     ROUTES.ui.rotateToken,

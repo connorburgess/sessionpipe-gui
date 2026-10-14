@@ -20,6 +20,9 @@ async function boot() {
   const transport = isMockMode() ? (await import("./mock/index")).createMockTransport() : createHttpTransport();
   const store = new Store(transport);
   store.start();
+  // Install-only service worker (public/sw.js): it caches nothing. Secure contexts only,
+  // which is where "Add to Home Screen" and the app badge exist anyway.
+  if ("serviceWorker" in navigator && !isMockMode()) navigator.serviceWorker.register("/sw.js").catch(() => {});
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <StoreContext.Provider value={store}>

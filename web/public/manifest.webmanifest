@@ -1,0 +1,15 @@
+{
+  "name": "sessionpipe gui",
+  "short_name": "sessionpipe",
+  "description": "Every coding-agent session on your machines, live; answer a prompt from your phone.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbfaf7",
+  "theme_color": "#fbfaf7",
+  "icons": [
+    { "src": "/brand/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}

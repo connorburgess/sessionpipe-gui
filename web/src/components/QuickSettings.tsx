@@ -13,6 +13,7 @@ import {
 } from "../lib/colorTheme";
 import { setColorTheme, setTextSize, setTheme, TEXT_SIZES, type TextSize, type Theme, useSettings } from "../lib/theme";
 import { Segmented } from "./bits";
+import { NotifyToggle } from "./NotifyToggle";
 
 const APPEARANCE: { value: Theme; label: string }[] = [
   { value: "auto", label: "System" },
@@ -159,6 +160,10 @@ export function QuickSettings({
               label="Text size"
               options={TEXT_SIZES.map((s) => ({ value: s, label: SIZE_LABEL[s], title: `${Math.round(s * 100)} %` }))}
             />
+          </div>
+          <div className="qs-row">
+            <span className="qs-label">Notifications</span>
+            <NotifyToggle />
           </div>
           <button type="button" className="btn btn--sm btn--ghost qs-close" onClick={() => setOpen(false)} data-dismiss>
             Close

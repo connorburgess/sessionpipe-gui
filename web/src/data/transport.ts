@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Everything that crosses the wire goes through a Transport: the real one speaks SSE and
 // fetch to our own origin, the mock one (web/src/mock) simulates a server in the page.
-import type { DetailQuery, FeedPage, FeedQuery, Info, SessionDetail, StreamMessage } from "@shared/api";
+import type {
+  DetailQuery,
+  Digest,
+  DigestQuery,
+  FeedPage,
+  FeedQuery,
+  FilesPage,
+  FilesQuery,
+  Info,
+  SearchPage,
+  SearchQuery,
+  SessionDetail,
+  StreamMessage,
+} from "@shared/api";
 import { ROUTES } from "@shared/api";
 
 export interface StreamHandlers {
@@ -17,6 +30,10 @@ export interface Transport {
   info(): Promise<Info>;
   session(harness: string, id: string, q: DetailQuery): Promise<SessionDetail>;
   feed(q: FeedQuery): Promise<FeedPage>;
+  /** The Review page: transcript search, files changed since a time, a day's digest. */
+  search(q: SearchQuery): Promise<SearchPage>;
+  files(q: FilesQuery): Promise<FilesPage>;
+  digest(q: DigestQuery): Promise<Digest>;
   forget(harness: string, id: string): Promise<void>;
   rotateToken(): Promise<{ sinkToken: string }>;
   demo(on: boolean): Promise<{ on: boolean }>;
@@ -68,6 +85,12 @@ const post = <T>(url: string, body?: unknown) =>
   }).then((r) => json<T>(r));
 
 const enc = encodeURIComponent;
+/** A query string from the defined, non-empty fields of a query object. */
+const params = (q: object): string => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") p.set(k, String(v));
+  return p.toString();
+};
 
 export function createHttpTransport(): Transport {
   return {
@@ -136,6 +159,9 @@ export function createHttpTransport(): Transport {
       const qs = p.toString();
       return get<FeedPage>(`${ROUTES.ui.feed}${qs ? `?${qs}` : ""}`);
     },
+    search: (q) => get<SearchPage>(`${ROUTES.ui.search}?${params(q)}`),
+    files: (q) => get<FilesPage>(`${ROUTES.ui.files}${params(q) ? `?${params(q)}` : ""}`),
+    digest: (q) => get<Digest>(`${ROUTES.ui.digest}${params(q) ? `?${params(q)}` : ""}`),
     forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),
     rotateToken: () => post<{ sinkToken: string }>(ROUTES.ui.rotateToken),
     demo: (on) => post<{ on: boolean }>(ROUTES.ui.demo, { on }),

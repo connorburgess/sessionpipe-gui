@@ -5,12 +5,14 @@ import { type CSSProperties, type MouseEvent, type ReactNode, useSyncExternalSto
 
 export type Route =
   | { name: "board" }
+  | { name: "inbox" }
   | { name: "session"; harness: string; id: string }
   | { name: "feed" }
   | { name: "machines" }
   | { name: "connect" }
   | { name: "setup" }
   | { name: "themes" }
+  | { name: "review" }
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
   | { name: "add-device" }
@@ -33,11 +35,13 @@ const current = () => location.pathname + location.search;
 export function parseRoute(pathWithSearch: string): Route {
   const path = pathWithSearch.split("?")[0] ?? "/";
   if (path === "/" || path === "") return { name: "board" };
+  if (path === "/inbox") return { name: "inbox" };
   if (path === "/feed") return { name: "feed" };
   if (path === "/machines") return { name: "machines" };
   if (path === "/connect") return { name: "connect" };
   if (path === "/setup") return { name: "setup" };
   if (path === "/themes") return { name: "themes" };
+  if (path === "/review") return { name: "review" };
   if (path === "/add-device") return { name: "add-device" };
   const t = /^\/t\/([^/]+)\/?$/.exec(path);
   if (t?.[1]) return { name: "theme", id: decodeURIComponent(t[1]) };

@@ -3,6 +3,7 @@
 // the whole app runs with `npx vite --config web/vite.config.ts` and no server. Add
 // `&empty=1` for the first-run board.
 import type { Transport } from "../data/transport";
+import { review } from "./review";
 import { World } from "./world";
 
 const latency = <T>(v: T, ms = 60): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
@@ -30,6 +31,9 @@ export function createMockTransport(): Transport {
       return latency(d, 120);
     },
     feed: (q) => latency(world.feed(q), 90),
+    search: (q) => latency(review(world).search(q), 120),
+    files: (q) => latency(review(world).files(q), 90),
+    digest: (q) => latency(review(world).digest(q), 90),
     forget: async (harness, id) => {
       await latency(undefined, 80);
       world.forget(harness, id);
