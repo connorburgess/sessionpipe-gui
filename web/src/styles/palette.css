@@ -1,0 +1,233 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The command palette (web/src/components/Palette.tsx): a quiet scrim, one 560 px dialog
+   near the top, one input, sections parted by hairlines, rows of 14 px text. Matched
+   letters are underlined with a hairline; the only colour is the amber state dot a
+   permission row carries. */
+
+.pal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in oklch, var(--bg) 55%, transparent);
+  cursor: default;
+}
+.pal {
+  position: fixed;
+  z-index: 41;
+  top: clamp(48px, 14vh, 160px);
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(70dvh, 560px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.18);
+  animation: pal-in var(--dur) var(--ease-out) both;
+}
+@keyframes pal-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pal {
+    animation: none;
+  }
+}
+@media (max-width: 839px) {
+  .pal {
+    top: 8px;
+    max-height: calc(100dvh - var(--tabbar) - env(safe-area-inset-bottom) - 16px);
+  }
+}
+
+/* ----- the input row ----- */
+
+.pal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.pal-icon {
+  flex: none;
+  color: var(--fg-4);
+}
+.pal-head input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: var(--text-md);
+}
+.pal-head input::placeholder {
+  color: var(--fg-4);
+}
+.pal-head kbd,
+.pal-to {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: 18px;
+}
+.pal-to {
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+}
+.pal-busy {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+
+/* ----- the list ----- */
+
+.pal-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pal-section {
+  padding: 10px 12px 2px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.pal-list > .pal-section:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.pal-empty {
+  padding: 12px;
+  color: var(--fg-3);
+  font-size: var(--text-md);
+}
+.pal-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 12px;
+  color: var(--fg-2);
+  cursor: default;
+}
+.pal-row[aria-selected="true"] {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.pal-row--busy {
+  opacity: 0.6;
+}
+.pal-row .dot {
+  justify-self: center;
+  width: 6px;
+  height: 6px;
+}
+.pal-glyph {
+  justify-self: center;
+  color: var(--fg-4);
+  font-size: var(--text-sm);
+}
+.pal-main {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pal-label {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+}
+.pal-label code {
+  font-size: 0.925em;
+}
+.pal-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pal-age {
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+}
+/* A hit: a hairline under the letter, the letter itself a step darker. No block. */
+.pal-row u {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--fg-3);
+  color: var(--fg);
+}
+
+/* ----- notes, confirm, footer ----- */
+
+.pal-note {
+  flex: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pal-note--err {
+  color: var(--err);
+}
+.pal-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--err);
+  font-size: var(--text-md);
+}
+.pal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: none;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+}
+.pal-foot kbd {
+  font-family: var(--font-ui);
+  font-size: inherit;
+  color: var(--fg-3);
+}
+@media (hover: none) {
+  .pal-foot {
+    display: none;
+  }
+}

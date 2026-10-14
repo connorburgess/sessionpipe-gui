@@ -6,6 +6,7 @@ import { SESSION_STATES } from "@shared/api";
 import { useMemo, useState } from "react";
 import { Wordmark } from "../components/Brand";
 import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
+import { PALETTE_KEY } from "../components/Palette";
 import { SessionCard } from "../components/SessionCard";
 import { useAppState, useSessionTree } from "../data/hooks";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
@@ -89,7 +90,7 @@ export function Board() {
   return (
     <div className="page board">
       <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search sessions" />
+        <SearchInput value={q} onChange={setQ} placeholder={`Search sessions · ${PALETTE_KEY} for everything`} />
         <div className="filters">
           {machines.length > 1 && (
             <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
