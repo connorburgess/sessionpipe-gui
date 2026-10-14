@@ -14,8 +14,8 @@ const args = process.argv.slice(2);
 const stateDir = args[args.indexOf("--state") + 1];
 if (!stateDir || args.indexOf("--state") < 0) throw new Error("serve.mjs needs --state DIR");
 
-/** A plain-DOM theme: session and event counts from the snapshot, live; a stored note
- *  through api.storage; a flag on window when unmounted. */
+/** A plain-DOM theme: session, event and viewer counts from the snapshot, live; a stored
+ *  note through api.storage; a flag on window when unmounted. */
 const COUNTER_JS = `export default {
   mount(el, api) {
     el.classList.add("e2e-counter");
@@ -24,11 +24,17 @@ const COUNTER_JS = `export default {
       <p>sessions <b data-sessions>0</b> · events <b data-events>0</b> · scheme <b data-scheme></b> · host <b data-host></b></p>
       <p>stored <code data-stored>…</code></p>
       <p><input data-note placeholder="note"> <button type="button" data-save>save</button></p>
-      <p>tokens <b data-tokens></b> · react <b data-react></b></p>\`;
+      <p>tokens <b data-tokens></b> · react <b data-react></b></p>
+      <p>viewers <b data-viewers>0</b> · me <code data-me></code> · <b data-current></b> · ids <code data-ids></code></p>\`;
     const render = (s) => {
       el.querySelector("[data-sessions]").textContent = String(s.sessions.size);
       el.querySelector("[data-events]").textContent = String(s.recent.length);
       el.querySelector("[data-scheme]").textContent = s.scheme;
+      const me = s.viewers.find((v) => v.current);
+      el.querySelector("[data-viewers]").textContent = String(s.viewers.length);
+      el.querySelector("[data-me]").textContent = me?.id ?? "";
+      el.querySelector("[data-current]").textContent = me ? me.device + " · " + me.label : "";
+      el.querySelector("[data-ids]").textContent = s.viewers.map((v) => v.id).join(",");
     };
     render(api.state.get());
     const unsubscribe = api.state.subscribe(render);

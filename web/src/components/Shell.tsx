@@ -7,9 +7,9 @@ import { Fragment, type ReactNode } from "react";
 import { useAppState } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
 import { Link, type Route } from "../lib/router";
-import { cycleTheme, type Theme, useTheme } from "../lib/theme";
 import { useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
+import { QuickSettings } from "./QuickSettings";
 
 /* Thin 1.5 px line icons on a 20 px grid. */
 const ICON: Record<string, ReactNode> = {
@@ -108,13 +108,10 @@ export function navItems(themes: readonly InstalledTheme[]): NavItem[] {
   return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
 }
 
-const THEME_LABEL: Record<Theme, string> = { auto: "Theme: system", dark: "Theme: dark", light: "Theme: light" };
-
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
   const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = [...useAppState().sessions.values()].filter((s) => s.state === "needs_you" && !s.parentId).length;
-  const theme = useTheme();
   const nav = navItems(useThemes().themes);
   const links = nav.map((n) => (
     <Link
@@ -188,22 +185,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             </svg>
           </Link>
           <ConnectionPill />
-          <button
-            type="button"
-            className="theme-btn"
-            onClick={cycleTheme}
-            title={THEME_LABEL[theme]}
-            aria-label={THEME_LABEL[theme]}
-          >
-            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-              <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-              {theme === "light" ? null : theme === "dark" ? (
-                <circle cx="10" cy="10" r="4" fill="currentColor" />
-              ) : (
-                <path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor" />
-              )}
-            </svg>
-          </button>
+          <QuickSettings placement="rail" />
         </div>
       </nav>
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main">
@@ -211,6 +193,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       </main>
       <nav className="tabbar" aria-label="Pages">
         {links}
+        <QuickSettings placement="tabbar" />
       </nav>
     </div>
   );

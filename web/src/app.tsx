@@ -20,7 +20,7 @@ const TITLES: Record<string, string> = {
   connect: "Connect",
   session: "Session",
   pair: "Pair a machine",
-  themes: "Themes",
+  themes: "Views",
 };
 
 export function App() {

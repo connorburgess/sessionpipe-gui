@@ -8,7 +8,7 @@ import { type ControlAction, ControlStrip } from "../components/ControlStrip";
 import { ActivityList } from "./Activity";
 import { type CommandFields, sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
-import { INSECURE_HINT, passkeysAvailable } from "./webauthn";
+import { insecureHint, passkeysAvailable } from "./webauthn";
 import { sendErrorWords } from "./words";
 import "./control.css";
 
@@ -22,7 +22,7 @@ export function SessionControl({
   attentions: Attention[];
 }) {
   const rp = useRpId();
-  const secure = passkeysAvailable();
+  const secure = passkeysAvailable(rp);
   const grant = useGrant(rp);
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export function SessionControl({
         attentions={attentions}
         onSend={secure && rp ? onSend : undefined}
         working={working}
-        blocked={secure ? undefined : INSECURE_HINT}
+        blocked={secure ? undefined : insecureHint()}
         note={error ?? tapHint}
         noteKind={error ? "err" : "info"}
       />

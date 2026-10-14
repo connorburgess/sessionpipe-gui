@@ -36,12 +36,12 @@ export function Themes() {
     <div className="page themes">
       <section className="sect">
         <header className="sect-head">
-          <h2>Installed themes</h2>
-          <p>Each one is a page of its own, listed on the rail. Files live under the state dir.</p>
+          <h2>Installed views</h2>
+          <p>Theme plugins: each one is a page of its own, listed on the rail. Files live under the state dir.</p>
         </header>
         {error && <p className="page-note is-err">{error}</p>}
         {loaded && themes.length === 0 && !error && (
-          <p className="themes-empty">No themes installed. Add one with the command below.</p>
+          <p className="themes-empty">No views installed. Add one with the command below.</p>
         )}
         {themes.length > 0 && (
           <ul className="themes-list">
@@ -94,7 +94,7 @@ export function Themes() {
 
       <section className="sect">
         <header className="sect-head">
-          <h2>Add a theme</h2>
+          <h2>Add a view</h2>
           <p>On the receiver machine, then Reload (or restart). A folder is copied; a link follows your edits.</p>
         </header>
         <div className="cmd">

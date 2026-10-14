@@ -30,7 +30,8 @@ client against a receiver you can see into.
 | Sources | (1) HTTP receiver, bearer sink token. (2) Local outbox tailer, like `sessionpipe tail` (`Outbox.read` every 500 ms, tier 3, `source: "outbox"`). (3) Demo generator | Zero config on the dev machine, real protocol from everywhere else. Dedup on (harness, session.id, seq) resolves overlap |
 | Auth | Events: `Bearer <sink token>` always. UI API + page: loopback free; otherwise cookie `spgui=<ui key>` set by `?k=`. Well-known: public. Machine calls: the machine's own token | One QR code gets a phone in; the token never has to be typed |
 | Readings | State machine in `shared/api.ts` (`needs_you` › `working` › `stale` › `idle` › `done`) | Spec §1: the receiver's reading, shown as such |
-| Control | Full receiver side (pair, hello, poll, ack, off, queue, redelivery, `taken` pause); UI signs with WebAuthn passkeys + a day key. `rp_id` is `localhost` by default | Phones need HTTPS for passkeys: that is the `--tls` follow-up, not v1 |
+| Control | Full receiver side (pair, hello, poll, ack, off, queue, redelivery, `taken` pause); UI signs with WebAuthn passkeys + a day key. `rp_id` is `localhost` by default, `<machine>.local` with `--tls` | Phones need HTTPS and a DNS name for passkeys |
+| TLS | `--tls`: a local CA + server cert made with the `openssl` CLI under `<stateDir>/tls`; one `net.Server` peeks the first byte and hands TLS to an `https.Server`, the rest to the `http.Server`, same handler, same port. `/trust` (plain http) walks a phone through trusting the CA; the QR points there | Passkeys from a phone with nothing to install but one certificate; loopback and sinks stay plain http |
 | Themes | Plugins: an ES module + `theme.json` outside this repo, loaded at runtime with `ThemeApi` (`shared/theme-api.ts`, `docs/theme-authoring.md`); the official ones live in `sessionpipe-gui-themes` | Themes stay out of the main GUI and can be installed, linked for development, or removed |
 | Conformance | Our own runner for `conformance/delivery/*.json` from a sessionpipe checkout (the upstream runner's receiver mode lands in M3) | We must score 100 % |
 
@@ -46,7 +47,8 @@ client against a receiver you can see into.
 | `server/receiver/*` | server-core | `registerReceiver(router, deps)`: well-known, events, errors per HTTP.md §2 |
 | `server/sources/outbox.ts` | server-core | `startOutboxSource(store, opts) → { stop }` |
 | `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback |
-| `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open` |
+| `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open`, `--tls`, `tls status/trust/reset` |
+| `server/tls/*` | tls | `ensureCerts(dir, opts) → TlsMaterial`, `createDualListener({http, https})`, `registerTrust(router, deps)`: `/trust`, `/ca.crt` |
 | `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`) |
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
 | `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |

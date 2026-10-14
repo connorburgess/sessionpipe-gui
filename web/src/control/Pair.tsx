@@ -15,7 +15,7 @@ import {
   assertPasskey,
   forgetPasskey,
   guessDeviceName,
-  INSECURE_HINT,
+  insecureHint,
   passkeysAvailable,
   registerPasskey,
   type StoredPasskey,
@@ -67,7 +67,7 @@ export function PairPage({ code }: { code: string }) {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(guessDeviceName());
   const [known, setKnown] = useState<StoredPasskey[]>([]);
-  const secure = passkeysAvailable();
+  const secure = passkeysAvailable("p" in phase ? phase.p.rpId : undefined);
   const now = useNow();
 
   useEffect(() => {
@@ -263,7 +263,7 @@ export function PairPage({ code }: { code: string }) {
               token, so its sessions show here without a second step. Only approve a request you just made.
             </p>
           )}
-          {!secure && <p className="pair-note pair-note--err">{INSECURE_HINT}</p>}
+          {!secure && <p className="pair-note pair-note--err">{insecureHint()}</p>}
           {error && (
             <p className="pair-note pair-note--err" role="alert">
               {error}

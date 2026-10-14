@@ -4,14 +4,15 @@
 // daemon played by fetch: pair → approve on /pair → the daemon collects key, proof and
 // token → hello → a session's events → a prompt from the Session page reaches the
 // daemon's poll as a verified command → taken / delivered acks show under the strip;
-// then Allow on an open permission, and Cancel on a working turn.
+// then Allow on an open permission, Cancel on a working turn, a start from /machines,
+// and a theme sending through api.control.
 //
 //   node scripts/build.mjs && npx vite build --config web/vite.config.ts
 //   npx playwright test -c web/e2e/playwright.config.ts
 //
 // CONTROL_SHOTS=<dir> also writes screenshots of /pair and the strip (desktop + 390 px).
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -179,6 +180,37 @@ async function virtualPasskey(context: BrowserContext, page: Page): Promise<CDPS
   });
   return cdp;
 }
+
+/** A theme that asks api.control whether it may send, and sends one prompt on a click. */
+const THEME_JS = (session: string) => `export default {
+  mount(el, api) {
+    el.innerHTML = \`<p data-avail></p><p data-avail-unpaired></p><p data-avail-unknown></p>
+      <button type="button" data-send>send</button><p data-result></p><p data-outcome></p>\`;
+    let sentId = null;
+    const say = (sel, a) => { el.querySelector(sel).textContent = a.ok ? "ok" : a.reason; };
+    const draw = (s) => {
+      say("[data-avail]", api.control.availability({ session: ${JSON.stringify(session)} }));
+      say("[data-avail-unpaired]", api.control.availability({ machineId: "m_nobody" }));
+      say("[data-avail-unknown]", api.control.availability({ session: "codex:nope" }));
+      const mine = sentId && s.control.find((c) => c.id === sentId);
+      el.querySelector("[data-outcome]").textContent = mine ? (mine.outcome ?? "queued") : "";
+    };
+    draw(api.state.get());
+    const stop = api.state.subscribe(draw);
+    el.querySelector("[data-send]").addEventListener("click", async () => {
+      try {
+        const a = await api.control.send(${JSON.stringify(session)}, "From the theme");
+        sentId = a.id;
+        el.querySelector("[data-result]").textContent = "sent " + a.id;
+        draw(api.state.get());
+      } catch (e) {
+        el.querySelector("[data-result]").textContent = e.message;
+      }
+    });
+    return stop;
+  },
+};
+`;
 
 test.describe.configure({ mode: "serial" });
 
@@ -412,6 +444,41 @@ test("a session is started from /machines in one of the machine's folders", asyn
   await shot(page, "machines-started-desktop");
 });
 
+test("a theme sends through api.control: availability says ok on localhost, the prompt reaches the daemon", async () => {
+  const dir = path.join(stateDir, "themes", "e2e-control");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, "theme.json"),
+    JSON.stringify({ id: "e2e-control", name: "E2E Control", version: "0.1.0", api: 1 }),
+  );
+  writeFileSync(path.join(dir, "index.js"), THEME_JS(`claude-code:${SID}`));
+  expect((await fetch(`${base}/api/ui/themes/reload`, { method: "POST" })).status).toBe(200);
+  await daemon.poll(0); // freshly online
+
+  await page.goto("/t/e2e-control");
+  const host = page.locator("[data-theme-id='e2e-control']");
+  await expect(host.locator("[data-avail]")).toHaveText("ok");
+  await expect(host.locator("[data-avail-unpaired]")).toHaveText("this machine is not paired here");
+  await expect(host.locator("[data-avail-unknown]")).toHaveText("no such session is known here");
+  await host.locator("[data-send]").click();
+
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({
+    v: 1,
+    t: "sessionpipe.control",
+    machine: daemon.machine,
+    kind: "prompt",
+    session: `claude-code:${SID}`,
+    text: "From the theme",
+  });
+  expect(Object.keys(msg.cmd)).toEqual(["v", "t", "machine", "kind", "session", "text", "nonce", "iat"]);
+  expect(typeof msg.raw.csig).toBe("string");
+  await expect(host.locator("[data-result]")).toHaveText(`sent ${msg.id}`);
+  await expect(host.locator("[data-outcome]")).toHaveText("queued");
+  await daemon.ack(msg.id, "delivered", { reply: "Done." });
+  await expect(host.locator("[data-outcome]")).toHaveText("delivered");
+});
+
 test("over plain LAN http every control affordance says passkeys need https or localhost", async ({
   browser,
 }: {
@@ -435,6 +502,10 @@ test("over plain LAN http every control affordance says passkeys need https or l
   await expect(p.locator(".pair-note--err")).toContainText("passkeys need https or localhost");
   await p.goto(`${lan}/machines`);
   await expect(p.getByRole("region", { name: MACHINE })).toContainText("passkeys need https or localhost");
+  await p.goto(`${lan}/t/e2e-control`);
+  await expect(p.locator("[data-theme-id='e2e-control'] [data-avail]")).toContainText(
+    "passkeys need https or localhost",
+  );
   await ctx.close();
 });
 

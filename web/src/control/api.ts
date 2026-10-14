@@ -2,7 +2,7 @@
 // Owned by: control-web. The browser's side of /api/ui/control/* (server/control/README.md):
 // pairings and their approval, a WebAuthn challenge, sending a signed command, the
 // activity and the paired machines. Same-origin fetch, JSON both ways, errors by code.
-import type { ControlActivity, Info, MachineControl } from "@shared/api";
+import type { ControlActivity, Info, MachineControl, TlsInfo } from "@shared/api";
 import { ROUTES } from "@shared/api";
 
 const BASE = ROUTES.ui.control;
@@ -116,17 +116,29 @@ export const controlApi = {
 };
 
 let rpIdPromise: Promise<string> | null = null;
+let tlsCache: TlsInfo | null | undefined;
 
-/** The rp id this receiver makes passkeys for (Info.control.rpId), fetched once. */
+/** The rp id this receiver makes passkeys for (Info.control.rpId), fetched once. The
+ *  same read remembers Info.tls for `tlsInfo()`. */
 export function rpId(): Promise<string> {
   if (!rpIdPromise) {
     rpIdPromise = fetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
-      .then((i) => i.control?.rpId ?? "localhost")
+      .then((i) => {
+        tlsCache = i.tls ?? null;
+        return i.control?.rpId ?? "localhost";
+      })
       .catch((e) => {
         rpIdPromise = null;
         throw e;
       });
   }
   return rpIdPromise;
+}
+
+/** Info.tls as last read (by `rpId()`): null when the server has no TLS mode on,
+ *  undefined before the first read lands. Synchronous, for hint text. */
+export function tlsInfo(): TlsInfo | null | undefined {
+  if (tlsCache === undefined) void rpId().catch(() => {});
+  return tlsCache;
 }

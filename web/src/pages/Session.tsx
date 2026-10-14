@@ -4,7 +4,7 @@
 // hides what a lower-tier receiver would never have got.
 import type { SessionSummary, StoredEvent, Tier } from "@shared/api";
 import { sessionKey } from "@shared/api";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Chip, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateBadge, TierBadge } from "../components/bits";
 import { plural } from "../components/SessionCard";
 import { SessionControl } from "../control/SessionControl";
@@ -14,7 +14,12 @@ import { back, Link, navigate, sessionPath } from "../lib/router";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
 
-const PAGE = 500;
+/** The newest page a session opens on, and the size of each older page. Both slim: the
+ *  full event is fetched only when a row is expanded (`fill`). */
+const TAIL = 100;
+const OLDER = 200;
+/** Characters of each tool input/output or transcript kept in a list page. */
+const LIST_PREVIEW = 400;
 
 interface Turn {
   n: number;
@@ -87,36 +92,49 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
   const lastSeq = useRef(-1);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Load every page, then let the stream append.
+  const [hasOlder, setHasOlder] = useState(false);
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [tailSeq, setTailSeq] = useState(-1);
+  const firstSeq = useRef<number | undefined>(undefined);
+  /** Taken just before older events are prepended, to keep the viewport still: the first row
+   *  on screen (by seq) and where it was, plus the page height as a fallback. */
+  const anchor = useRef<{ seq: number | null; top: number; height: number; y: number } | null>(null);
+  const firstPaint = useRef(true);
+
+  // The newest page in one round trip, then let the stream append. Older pages load on demand.
   useEffect(() => {
     let cancelled = false;
     lastSeq.current = -1;
+    firstSeq.current = undefined;
+    firstPaint.current = true;
     setEvents([]);
     setLoading(true);
     setError(null);
+    setHasOlder(false);
     const buffered: StoredEvent[] = [];
     const unsub = store.onEvent((e) => {
       if (`${e.harness.name}:${e.session.id}` === key) buffered.push(e);
     });
     (async () => {
       try {
-        let after: number | undefined;
-        let acc: StoredEvent[] = [];
-        for (let i = 0; i < 200; i++) {
-          const d = await store.transport.session(harness, id, { after, limit: PAGE });
-          if (cancelled) return;
-          acc = acc.concat(d.events);
-          setSummary(d.session);
-          setChildren(d.children);
-          setTotal(d.total);
-          const last = d.events[d.events.length - 1];
-          if (!last || d.events.length < PAGE) break;
-          after = last.session.seq;
-        }
+        const d = await store.transport.session(harness, id, {
+          tail: true,
+          limit: TAIL,
+          slim: true,
+          preview: LIST_PREVIEW,
+        });
+        if (cancelled) return;
+        const acc = d.events.slice();
         const seen = new Set(acc.map((e) => e.session.seq));
         for (const e of buffered) if (!seen.has(e.session.seq)) acc.push(e);
         acc.sort((a, b) => a.session.seq - b.session.seq);
         lastSeq.current = acc[acc.length - 1]?.session.seq ?? -1;
+        firstSeq.current = d.firstSeq ?? acc[0]?.session.seq;
+        setSummary(d.session);
+        setChildren(d.children);
+        setTotal(d.total);
+        setHasOlder(!!d.hasOlder);
+        setTailSeq(lastSeq.current);
         setEvents(acc);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -131,6 +149,52 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
     };
   }, [store, harness, id, key]);
 
+  /** The previous page of older events, prepended; the viewport stays where it was. */
+  const loadOlder = useCallback(async () => {
+    const before = firstSeq.current;
+    if (olderBusy || before === undefined) return;
+    setOlderBusy(true);
+    try {
+      const d = await store.transport.session(harness, id, { before, limit: OLDER, slim: true, preview: LIST_PREVIEW });
+      anchor.current = { ...firstVisibleRow(), height: document.documentElement.scrollHeight, y: window.scrollY };
+      if (d.firstSeq !== undefined) firstSeq.current = d.firstSeq;
+      setHasOlder(!!d.hasOlder);
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.session.seq));
+        return [...d.events.filter((e) => !seen.has(e.session.seq)), ...prev];
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOlderBusy(false);
+    }
+  }, [store, harness, id, olderBusy]);
+
+  // Bottom-anchored first paint (the newest turn is what a session opens on), and a
+  // still viewport when older events land above it, whether or not the browser's own
+  // scroll anchoring already moved it.
+  useLayoutEffect(() => {
+    if (events.length === 0) return;
+    const doc = document.documentElement;
+    if (firstPaint.current) {
+      firstPaint.current = false;
+      window.scrollTo(0, doc.scrollHeight);
+      return;
+    }
+    const a = anchor.current;
+    if (a) {
+      anchor.current = null;
+      const row = a.seq === null ? null : document.querySelector(`[data-seq="${a.seq}"]`);
+      if (row) {
+        const d = row.getBoundingClientRect().top - a.top;
+        if (Math.abs(d) > 1) window.scrollBy(0, d);
+      } else {
+        const want = a.y + (doc.scrollHeight - a.height);
+        if (Math.abs(window.scrollY - want) > 1) window.scrollTo(0, want);
+      }
+    }
+  }, [events]);
+
   useEffect(() => {
     if (loading) return;
     return store.onEvent((e, s) => {
@@ -142,6 +206,7 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
         lastSeq.current = Math.max(lastSeq.current, e.session.seq);
         return next;
       });
+      setTailSeq(e.session.seq);
       setTotal((t) => t + 1);
     });
   }, [store, key, loading]);
@@ -159,13 +224,18 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
   );
   const turns = useMemo(() => groupTurns(visible), [visible]);
   const hidden = events.length - visible.length;
+  /** The loaded window ends at the latest turn, so its last turn is turn `counts.turns`. */
+  const loadedTurns = turns.filter((t) => t.start).length;
+  const turnOffset = Math.max(0, (s?.counts.turns ?? loadedTurns) - loadedTurns);
 
   // Auto-follow: stick to the bottom while live and the person has not scrolled up.
   const isLive = !!s && (s.state === "working" || s.state === "needs_you");
+  // To the very end (not "endRef into view": the sticky control strip and the tab bar
+  // would cover the last rows), on every new event while following.
   useEffect(() => {
     if (!follow || !isLive) return;
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [follow, isLive, events.length]);
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  }, [follow, isLive, tailSeq]);
   useEffect(() => {
     if (!follow) return;
     let lastY = window.scrollY;
@@ -323,21 +393,37 @@ export function SessionPage({ harness, id }: { harness: string; id: string }) {
       {error && <p className="page-note is-err">{error}</p>}
 
       <ol className="timeline">
+        {hasOlder && (
+          <li className="older">
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={() => void loadOlder()}
+              disabled={olderBusy}
+            >
+              {olderBusy ? "Loading…" : `Older turns · ${Math.max(0, total - events.length)} earlier events`}
+            </button>
+          </li>
+        )}
         {turns.map((t) => (
           <TurnBlock
             key={t.n}
             turn={t}
+            label={
+              t.n === 0
+                ? hasOlder
+                  ? turnOffset > 0
+                    ? `turn ${turnOffset} · continued`
+                    : "earlier"
+                  : "session"
+                : `turn ${t.n + turnOffset}`
+            }
             lens={lens}
             kids={kids}
             liveTurn={s.currentTurn ? t === turns[turns.length - 1] : false}
             fill={fill}
           />
         ))}
-        {loading && (
-          <li className="page-note">
-            <Spinner /> loading {events.length} of {total}…
-          </li>
-        )}
         {!loading && visible.length === 0 && <li className="page-note">No events at this tier.</li>}
       </ol>
       <div ref={endRef} />
@@ -359,18 +445,30 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
 
 type Fill = (e: StoredEvent) => Promise<void>;
 
+/** The first timeline row whose top edge is on screen (below the sticky header), by seq. */
+function firstVisibleRow(): { seq: number | null; top: number } {
+  const headerBottom = document.querySelector(".sess-head")?.getBoundingClientRect().bottom ?? 0;
+  for (const el of document.querySelectorAll<HTMLElement>("[data-seq]")) {
+    const top = el.getBoundingClientRect().top;
+    if (top >= headerBottom) return { seq: Number(el.dataset.seq), top };
+  }
+  return { seq: null, top: 0 };
+}
+
 function TurnBlock({
   turn,
   lens,
   kids,
   liveTurn,
   fill,
+  label,
 }: {
   turn: Turn;
   lens: Tier;
   kids: SessionSummary[];
   liveTurn: boolean;
   fill: Fill;
+  label: string;
 }) {
   const now = useNow();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
@@ -397,7 +495,7 @@ function TurnBlock({
   return (
     <li className={`turn ${liveTurn ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}>
       <header className="turn-head">
-        <span className="turn-n">{turn.n === 0 ? "session" : `turn ${turn.n}`}</span>
+        <span className="turn-n">{label}</span>
         {turn.start && <span className="turn-time num">{clock(turn.start.time)}</span>}
         {elapsed !== undefined && <span className="turn-dur num">{dur(elapsed)}</span>}
         {liveTurn && !ended && <Spinner label="turn running" />}
@@ -420,7 +518,7 @@ function TurnBlock({
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
             return (
-              <li key={it.key} className="reply">
+              <li key={it.key} className="reply" data-seq={e.session.seq}>
                 <Redacted text={String(e.data.assistant ?? "")} />
                 <Cut e={e} field="assistant" fill={fill} />
               </li>
@@ -430,7 +528,11 @@ function TurnBlock({
             const reason = String(e.data.reason ?? "stop");
             const err = e.data.error as string | undefined;
             return (
-              <li key={it.key} className={`marker marker--end ${reason === "error" ? "is-err" : ""}`}>
+              <li
+                key={it.key}
+                className={`marker marker--end ${reason === "error" ? "is-err" : ""}`}
+                data-seq={e.session.seq}
+              >
                 <span className="marker-time num">{clock(e.time)}</span>
                 <span>
                   turn ended · {reason}
@@ -442,7 +544,7 @@ function TurnBlock({
           if (e.type === "attention.needed") {
             const kind = String(e.data.kind);
             return (
-              <li key={it.key} className="marker marker--attn">
+              <li key={it.key} className="marker marker--attn" data-seq={e.session.seq}>
                 <span className="marker-time num">{clock(e.time)}</span>
                 <span className="marker-kind">{ATTENTION_LABEL[kind] ?? kind}</span>
                 {typeof e.data.tool === "string" && <code>{e.data.tool}</code>}
@@ -458,7 +560,7 @@ function TurnBlock({
             const agentId = String(e.data.agent_id ?? "");
             const kid = kids.find((k) => k.id.includes(agentId));
             return (
-              <li key={it.key} className="marker marker--agent">
+              <li key={it.key} className="marker marker--agent" data-seq={e.session.seq}>
                 <span className="marker-time num">{clock(e.time)}</span>
                 <span>
                   ↳ {String(e.data.agent_type ?? "subagent")} {e.type === "subagent.started" ? "started" : "ended"}
@@ -472,7 +574,7 @@ function TurnBlock({
             );
           }
           return (
-            <li key={it.key} className={`marker marker--${e.type.split(".")[0]}`}>
+            <li key={it.key} className={`marker marker--${e.type.split(".")[0]}`} data-seq={e.session.seq}>
               <span className="marker-time num">{clock(e.time)}</span>
               <span className="marker-type mono">{e.type}</span>
               <span className="marker-msg">
@@ -482,7 +584,7 @@ function TurnBlock({
           );
         })}
         {progress && String(progress.e.data.assistant ?? "").trim() && (
-          <li className="reply reply--live">
+          <li className="reply reply--live" data-seq={progress.e.session.seq}>
             <Redacted text={String(progress.e.data.assistant)} />
             <span className="caret" aria-hidden="true" />
             <Cut e={progress.e} field="assistant" fill={fill} />
@@ -553,9 +655,14 @@ function ToolRow({
       <span className="tool-dur num">{dur(msv)}</span>
     </>
   );
-  if (!expandable) return <li className="tool">{head}</li>;
+  if (!expandable)
+    return (
+      <li className="tool" data-seq={e.session.seq}>
+        {head}
+      </li>
+    );
   return (
-    <li className="tool tool--x">
+    <li className="tool tool--x" data-seq={e.session.seq}>
       <details>
         <summary>{head}</summary>
         <div className="tool-io">

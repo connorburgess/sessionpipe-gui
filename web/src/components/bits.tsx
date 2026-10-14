@@ -203,15 +203,17 @@ export function Segmented<T extends string | number>({
   options,
   onChange,
   label,
+  disabled = false,
 }: {
   value: T;
   options: { value: T; label: string; title?: string }[];
   onChange: (v: T) => void;
   label: string;
+  disabled?: boolean;
 }) {
   const name = useId();
   return (
-    <fieldset className="seg">
+    <fieldset className="seg" disabled={disabled}>
       <legend className="sr-only">{label}</legend>
       {options.map((o) => (
         <label key={String(o.value)} className={`seg-opt ${o.value === value ? "seg-on" : ""}`} title={o.title}>

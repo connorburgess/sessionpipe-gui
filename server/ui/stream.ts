@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // GET /api/ui/stream: Server-Sent Events. The first frame is a snapshot, then every
-// store message and every control message as it happens, and a `: ping` comment
-// every 15 s so proxies and phones keep the connection.
+// store message, every control message and every change of who is connected as it
+// happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
+// Each stream is one Viewer in the registry for as long as it stays open.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Ctx } from "../http/router.js";
 import type { Store } from "../store/store.js";
+import type { ViewerRegistry } from "./viewers.js";
 
 export const PING_MS = 15_000;
 
@@ -13,6 +15,7 @@ export interface StreamDeps {
   store: Store;
   control: Control;
   snapshot: () => Snapshot;
+  viewers: ViewerRegistry;
   pingMs?: number;
 }
 
@@ -29,7 +32,13 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     if (res.destroyed || res.writableEnded) return;
     res.write(`event: ${msg.kind}\ndata: ${JSON.stringify(msg)}\n\n`);
   };
-  write({ kind: "snapshot", snapshot: deps.snapshot() });
+  const ua = req.headers["user-agent"];
+  const me = deps.viewers.add({
+    ip: ctx.remote.ip,
+    loopback: ctx.remote.loopback,
+    userAgent: Array.isArray(ua) ? ua[0] : ua,
+  });
+  write({ kind: "snapshot", snapshot: { ...deps.snapshot(), viewers: deps.viewers.list(me) } });
   const offStore = deps.store.subscribe((m) => {
     if (m.kind === "machine") {
       const control = deps.control.machines().get(m.machine.name);
@@ -44,8 +53,11 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
       write({ kind: "machine", machine: known ?? m.machine });
     } else write(m);
   });
+  const offViewers = deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }));
   const ping = setInterval(() => {
-    if (!res.destroyed && !res.writableEnded) res.write(": ping\n\n");
+    if (res.destroyed || res.writableEnded) return;
+    res.write(": ping\n\n");
+    deps.viewers.touch(me);
   }, deps.pingMs ?? PING_MS);
   let done = false;
   const cleanup = (): void => {
@@ -54,6 +66,8 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     clearInterval(ping);
     offStore();
     offControl();
+    offViewers();
+    deps.viewers.remove(me);
     if (!res.writableEnded) res.end();
   };
   res.on("close", cleanup);

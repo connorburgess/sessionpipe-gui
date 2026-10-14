@@ -11,6 +11,7 @@ import type {
   Stats,
   StoredEvent,
   StreamMessage,
+  Viewer,
 } from "@shared/api";
 import type { Transport } from "./transport";
 
@@ -28,6 +29,8 @@ export interface AppState {
   recent: readonly StoredEvent[];
   /** Newest first, capped at 200. */
   control: readonly ControlActivity[];
+  /** Browsers on the stream right now, this one marked `current`. */
+  viewers: readonly Viewer[];
   /** Counts every message, so a page can tell "something changed" cheaply. */
   version: number;
 }
@@ -43,6 +46,7 @@ const initial: AppState = {
   stats: null,
   recent: [],
   control: [],
+  viewers: [],
   version: 0,
 };
 
@@ -108,6 +112,7 @@ export class Store {
           sessions: new Map(s.sessions.map((x) => [x.key, x])),
           machines: new Map(s.machines.map((x) => [x.name, x])),
           stats: s.stats,
+          viewers: s.viewers ?? [],
         });
         return;
       }
@@ -156,6 +161,9 @@ export class Store {
         this.set({ control });
         return;
       }
+      case "viewers":
+        this.set({ viewers: m.viewers });
+        return;
       default:
         return;
     }

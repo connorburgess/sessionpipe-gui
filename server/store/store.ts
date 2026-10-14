@@ -364,29 +364,48 @@ export class Store {
     return [...this.sessions.keys()];
   }
 
-  /** Full events (read from disk) after `after` (a seq; -1 or undefined for the start),
-   *  at most `limit`, in seq order. */
-  sessionDetail(key: SessionKey, after?: number, limit?: number): SessionDetail | undefined {
+  /** A page of a session's events in seq order, at most `limit`: forwards after `after`
+   *  (a seq; -1 or undefined for the start), or backwards with `opts.before` (the newest
+   *  events with seq below it) or `opts.tail` (the newest events). Full lines are read
+   *  from disk unless `opts.slim`, which returns the index's slim copies. */
+  sessionDetail(
+    key: SessionKey,
+    after?: number,
+    limit?: number,
+    opts: { before?: number; tail?: boolean; slim?: boolean } = {},
+  ): SessionDetail | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
     refreshState(entry, Date.now());
-    const from = typeof after === "number" && Number.isFinite(after) ? after : -1;
     const n = Math.max(1, Math.min(DETAIL_MAX, limit ?? DETAIL_DEFAULT));
     const page: Rec[] = [];
-    for (const rec of entry.recs) {
-      if (rec.ev.session.seq <= from) continue;
-      page.push(rec);
-      if (page.length >= n) break;
+    const backwards = opts.tail || (typeof opts.before === "number" && Number.isFinite(opts.before));
+    if (backwards) {
+      const below = opts.tail ? Number.POSITIVE_INFINITY : (opts.before as number);
+      for (let i = entry.recs.length - 1; i >= 0 && page.length < n; i--) {
+        const rec = entry.recs[i]!;
+        if (rec.ev.session.seq < below) page.push(rec);
+      }
+      page.reverse();
+    } else {
+      const from = typeof after === "number" && Number.isFinite(after) ? after : -1;
+      for (const rec of entry.recs) {
+        if (rec.ev.session.seq <= from) continue;
+        page.push(rec);
+        if (page.length >= n) break;
+      }
     }
     const { harness, id } = splitKey(key);
-    const full = this.files.readAt(harness, id, page);
+    const full = opts.slim ? [] : this.files.readAt(harness, id, page);
     const events = page.map((rec, i) => full[i] ?? rec.ev);
     const children: SessionSummary[] = [];
     for (const k of entry.childKeys) {
       const c = this.sessions.get(k);
       if (c) children.push(c.summary);
     }
-    return { session: entry.summary, events, total: entry.recs.length, children };
+    const firstSeq = page[0]?.ev.session.seq;
+    const hasOlder = firstSeq !== undefined && entry.recs.some((r) => r.ev.session.seq < firstSeq);
+    return { session: entry.summary, events, total: entry.recs.length, children, firstSeq, hasOlder };
   }
 
   /** Newest event time first (arrival breaks ties). `before` is the cursor of a previous page. */

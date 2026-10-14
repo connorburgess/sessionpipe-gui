@@ -2,6 +2,8 @@
 // Owned by: server-core (composition root). Every module plugs in here and nowhere
 // else. Module boundaries and who owns what: ARCHITECTURE.md.
 import http from "node:http";
+import https from "node:https";
+import type net from "node:net";
 import path from "node:path";
 import { DEFAULT_PORT, type Info, ROUTES } from "../shared/api.js";
 import { defaultStateDir, type GuiConfig, packageVersion, readGuiConfig, rotateSinkToken } from "./config.js";
@@ -14,6 +16,9 @@ import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
 import { registerThemes, ThemeRegistry } from "./themes/index.js";
+import { ensureCerts, type TlsMaterial } from "./tls/certs.js";
+import { createDualListener, type DualListener, listen } from "./tls/listen.js";
+import { registerTrust } from "./tls/trust.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi } from "./ui/index.js";
 
@@ -31,8 +36,14 @@ export interface AppOptions {
   replay?: string;
   /** Replay / demo speed. */
   speed?: number;
-  /** The rp id control passkeys are made for (CONTROL.md §2); "localhost" by default. */
+  /** The rp id control passkeys are made for (CONTROL.md §2); "localhost" by default,
+   *  the `.local` hostname when `tls` is on. */
   rpId?: string;
+  /** TLS mode: the same port also answers https with a certificate from the GUI's own
+   *  local CA (server/tls), so passkeys work from a phone. Needs `openssl`. */
+  tls?: boolean;
+  /** The `.local` name the certificate and the rp id are made for (tests); default from os.hostname(). */
+  tlsHostname?: string;
   /** Loopback-only test door for the conformance runner. */
   testDoor?: boolean;
   /** Where the built web app is; default: dist/web beside the bundle. */
@@ -46,7 +57,14 @@ export interface AppOptions {
 }
 
 export interface App {
+  /** The plain-http server; with TLS on, one of the two behind `listener`. */
   server: http.Server;
+  /** The https server when TLS mode is on. */
+  httpsServer: https.Server | null;
+  /** What is bound to the port: the dual-protocol listener with TLS on, `server` otherwise. */
+  listener: net.Server;
+  /** The certificates in use, or null. */
+  tls: TlsMaterial | null;
   router: Router;
   store: Store;
   control: Control;
@@ -69,7 +87,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let config = readGuiConfig(stateDir);
   const store = new Store(stateDir, { tickMs: opts.tickMs });
   const router = new Router();
-  const rpId = opts.rpId ?? "localhost";
+  let port = opts.port ?? DEFAULT_PORT;
+  const tls: TlsMaterial | null = opts.tls
+    ? ensureCerts(path.join(stateDir, "tls"), { hostname: opts.tlsHostname, addresses: lanAddresses() })
+    : null;
+  const rpId = opts.rpId ?? tls?.hostname ?? "localhost";
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 
@@ -106,8 +128,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let replay: Runner | null = null;
   if (opts.replay) replay = startReplay(store, opts.replay, { speed: opts.speed ?? 0, rebase: true, maxGapMs: 10_000 });
 
-  let port = opts.port ?? DEFAULT_PORT;
   const lanUrls = (): string[] => lanAddresses().map((ip) => `http://${ip}:${port}`);
+  const httpsUrl = (): string | undefined => (tls ? `https://${tls.hostname}:${port}` : undefined);
   const info = (): Info => {
     const lan = lanUrls();
     const base = lan[0] ?? `http://127.0.0.1:${port}`;
@@ -118,7 +140,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       version: packageVersion(),
       startedAt,
       port,
-      urls: { local: `http://localhost:${port}`, lan },
+      urls: { local: `http://localhost:${port}`, lan, ...(tls ? { https: httpsUrl()! } : {}) },
       sinkCommand: `sessionpipe sink add ${base} --tier 3 --token ${config.sinkToken}`,
       sinkToken: config.sinkToken,
       uiKey: config.uiKey,
@@ -130,10 +152,23 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       storage: { dir: stateDir, bytes: stats.storageBytes },
       wellKnown: wellKnown(control),
       control: { enabled: true, rpId, machines: control.machines().size },
+      ...(tls
+        ? {
+            tls: {
+              on: true,
+              hostname: tls.hostname,
+              httpsUrl: httpsUrl()!,
+              caUrl: `${base}${ROUTES.caCert}`,
+              caFingerprint: tls.caFingerprint,
+              expiresAt: tls.serverExpiresAt,
+            },
+          }
+        : {}),
     };
   };
 
   registerUi(router, {
+    colorThemesDir: path.join(stateDir, "color-themes"),
     store,
     control,
     uiKey,
@@ -146,21 +181,27 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
   registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
+  registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
   router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 
-  const server = http.createServer((req, res) => void router.handle(req, res));
+  const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => void router.handle(req, res);
+  const server = http.createServer(handler);
   server.keepAliveTimeout = 65_000;
+  let httpsServer: https.Server | null = null;
+  let listener: net.Server = server;
+  if (tls) {
+    httpsServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, handler);
+    httpsServer.keepAliveTimeout = 65_000;
+    listener = createDualListener({ http: server, https: httpsServer });
+  }
   const host = opts.host ?? "0.0.0.0";
-  port = await new Promise<number>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port ?? DEFAULT_PORT, host, () => {
-      const a = server.address();
-      resolve(typeof a === "object" && a ? a.port : (opts.port ?? DEFAULT_PORT));
-    });
-  });
+  port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
 
   return {
     server,
+    httpsServer,
+    listener,
+    tls,
     router,
     store,
     control,
@@ -181,7 +222,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       control.close();
       await store.close();
       server.closeAllConnections?.();
-      await new Promise<void>((r) => server.close(() => r()));
+      httpsServer?.closeAllConnections?.();
+      if (listener !== server) (listener as DualListener).destroyConnections();
+      await new Promise<void>((r) => listener.close(() => r()));
+      if (listener !== server) await new Promise<void>((r) => server.close(() => r()));
+      if (httpsServer) await new Promise<void>((r) => httpsServer!.close(() => r()));
     },
   };
 }

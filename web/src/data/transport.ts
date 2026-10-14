@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Everything that crosses the wire goes through a Transport: the real one speaks SSE and
 // fetch to our own origin, the mock one (web/src/mock) simulates a server in the page.
-import type { FeedPage, FeedQuery, Info, SessionDetail, StreamMessage } from "@shared/api";
+import type { DetailQuery, FeedPage, FeedQuery, Info, SessionDetail, StreamMessage } from "@shared/api";
 import { ROUTES } from "@shared/api";
 
 export interface StreamHandlers {
@@ -15,7 +15,7 @@ export interface Transport {
   /** Opens the stream and keeps it open with backoff until the returned function is called. */
   openStream(h: StreamHandlers): () => void;
   info(): Promise<Info>;
-  session(harness: string, id: string, q: { after?: number; limit?: number }): Promise<SessionDetail>;
+  session(harness: string, id: string, q: DetailQuery): Promise<SessionDetail>;
   feed(q: FeedQuery): Promise<FeedPage>;
   forget(harness: string, id: string): Promise<void>;
   rotateToken(): Promise<{ sinkToken: string }>;
@@ -24,7 +24,16 @@ export interface Transport {
   qrUrl(): string | null;
 }
 
-export const STREAM_KINDS = ["snapshot", "event", "session", "forgotten", "machine", "stats", "control"] as const;
+export const STREAM_KINDS = [
+  "snapshot",
+  "event",
+  "session",
+  "forgotten",
+  "machine",
+  "stats",
+  "control",
+  "viewers",
+] as const;
 
 export class HttpError extends Error {
   constructor(
@@ -113,7 +122,11 @@ export function createHttpTransport(): Transport {
     session: (harness, id, q) => {
       const p = new URLSearchParams();
       if (q.after !== undefined) p.set("after", String(q.after));
+      if (q.before !== undefined) p.set("before", String(q.before));
+      if (q.tail) p.set("tail", "1");
       if (q.limit !== undefined) p.set("limit", String(q.limit));
+      if (q.slim) p.set("slim", "1");
+      if (q.slim && q.preview !== undefined) p.set("preview", String(q.preview));
       const qs = p.toString();
       return get<SessionDetail>(`${ROUTES.ui.session}/${enc(harness)}/${enc(id)}${qs ? `?${qs}` : ""}`);
     },

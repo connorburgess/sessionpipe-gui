@@ -12,13 +12,13 @@ import { ActivityRow } from "./Activity";
 import { uuid } from "./bytes";
 import { sendCommand } from "./command";
 import { useGrant, useMessage, useRpId } from "./hooks";
-import { INSECURE_HINT, passkeysAvailable } from "./webauthn";
+import { insecureHint, passkeysAvailable } from "./webauthn";
 import { sendErrorWords } from "./words";
 import "./control.css";
 
 export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl }) {
   const rp = useRpId();
-  const secure = passkeysAvailable();
+  const secure = passkeysAvailable(rp);
   const grant = useGrant(rp);
   const harnesses = c.harnesses?.length ? c.harnesses : Object.keys(m.harnesses);
   const [harness, setHarness] = useState(harnesses[0] ?? "claude-code");
@@ -61,7 +61,7 @@ export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl })
       <dt>start</dt>
       <dd>
         {!secure ? (
-          <span className="machine-ctl-row">{INSECURE_HINT}</span>
+          <span className="machine-ctl-row">{insecureHint()}</span>
         ) : (
           <form
             className="start-form"

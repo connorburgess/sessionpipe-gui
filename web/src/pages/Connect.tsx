@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Connect: how a phone, another machine or demo mode gets onto this board, plus the
 // receiver's own numbers. Also where the empty board sends people.
-import type { Info } from "@shared/api";
+import { type Info, ROUTES } from "@shared/api";
 import { useEffect, useState } from "react";
 import { CopyButton, Toggle } from "../components/bits";
 import { useAppState, useStore } from "../data/hooks";
@@ -110,6 +110,66 @@ export function Connect() {
             )}
           </ul>
         </div>
+      </section>
+
+      <section className="sect sect--passkeys">
+        <header className="sect-head">
+          <h2>Passkeys on your phone</h2>
+          <p>
+            Control signs with a passkey, and a passkey needs https on a DNS name. TLS mode gives this port a
+            certificate from the receiver's own local CA, trusted once per phone.
+          </p>
+        </header>
+        {info?.tls?.on ? (
+          <dl className="passkeys">
+            <div>
+              <dt>TLS mode</dt>
+              <dd>
+                on · rp id <code>{info.control.rpId}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>secure address</dt>
+              <dd className="passkeys-url">
+                <code className="url">{phoneUrl(info.tls.httpsUrl)}</code>
+                <CopyButton text={phoneUrl(info.tls.httpsUrl)} small />
+              </dd>
+            </div>
+            <div>
+              <dt>CA fingerprint</dt>
+              <dd>
+                <code className="passkeys-fp">{info.tls.caFingerprint}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>trust steps</dt>
+              <dd>
+                <a href={trustHref(info)} className="passkeys-trust">
+                  Trust steps for iPhone, Android, Mac and Linux
+                </a>
+                {" · "}
+                <span className="passkeys-note">the QR code above opens them first; the CA is at </span>
+                <code>{info.tls.caUrl}</code>
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <div className="cmd">
+            <pre className="passkeys-cmd">
+              <code>sessionpipe-gui --tls</code>
+            </pre>
+            <CopyButton text="sessionpipe-gui --tls" label="Copy" small />
+            <p className="sect-note passkeys-off">
+              off · start the receiver with this once; it is remembered (<code>--no-tls</code> turns it off).
+              {info?.tls === undefined && info ? " This server has no TLS mode." : ""}
+            </p>
+          </div>
+        )}
+        <p className="sect-note">
+          Passkeys then work only on the https address, on the phone and on this machine; the daemon still pairs over
+          plain http (<code>sessionpipe control pair {info?.urls.local ?? "http://localhost:7373"}</code>, it reads the
+          rp id from the well-known file) and the sink line for other machines stays plain http to the LAN address.
+        </p>
       </section>
 
       <section className="sect">
@@ -272,17 +332,23 @@ export function Connect() {
 
       <section className="sect">
         <header className="sect-head">
-          <h2>Themes</h2>
+          <h2>Views</h2>
           <p>
             {themes.length === 0
-              ? "No theme plugins installed."
+              ? "No view plugins installed."
               : `${themes.length} installed: ${themes.map((t) => t.name || t.id).join(", ")}.`}{" "}
-            <Link to="/themes">Manage themes</Link>
+            <Link to="/themes">Manage views</Link>
           </p>
         </header>
       </section>
     </div>
   );
 }
+
+/** The trust page on the plain-http LAN address, with the key, so a phone can follow it too. */
+const trustHref = (info: Info): string => {
+  const base = info.urls.lan[0] ?? info.urls.local;
+  return info.uiKey ? `${base}${ROUTES.trust}?k=${encodeURIComponent(info.uiKey)}` : `${base}${ROUTES.trust}`;
+};
 
 const mask = (t: string) => (t.length <= 8 ? "••••" : `${t.slice(0, 4)}…${t.slice(-3)}`);

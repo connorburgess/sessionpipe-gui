@@ -25,7 +25,7 @@ export function createMockTransport(): Transport {
     },
     info: () => latency(world.info()),
     session: async (harness, id, q) => {
-      const d = world.detail(harness, id, q.after, q.limit);
+      const d = world.detail(harness, id, q);
       if (!d) throw new Error("no such session");
       return latency(d, 120);
     },

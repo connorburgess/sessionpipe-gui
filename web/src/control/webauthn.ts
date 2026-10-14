@@ -3,7 +3,7 @@
 // (CONTROL.md §2, §3.2): making a passkey for the receiver's rp id, and asserting over a
 // 32-byte challenge with it. The passkeys this browser made are remembered per rp id
 // (credential id, alg, SPKI) in localStorage, so a later approval or grant can name them.
-import { type Assertion, controlApi, type TrustedKey } from "./api";
+import { type Assertion, controlApi, type TrustedKey, tlsInfo } from "./api";
 import { b64url, fromB64url, randomBytes } from "./bytes";
 
 export const ES256 = -7;
@@ -12,13 +12,31 @@ export const RS256 = -257;
 /** Why no control affordance can work here: passkeys need a secure context. */
 export const INSECURE_HINT = "passkeys need https or localhost: open this page on the machine running sessionpipe-gui";
 
-/** Can this page use passkeys at all? False over plain LAN http (a phone on the Wi-Fi). */
-export function passkeysAvailable(): boolean {
+/** The hint for this page: with TLS mode on, the one origin passkeys work on (the
+ *  `.local` rp id makes http://localhost stop signing too); otherwise INSECURE_HINT. */
+export function insecureHint(): string {
+  const tls = tlsInfo();
+  if (!tls?.on) return INSECURE_HINT;
+  return `passkeys work only on ${tls.httpsUrl} here (TLS mode, rp id ${tls.hostname}): open that address, after the trust steps on the Connect page`;
+}
+
+/** Is `location.hostname` the rp id or under it (CONTROL.md §3.2)? True when `rp` is unknown. */
+export function rpMatchesHere(rp: string | null | undefined): boolean {
+  if (!rp || typeof location === "undefined") return true;
+  const h = location.hostname.toLowerCase();
+  return h === rp.toLowerCase() || h.endsWith(`.${rp.toLowerCase()}`);
+}
+
+/** Can this page use passkeys at all? False over plain LAN http (a phone on the Wi-Fi),
+ *  and, given the rp id, on an origin that is not under it (http://localhost with a
+ *  `.local` rp id: the browser would refuse the ceremony). */
+export function passkeysAvailable(rp?: string | null): boolean {
   return (
     typeof window !== "undefined" &&
     window.isSecureContext === true &&
     typeof PublicKeyCredential !== "undefined" &&
-    !!navigator.credentials?.create
+    !!navigator.credentials?.create &&
+    rpMatchesHere(rp)
   );
 }
 
@@ -85,7 +103,7 @@ export function webauthnError(e: unknown): string {
     case "NotSupportedError":
       return "This browser cannot make a passkey of a kind the machine accepts.";
     case "SecurityError":
-      return INSECURE_HINT;
+      return insecureHint();
     case "AbortError":
       return "The passkey prompt was cancelled.";
     default:

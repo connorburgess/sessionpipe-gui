@@ -2,8 +2,8 @@
 /// <reference lib="dom" />
 // Theme plugins: two fixture themes are installed by test/e2e/serve.mjs with the real CLI
 // before the server starts. The nav lists them, /t/<id> mounts one with the ThemeApi,
-// counts update live, storage round-trips through the server, the theme unmounts on
-// navigation, a syntax error shows the error panel, and /themes manages the lot.
+// counts update live, the viewers list names this browser, storage round-trips through
+// the server, the theme unmounts on navigation, a syntax error shows the error panel, and /themes manages the lot.
 import { expect, test } from "@playwright/test";
 import { openPage } from "./helpers.js";
 
@@ -79,6 +79,27 @@ test.describe("themes", () => {
     expect(box.y).toBe(0);
     await expect(host).toHaveCSS("overflow", "hidden");
     await expect(host).toHaveCSS("position", "relative");
+  });
+
+  test("the snapshot lists the browsers on the stream, this one marked current", async ({ page, context, request }) => {
+    await openPage(page, "/t/e2e-counter");
+    const host = page.locator("[data-theme-id='e2e-counter']");
+    await expect(host.locator("[data-viewers]")).toHaveText(/^[1-9]\d*$/);
+    const me = await host.locator("[data-me]").innerText();
+    expect(me).toMatch(/^[0-9a-f]{16}$/);
+    // Chromium on this machine, over loopback: a desktop, with the OS and the browser named.
+    await expect(host.locator("[data-current]")).toHaveText(/^desktop · (Mac|Linux|Windows|ChromeOS) · Chrome$/);
+    const listed = (await (await request.get("/api/ui/viewers")).json()) as { viewers: { id: string }[] };
+    expect(listed.viewers.map((v) => v.id)).toContain(me);
+    // A second tab joins: the first one sees it arrive, and go.
+    const other = await context.newPage();
+    await openPage(other, "/t/e2e-counter");
+    const otherId = await other.locator("[data-theme-id='e2e-counter'] [data-me]").innerText();
+    expect(otherId).not.toBe(me);
+    await expect(host.locator("[data-ids]")).toContainText(otherId);
+    await other.close();
+    await expect(host.locator("[data-ids]")).not.toContainText(otherId);
+    await expect(host.locator("[data-ids]")).toContainText(me);
   });
 
   test("storage round-trips through the server and the theme unmounts on navigation", async ({ page, request }) => {

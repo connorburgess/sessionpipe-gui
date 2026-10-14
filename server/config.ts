@@ -12,6 +12,8 @@ export interface GuiConfig {
   sinkToken: string;
   uiKey: string;
   createdAt: string;
+  /** TLS mode on by default (`--tls` persists true, `--no-tls` false); absent = off. */
+  tls?: boolean;
 }
 
 export function defaultStateDir(): string {
@@ -42,6 +44,7 @@ export function readGuiConfig(dir: string): GuiConfig {
     uiKey: typeof cfg.uiKey === "string" && cfg.uiKey ? cfg.uiKey : newUiKey(),
     createdAt: typeof cfg.createdAt === "string" ? cfg.createdAt : new Date().toISOString(),
   };
+  if (typeof cfg.tls === "boolean") full.tls = cfg.tls;
   if (!complete) writeGuiConfig(dir, full);
   return full;
 }
@@ -55,6 +58,13 @@ export function writeGuiConfig(dir: string, cfg: GuiConfig): void {
 export function rotateSinkToken(dir: string, cfg: GuiConfig): GuiConfig {
   const next = { ...cfg, sinkToken: newSinkToken() };
   writeGuiConfig(dir, next);
+  return next;
+}
+
+/** Remember `--tls` / `--no-tls`, so a plain `npx sessionpipe-gui` keeps the choice. */
+export function setTlsPreference(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
+  const next = { ...cfg, tls: on };
+  if (cfg.tls !== on) writeGuiConfig(dir, next);
   return next;
 }
 

@@ -16,7 +16,10 @@ import type { Control } from "../control/index.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import type { Store } from "../store/store.js";
 import { uiAuth } from "./auth.js";
+import { readColorThemes } from "./colorThemes.js";
+import { cutPreview } from "./preview.js";
 import { serveStream } from "./stream.js";
+import { ViewerRegistry } from "./viewers.js";
 
 export interface UiDeps {
   store: Store;
@@ -29,6 +32,10 @@ export interface UiDeps {
   demo: { on: () => boolean; set: (on: boolean) => void };
   /** SSE ping interval (tests). */
   pingMs?: number;
+  /** Who is connected to the stream; made here when the caller has none. */
+  viewers?: ViewerRegistry;
+  /** `<stateDir>/color-themes`: JSON token sets served at /api/ui/color-themes. */
+  colorThemesDir?: string;
 }
 
 /** The store's snapshot with what control knows about each machine merged in, plus
@@ -64,7 +71,8 @@ export function registerUi(router: Router, deps: UiDeps): void {
     (h: Handler): Handler =>
     (ctx) =>
       uiAuth(ctx, deps.uiKey()) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
-  const snapshot = (): Snapshot => snapshotWithControl(deps.store, deps.control);
+  const viewers = deps.viewers ?? new ViewerRegistry();
+  const snapshot = (): Snapshot => ({ ...snapshotWithControl(deps.store, deps.control), viewers: viewers.list() });
 
   router.get(
     ROUTES.ui.info,
@@ -77,9 +85,20 @@ export function registerUi(router: Router, deps: UiDeps): void {
   router.get(
     ROUTES.ui.stream,
     guard((ctx) => {
-      serveStream(ctx, { store: deps.store, control: deps.control, snapshot, pingMs: deps.pingMs });
+      serveStream(ctx, { store: deps.store, control: deps.control, snapshot, viewers, pingMs: deps.pingMs });
     }),
   );
+  router.get(
+    ROUTES.ui.viewers,
+    guard(() => ({ status: 200, json: { viewers: viewers.list() } })),
+  );
+  if (deps.colorThemesDir) {
+    const dir = deps.colorThemesDir;
+    router.get(
+      ROUTES.ui.colorThemes,
+      guard(() => ({ status: 200, json: readColorThemes(dir), headers: { "cache-control": "no-cache" } })),
+    );
+  }
 
   router.get(
     `${ROUTES.ui.session}/:harness/:id`,
@@ -87,8 +106,16 @@ export function registerUi(router: Router, deps: UiDeps): void {
       const key = sessionKey(ctx.params.harness!, ctx.params.id!);
       const after = intParam(ctx, "after");
       const limit = intParam(ctx, "limit");
-      const detail = deps.store.sessionDetail(key, after, limit);
+      const p = ctx.url.searchParams;
+      const slim = p.get("slim") === "1";
+      const detail = deps.store.sessionDetail(key, after, limit, {
+        before: intParam(ctx, "before"),
+        tail: p.get("tail") === "1",
+        slim,
+      });
       if (!detail) return { status: 404, json: { reason: "not_found" } };
+      const preview = intParam(ctx, "preview");
+      if (slim && preview !== undefined) detail.events = detail.events.map((e) => cutPreview(e, preview));
       return { status: 200, json: detail };
     }),
   );
@@ -145,7 +172,9 @@ export function registerUi(router: Router, deps: UiDeps): void {
     guard(async (): Promise<Reply> => {
       const info = deps.info();
       const base = info.urls.lan[0] ?? info.urls.local;
-      const url = `${base}/?${UI_KEY_PARAM}=${encodeURIComponent(info.uiKey)}`;
+      // TLS mode: the phone lands on the trust page first (plain http), which installs
+      // the CA and forwards to the https origin, so it never meets a certificate warning.
+      const url = `${base}${info.tls?.on ? ROUTES.trust : "/"}?${UI_KEY_PARAM}=${encodeURIComponent(info.uiKey)}`;
       const svg = await QRCode.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
       return {
         status: 200,

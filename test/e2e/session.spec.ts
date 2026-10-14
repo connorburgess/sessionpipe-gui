@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // One session: the timeline, the tier lens, follow, back, and Forget.
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { EVENTS, INFO, openBoard, sessionUrl, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
 async function openWorking(page: Page): Promise<string> {
@@ -20,7 +21,112 @@ async function openWorking(page: Page): Promise<string> {
 const lens = (page: Page, tier: 0 | 1 | 2 | 3) =>
   page.locator("fieldset.seg label.seg-opt").filter({ hasText: new RegExp(`^${tier}$`) });
 
+/** A long tier-1 session: `turns` prompts, each with two tools, sent in batches of 50. */
+async function postLongSession(
+  request: Parameters<typeof test>[1] extends never ? never : import("@playwright/test").APIRequestContext,
+  turns: number,
+) {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const harness = "claude-code";
+  const sessionId = randomUUID();
+  const title = `E2E long ${sessionId.slice(0, 8)}`;
+  let seq = 0;
+  let clock = Date.now() - turns * 10_000 - 60_000;
+  const ev = (type: string, data: Record<string, unknown>) => {
+    clock += 1000;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: harness, version: "2.1.296" },
+      session: { id: sessionId, seq: seq++, machine: "e2e-box", cwd: "~/code/e2e", title, title_source: "custom" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const events = [ev("session.started", { source: "startup" })];
+  for (let t = 1; t <= turns; t++) {
+    const turnId = `t${t}`;
+    events.push(ev("turn.started", { turn_id: turnId, prompt_chars: 40 + t }));
+    for (const tool of ["Read", "Edit"]) {
+      const callId = `c${t}${tool}`;
+      events.push(ev("tool.started", { tool, call_id: callId, turn_id: turnId }));
+      events.push(ev("tool.ended", { tool, call_id: callId, turn_id: turnId, ms: 120, ok: true }));
+    }
+    events.push(ev("turn.ended", { turn_id: turnId, reason: "stop", ms: 5000 }));
+  }
+  for (let i = 0; i < events.length; i += 50) {
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: events.slice(i, i + 50) },
+    });
+    expect(res.status()).toBe(202);
+  }
+  return { harness, sessionId, title, total: events.length, turns };
+}
+
+const scrollState = (page: Page) =>
+  page.evaluate(() => ({
+    top: window.scrollY,
+    max: document.documentElement.scrollHeight - window.innerHeight,
+  }));
+
 test.describe("session page", () => {
+  test("opens at the latest turn in one page, and older turns load above without moving the view", async ({
+    page,
+    request,
+  }) => {
+    const long = await postLongSession(request, 60); // 361 events, well over the 100-event first page
+    const [detail] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes(`/api/ui/sessions/${long.harness}/${long.sessionId}?`)),
+      page.goto(sessionUrl(long.harness, long.sessionId)),
+    ]);
+    // One slim tail page, not the whole session.
+    expect(detail.url()).toMatch(/tail=1/);
+    expect(detail.url()).toMatch(/slim=1/);
+    const body = (await detail.json()) as { events: unknown[]; total: number; hasOlder: boolean };
+    expect(body.events.length).toBeLessThanOrEqual(100);
+    expect(body.total).toBe(long.total);
+    expect(body.hasOlder).toBe(true);
+    await expect(page.locator("h1.sess-title")).toHaveText(long.title);
+    await expect(page.locator(".sess-counts-ev")).toHaveText(`${long.total} events`);
+
+    // The last turn is on screen and the page sits at the bottom.
+    const lastTurn = page.locator("ol.timeline li.turn").last();
+    await expect(lastTurn.locator(".turn-n")).toHaveText(`turn ${long.turns}`);
+    await expect(lastTurn.locator(".marker--end")).toBeInViewport();
+    const s1 = await scrollState(page);
+    expect(s1.max).toBeGreaterThan(200);
+    expect(s1.top, "scrollTop near its maximum").toBeGreaterThanOrEqual(s1.max - 4);
+    expect(await page.locator("ol.timeline li.turn").count()).toBeLessThan(long.turns);
+
+    // "Older turns" is at the top; loading keeps what was on screen where it was.
+    const older = page.locator("li.older button");
+    await expect(older).toHaveText(/^Older turns · \d+ earlier events$/);
+    // The button sits at the top, so that is where one is when loading. The first whole
+    // turn on screen (its number never changes) must stay where it was.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const anchorTurn = page.locator("ol.timeline li.turn").nth(1);
+    const anchorLabel = (await anchorTurn.locator(".turn-n").textContent())!;
+    expect(anchorLabel).toMatch(/^turn \d+$/);
+    const yBefore = (await anchorTurn.locator(".turn-head").boundingBox())!.y;
+    const turnsBefore = await page.locator("ol.timeline li.turn").count();
+    await older.click();
+    await expect(page.locator("ol.timeline li.turn")).not.toHaveCount(turnsBefore);
+    const sameTurn = page
+      .locator("ol.timeline li.turn")
+      .filter({ has: page.locator(".turn-n", { hasText: new RegExp(`^${anchorLabel}$`) }) });
+    const yAfter = (await sameTurn.locator(".turn-head").boundingBox())!.y;
+    expect(Math.abs(yAfter - yBefore), "the anchored turn did not move").toBeLessThanOrEqual(2);
+    await expect(page.locator(".sess-counts-ev")).toHaveText(`${long.total} events`);
+  });
+
   test("shows the timeline with turns and tool rows; the tier lens hides and reveals", async ({ page }) => {
     await openWorking(page);
     await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();

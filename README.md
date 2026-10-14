@@ -66,7 +66,47 @@ The terminal prints a link and six digits; open the link on `http://localhost:73
 compare the digits, approve with your passkey (Touch ID). From then on a session page has
 an input and Allow / Deny on open permission prompts. The first send of a day asks for the
 passkey once. Passkeys need a secure context, so sending works from the machine's own
-browser (`localhost`); on a phone over plain `http` the controls explain why they are off.
+browser (`localhost`); on a phone over plain `http` the controls explain why they are off
+and point at TLS mode, below.
+
+## Passkeys from a phone
+
+A passkey needs https on a DNS name (never an IP), so `--tls` gives the same port a
+second protocol: the GUI makes its own local certificate authority and a server
+certificate for `<machine>.local`, `localhost`, `127.0.0.1` and every LAN address, under
+`~/.local/state/sessionpipe-gui/tls/` (openssl does the signing; it is on macOS and Linux
+already). `http://localhost:7373` keeps working for the daemon and the sinks;
+`https://<machine>.local:7373` is where passkeys work, on the phone *and* on the Mac.
+The choice is remembered (`--no-tls` turns it off).
+
+```sh
+sessionpipe-gui --tls
+```
+
+On an iPhone, scan the new QR code (it opens the trust page over plain http, so the phone
+never meets a certificate warning), then:
+
+1. **Download the certificate** on that page and allow the profile download.
+2. **Settings → Profile Downloaded → Install.**
+3. **Settings → General → About → Certificate Trust Settings**: enable full trust for
+   *sessionpipe-gui local CA*.
+4. Tap the **https://<machine>.local:7373** button on the trust page.
+
+Compare the SHA-256 fingerprint the page shows with the one in the profile before you
+trust it. Android: *Settings → Security → More security settings → Install a certificate
+→ CA certificate*, then the same button. On the Mac, `sessionpipe-gui tls trust` adds the
+CA to your login keychain (`security add-trusted-cert`; macOS asks for your password);
+Linux: `update-ca-certificates` (Debian) or `trust anchor` (Fedora) with the `ca.crt`.
+`sessionpipe-gui tls status` prints the names, the expiry, the fingerprint and the paths;
+`tls reset` makes a new CA (phones trust it again).
+
+With TLS on the rp id becomes `<machine>.local` (unless `--rp-id` says otherwise), and a
+passkey only answers on that origin: `http://localhost` still shows everything but no
+longer signs. Pairing a daemon stays `sessionpipe control pair http://localhost:7373`; it
+reads the rp id from the well-known file. The name is mDNS: macOS advertises it itself,
+Linux needs avahi-daemon, Windows 10+ resolves it, and Android builds vary (a hosts
+entry or the router's DNS can stand in). A new LAN address re-issues the server
+certificate at the next start; the CA, and the phones' trust in it, stay.
 
 ## It is a receiver
 
@@ -90,6 +130,7 @@ loopback).
 | Events | `~/.local/state/sessionpipe-gui/events/<harness>/<session>.jsonl`, one file per session, append-only |
 | Config | `~/.local/state/sessionpipe-gui/config.json`: the sink token and the UI key |
 | Control | `~/.local/state/sessionpipe-gui/control/`: paired machines, queues |
+| TLS | `~/.local/state/sessionpipe-gui/tls/`: the local CA and the server certificate (`--tls`) |
 
 Delete a session from its page (Forget), or delete the whole directory to start over.
 
@@ -103,9 +144,14 @@ Delete a session from its page (Forget), or delete the whole directory to start 
 --outbox DIR      tail a sessionpipe state dir other than the default one
 --demo            generate synthetic sessions
 --replay FILE     replay a sessionpipe JSONL file (--speed N: 0 = at once, 1 = real time)
---rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost)
+--tls             TLS mode: https on the same port from a local CA, for passkeys on a phone (remembered)
+--no-tls          turn TLS mode off again (remembered)
+--rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost; with --tls, <machine>.local)
 --test-door       loopback-only test door for the conformance runner
 --open            open the board in the browser
+
+sessionpipe-gui tls status | trust | reset   the certificate's names, expiry and fingerprint;
+                                             trust the CA on this Mac; start over
 ```
 
 ## Development

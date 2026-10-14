@@ -4,11 +4,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { back, navigate } from "./router";
 
+/** Whether a key press belongs to a text field (so `/` and Esc leave it alone). A radio,
+ *  a checkbox or a button is focusable but not typed into. */
 const isTyping = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+  if (tag === "INPUT") {
+    const type = (el as HTMLInputElement).type;
+    return !["radio", "checkbox", "button", "submit", "reset", "range", "color", "file"].includes(type);
+  }
+  return tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 };
 
 export function focusSearch(): boolean {

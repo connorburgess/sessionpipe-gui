@@ -4,6 +4,7 @@
 import { rmSync } from "node:fs";
 
 export default function globalTeardown(): void {
-  const dir = process.env.SPGUI_E2E_STATE;
-  if (dir?.includes("spgui-e2e-")) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [process.env.SPGUI_E2E_STATE, process.env.SPGUI_E2E_TLS_STATE]) {
+    if (dir?.includes("spgui-e2e-")) rmSync(dir, { recursive: true, force: true });
+  }
 }

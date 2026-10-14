@@ -3,6 +3,7 @@
 // the UI API a handful more. Handlers return a Reply, or write the response themselves
 // (SSE, static files) and return nothing.
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { gzipSync } from "node:zlib";
 import { isLoopback } from "./net.js";
 
 export interface Ctx {
@@ -84,7 +85,7 @@ export class Router {
     const m = this.match(req.method ?? "GET", url.pathname);
     try {
       const reply = m ? await m.handler({ ...ctx, params: m.params }) : await this.fallback(ctx);
-      if (reply) send(res, reply);
+      if (reply) send(res, reply, req);
       else if (!res.writableEnded && !res.headersSent) send(res, { status: 404, json: { reason: "not_found" } });
     } catch (e) {
       if (e instanceof HttpError) send(res, { status: e.status, json: e.body ?? { reason: `http_${e.status}` } });
@@ -120,7 +121,10 @@ function matchParts(pattern: string[], parts: string[]): Record<string, string> 
   return params;
 }
 
-export function send(res: ServerResponse, r: Reply): void {
+/** Bodies over this are gzipped when the client accepts it (a session page is 140 KB of JSON). */
+const GZIP_MIN = 1024;
+
+export function send(res: ServerResponse, r: Reply, req?: IncomingMessage): void {
   const headers: Record<string, string> = { ...(r.headers ?? {}) };
   let body: Buffer;
   if (r.json !== undefined) {
@@ -132,6 +136,15 @@ export function send(res: ServerResponse, r: Reply): void {
   } else {
     headers["content-type"] ??= "text/plain; charset=utf-8";
     body = Buffer.from(r.text ?? "");
+  }
+  if (
+    body.length >= GZIP_MIN &&
+    !headers["content-encoding"] &&
+    /\bgzip\b/.test(String(req?.headers["accept-encoding"] ?? ""))
+  ) {
+    body = gzipSync(body);
+    headers["content-encoding"] = "gzip";
+    headers.vary = headers.vary ? `${headers.vary}, accept-encoding` : "accept-encoding";
   }
   headers["content-length"] = String(body.length);
   res.writeHead(r.status, headers);

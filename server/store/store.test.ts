@@ -287,6 +287,27 @@ describe("detail and feed", () => {
     expect("preview" in p1.events[1]!).toBe(false);
     const p2 = store.sessionDetail(KEY, 2, 10)!;
     expect(p2.events.map((e) => e.session.seq)).toEqual([3, 4, 5]);
+    expect(p2).toMatchObject({ firstSeq: 3, hasOlder: true });
+    expect(p1).toMatchObject({ firstSeq: 0, hasOlder: false });
+    // Backwards: the newest page first (what the Session page opens on), then older ones.
+    const tail = store.sessionDetail(KEY, undefined, 2, { tail: true })!;
+    expect(tail.events.map((e) => e.session.seq)).toEqual([4, 5]);
+    expect(tail).toMatchObject({ firstSeq: 4, hasOlder: true, total: 6 });
+    expect(tail.events[0]!.data.output).toBe(big);
+    const older = store.sessionDetail(KEY, undefined, 3, { before: 4 })!;
+    expect(older.events.map((e) => e.session.seq)).toEqual([1, 2, 3]);
+    expect(older).toMatchObject({ firstSeq: 1, hasOlder: true });
+    const oldest = store.sessionDetail(KEY, undefined, 10, { before: 1 })!;
+    expect(oldest.events.map((e) => e.session.seq)).toEqual([0]);
+    expect(oldest.hasOlder).toBe(false);
+    expect(store.sessionDetail(KEY, undefined, 10, { before: 0 })!.events).toEqual([]);
+    // Slim pages come from the index, not the disk: previews and their lengths.
+    const slimTail = store.sessionDetail(KEY, undefined, 2, { tail: true, slim: true })!;
+    expect((slimTail.events[0]!.data.output as string).length).toBe(2048);
+    expect((slimTail.events[0]! as { preview?: Record<string, number> }).preview).toEqual({
+      input: JSON.stringify({ command: big }).length,
+      output: 10_000,
+    });
     // The feed and the stream carry the slim copy.
     const slim = store.feed({ session: KEY, type: "tool.ended" }).events[0]!;
     expect((slim.data.output as string).length).toBe(2048);

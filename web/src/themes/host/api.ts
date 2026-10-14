@@ -15,6 +15,7 @@ import {
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { createRoot } from "react-dom/client";
+import { createControlApi } from "../../control/themeControl";
 import type { AppState, Store } from "../../data/store";
 import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
 import { navigate, sessionPath } from "../../lib/router";
@@ -65,7 +66,7 @@ export function toSnapshot(s: AppState, scheme: "dark" | "light"): ThemeSnapshot
     control: s.control,
     recent: s.recent,
     scheme,
-    viewers: [],
+    viewers: s.viewers,
   });
 }
 
@@ -180,6 +181,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
         }
       },
     },
+    control: createControlApi({ machines: () => store.get().machines, sessions: () => store.get().sessions }),
     react: { React, ReactDOM, createRoot },
     format: {
       ago: (iso, now = Date.now()) => ago(iso, now),

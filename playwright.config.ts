@@ -8,9 +8,14 @@ import { defineConfig, devices } from "@playwright/test";
 
 export const E2E_PORT = 7311;
 export const E2E_BASE = `http://127.0.0.1:${E2E_PORT}`;
+/** A second instance in TLS mode (dual-protocol port, rp id localhost) for tls.spec.ts. */
+export const E2E_TLS_PORT = 7312;
+export const E2E_TLS_BASE = `https://localhost:${E2E_TLS_PORT}`;
 
 const stateDir = path.join(os.tmpdir(), `spgui-e2e-${Date.now()}-${process.pid}`);
 process.env.SPGUI_E2E_STATE = stateDir;
+const tlsStateDir = `${stateDir}-tls`;
+process.env.SPGUI_E2E_TLS_STATE = tlsStateDir;
 
 export default defineConfig({
   testDir: "test/e2e",
@@ -47,13 +52,26 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    // serve.mjs installs the fixture themes with the CLI, then runs dist/cli.js with these args.
-    command: `node test/e2e/serve.mjs --port ${E2E_PORT} --state "${stateDir}" --no-outbox --demo --speed 20 --quiet`,
-    url: `${E2E_BASE}/api/ui/info`,
-    reuseExistingServer: false,
-    timeout: 30_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  webServer: [
+    {
+      // serve.mjs installs the fixture themes with the CLI, then runs dist/cli.js with these args.
+      command: `node test/e2e/serve.mjs --port ${E2E_PORT} --state "${stateDir}" --no-outbox --demo --speed 20 --quiet`,
+      url: `${E2E_BASE}/api/ui/info`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // TLS mode on its own port and state dir; the readiness check goes over plain http,
+      // which the same port also answers. --rp-id localhost because the test browser
+      // cannot resolve this machine's .local name. Needs openssl (tls.spec.ts skips if not).
+      command: `node dist/cli.js --port ${E2E_TLS_PORT} --state "${tlsStateDir}" --no-outbox --tls --rp-id localhost --test-door --quiet`,
+      url: `http://127.0.0.1:${E2E_TLS_PORT}/api/ui/info`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+  ],
 });

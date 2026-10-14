@@ -94,6 +94,7 @@ Scrolling inside it is yours to do. Return the function that unmounts (it may be
 | `tokens` | The CSS custom properties the host defines on `:root` (`--bg`, `--fg`, `--fg-2`, `--line`, `--needs`, `--err`, …), right for both colour schemes. Use them and your theme follows the switch. |
 | `storage.get()` / `storage.set(value)` | One JSON document per theme, kept by the server and shared by every device, at most 256 KB. `get()` is `null` until the first `set`. |
 | `local.get(key)` / `local.set(key, value)` | `localStorage`, namespaced to your theme, for per-device conveniences. May silently be unavailable. |
+| `control` | The control channel, signed by the host: `availability(target)`, `send`, `answer`, `cancel`, `start`. See [Control from a theme](#control-from-a-theme). |
 | `react` | `{ React, ReactDOM, createRoot }`: the host's React 18, for a theme that wants it without bundling its own. |
 | `format.ago(iso)` | `"12 s ago"`, `"3 m ago"`, `"yesterday"`. |
 | `format.duration(ms)` | `"0.4 s"`, `"4 m 12 s"`, `"2 h 05 m"`. |
@@ -112,6 +113,7 @@ A `ThemeSnapshot`:
   control: readonly ControlActivity[],                  // newest first
   recent: readonly StoredEvent[],                       // newest first, the live tail (≤ 1500)
   scheme: "dark" | "light",                             // what the page renders in right now
+  viewers: readonly Viewer[],                           // browsers on the stream; `current` marks this one
 }
 ```
 
@@ -119,6 +121,67 @@ A `ThemeSnapshot`:
 `state` is the host's reading (`needs_you`, `working`, `stale`, `idle`, `done`);
 `openAttentions`, `currentTool`, `currentTurn`, `counts` and `recentTools` are what
 the board's cards are drawn from.
+
+## Who is looking: `viewers`
+
+Every browser with the GUI open holds a stream to the server, and the server reads
+a `Viewer` off each connection: a per-connection `id`, the `ip` (`"this machine"`
+when it is the receiver's own browser), `loopback`, a `device` and a short `label`
+from the user agent, `connectedAt` and `lastSeenAt`. Nothing is installed on the
+device; close the tab and it is gone. `device` is `"phone"` (iPhone, Android phone),
+`"tablet"` (iPad, Android tablet), `"laptop"` (a Mac, Windows or Linux browser on
+another address), `"desktop"` (the same on this machine) or `"unknown"`. The entry
+for the very page your theme runs in carries `current: true`.
+
+```js
+const draw = (snap) => {
+  const me = snap.viewers.find((v) => v.current);
+  el.textContent = `${snap.viewers.length} connected · you are ${me?.label ?? "?"}`;
+  for (const v of snap.viewers) {
+    if (!v.current) el.append(` · ${v.label} (${v.device}, ${api.format.ago(v.connectedAt)})`);
+  }
+};
+draw(api.state.get());
+api.state.subscribe(draw);
+```
+
+The list is also at `GET /api/ui/viewers` (`{ viewers }`, nobody marked current).
+
+## Control from a theme
+
+`api.control` sends the same signed commands the Session and Machines pages do
+(CONTROL.md): the host signs with the person's passkey, once a day for a day grant,
+and `POST`s to the receiver, which hands the message to the machine's daemon. A theme
+never sees a key. Each call resolves to a `ControlActivity`; the same message then
+moves through `snap.control` (queued → taken → delivered, or refused) as the daemon
+acks it.
+
+| Call | What it does |
+|---|---|
+| `availability({ session })` or `availability({ machineId })` | `{ ok: true }`, or `{ ok: false, reason }` with the line the host would show: no secure context (passkeys need https or localhost), the session's machine is not paired here, or its daemon is offline. Call it before offering a button. |
+| `send(session, text)` | A prompt for the session's next turn. |
+| `answer(session, attentionId, "allow" \| "deny", note?)` | Answers an open permission (`session.openAttentions[].attentionId`). |
+| `cancel(session)` | Interrupts the running turn. |
+| `start(machineId, { harness, cwd, text })` | A new session on a paired machine (`machine.control.machineId`, a `cwd` from `machine.control.folders`). The result carries `session`, the key the host chose. |
+
+A call that cannot be sent rejects with an `Error` whose message is the host's wording
+(`not sent · …`), including a refusal the daemon returns. The first send of the day
+opens the passkey prompt; a theme may want to say so next to its button.
+
+```js
+const key = "claude-code:8c132906-…";
+const a = api.control.availability({ session: key });
+button.disabled = !a.ok;
+button.title = a.reason ?? "";
+button.onclick = async () => {
+  try {
+    const sent = await api.control.send(key, "Run the tests and fix what fails");
+    note.textContent = `queued as ${sent.id}`;
+  } catch (e) {
+    note.textContent = e.message; // "not sent · the machine is offline…"
+  }
+};
+```
 
 ## The same theme with `api.react`
 
@@ -218,6 +281,21 @@ folder; the server reads it at boot and on **Reload** on the Themes page
 A **linked** theme is imported afresh on every visit to its page (a cache-busting
 query string, and the server sends `no-cache` for `.js`, `.css` and `.json`), so an
 edit shows after navigating away and back; no restart.
+
+## Color themes are not themes
+
+A **color theme** is a token set, like a VS Code color theme: a JSON file that sets
+some of the custom properties in `web/src/styles/tokens.css` (`--bg`, `--fg`,
+`--needs`, …) and the scheme it is for. People pick one from the page's quick settings
+(the gear on the rail or the tab bar), beside the appearance and the text size; the
+built-ins are Default, Paper, Graphite, Ink and Sepia. To add your own, drop a file into
+`<stateDir>/color-themes/<id>.json` with the shape of
+[`color-theme.example.json`](color-theme.example.json): `id`, `name`, `scheme` (`dark`
+or `light`), and `tokens` with at least `--bg` and `--fg`; unknown token names are
+refused and the file is listed with its error. The server serves them at
+`GET /api/ui/color-themes`, read on every request, so an edit shows on the next open
+of the popover. Because every theme plugin draws with the same tokens by name, a color
+theme restyles every view at once; a plugin never needs to know which one is on.
 
 ## Rules of the house
 

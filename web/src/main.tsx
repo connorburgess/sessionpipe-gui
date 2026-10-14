@@ -7,12 +7,12 @@ import { App } from "./app";
 import { StoreContext } from "./data/hooks";
 import { Store } from "./data/store";
 import { createHttpTransport } from "./data/transport";
-import { applyTheme } from "./lib/theme";
+import { applySettings } from "./lib/theme";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
 
-applyTheme();
+applySettings();
 
 const isMockMode = () => import.meta.env.VITE_MOCK === "1" || new URLSearchParams(location.search).get("mock") === "1";
 

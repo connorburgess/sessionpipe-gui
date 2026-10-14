@@ -4,6 +4,7 @@
 // them with the same readings ARCHITECTURE.md gives the store, so the mock is the contract.
 import type {
   Attention,
+  DetailQuery,
   FeedPage,
   FeedQuery,
   Info,
@@ -40,15 +41,15 @@ const iso = (t: number) => new Date(t).toISOString();
 /** The stream and the feed carry slim events: long strings cut to a preview, with the
  *  original lengths in `preview` (ARCHITECTURE.md "Memory"). The detail route is full. */
 const PREVIEW_CHARS = 2048;
-export function slim(e: StoredEvent): StoredEvent {
+export function slim(e: StoredEvent, chars = PREVIEW_CHARS): StoredEvent {
   const preview: Record<string, number> = {};
   const data: Record<string, unknown> = { ...e.data };
   for (const k of ["input", "output", "user", "assistant"]) {
     const v = data[k];
     const text = typeof v === "string" ? v : v !== undefined ? JSON.stringify(v) : undefined;
-    if (text !== undefined && text.length > PREVIEW_CHARS) {
+    if (text !== undefined && text.length > chars) {
       preview[k] = text.length;
-      data[k] = `${text.slice(0, PREVIEW_CHARS)}…`;
+      data[k] = `${text.slice(0, chars)}…`;
     }
   }
   return Object.keys(preview).length ? { ...e, data, preview } : e;
@@ -540,17 +541,27 @@ export class World {
     };
   }
 
-  detail(harness: string, id: string, after?: number, limit = 500): SessionDetail | null {
+  detail(harness: string, id: string, q: DetailQuery = {}): SessionDetail | null {
     const r = this.sessions.get(sessionKey(harness, id));
     if (!r) return null;
     const now = Date.now();
+    const limit = Math.max(1, Math.min(500, q.limit ?? 500));
     const sorted = [...r.events].sort((a, b) => a.session.seq - b.session.seq);
-    const from = after === undefined ? sorted : sorted.filter((e) => e.session.seq > after);
+    let page: StoredEvent[];
+    if (q.tail || q.before !== undefined) {
+      const below = q.tail ? Number.POSITIVE_INFINITY : q.before!;
+      page = sorted.filter((e) => e.session.seq < below).slice(-limit);
+    } else {
+      page = (q.after === undefined ? sorted : sorted.filter((e) => e.session.seq > q.after!)).slice(0, limit);
+    }
+    const firstSeq = page[0]?.session.seq;
     return {
       session: this.summary(r, now),
-      events: from.slice(0, limit),
+      events: q.slim ? page.map((e) => slim(e, q.preview)) : page,
       total: sorted.length,
       children: this.children(r).map((c) => this.summary(c, now)),
+      firstSeq,
+      hasOlder: firstSeq !== undefined && sorted.some((e) => e.session.seq < firstSeq),
     };
   }
 
