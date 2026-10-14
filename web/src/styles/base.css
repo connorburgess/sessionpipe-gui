@@ -51,12 +51,13 @@ button {
   touch-action: manipulation;
 }
 
+/* Mono sits a step under the text around it: 13 in body, 12 in a meta line. */
 code,
 pre,
 kbd,
 .mono {
   font-family: var(--font-mono);
-  font-size: 0.875em;
+  font-size: 0.925em;
 }
 
 pre {

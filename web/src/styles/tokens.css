@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Design tokens. One typeface (the system sans) and one mono. Neutrals carry the whole
-   interface; every neutral is tinted a little so nothing is pure grey. One accent: amber,
+   interface; every neutral is tinted a little so nothing is pure grey. The muted tiers
+   stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta (≥ 5:1),
+   fg-4 is for marks only (≥ 3:1). One accent: amber,
    for "needs you" and nothing else. Working is the foreground with a live dot; stale,
    idle and done are shades of muted text. Red only where there is an error. */
 
@@ -12,12 +14,14 @@
   --font-display: var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 
+  /* The scale, in rem so the text-size setting multiplies it: 12 for mono stamps and
+     tier marks, 13 for meta, 14 for everything a person reads, 15 for card titles,
+     18 for page titles. Nothing is set below 12. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
-  --text-md: 0.9375rem;
-  --text-lg: 1.0625rem;
-  /* Kept for other owners' styles; headings are body size now. */
-  --text-xl: 1.0625rem;
+  --text-md: 0.875rem;
+  --text-lg: 0.9375rem;
+  --text-xl: 1.125rem;
 
   --radius: 6px;
   --radius-sm: 6px;
@@ -40,12 +44,12 @@
   --bg-2: oklch(0.998 0.002 85);
   --bg-3: oklch(0.955 0.006 85);
   --bg-4: oklch(0.925 0.008 85);
-  --line: oklch(0.905 0.008 85);
-  --line-2: oklch(0.84 0.01 85);
+  --line: oklch(0.88 0.008 85);
+  --line-2: oklch(0.8 0.01 85);
   --fg: oklch(0.22 0.014 265);
-  --fg-2: oklch(0.44 0.016 265);
-  --fg-3: oklch(0.58 0.014 265);
-  --fg-4: oklch(0.7 0.01 265);
+  --fg-2: oklch(0.42 0.016 265);
+  --fg-3: oklch(0.52 0.014 265);
+  --fg-4: oklch(0.64 0.01 265);
 
   --needs: oklch(0.72 0.15 65);
   --needs-fg: oklch(0.5 0.12 60);
@@ -82,12 +86,12 @@
     --bg-2: oklch(0.195 0.009 255);
     --bg-3: oklch(0.225 0.01 255);
     --bg-4: oklch(0.27 0.011 255);
-    --line: oklch(0.255 0.01 255);
-    --line-2: oklch(0.33 0.012 255);
+    --line: oklch(0.27 0.01 255);
+    --line-2: oklch(0.35 0.012 255);
     --fg: oklch(0.92 0.006 85);
-    --fg-2: oklch(0.72 0.008 85);
-    --fg-3: oklch(0.56 0.008 85);
-    --fg-4: oklch(0.43 0.008 255);
+    --fg-2: oklch(0.8 0.008 85);
+    --fg-3: oklch(0.66 0.008 85);
+    --fg-4: oklch(0.5 0.008 255);
 
     --needs: oklch(0.78 0.13 70);
     --needs-fg: oklch(0.84 0.11 75);
@@ -109,12 +113,12 @@
   --bg-2: oklch(0.195 0.009 255);
   --bg-3: oklch(0.225 0.01 255);
   --bg-4: oklch(0.27 0.011 255);
-  --line: oklch(0.255 0.01 255);
-  --line-2: oklch(0.33 0.012 255);
+  --line: oklch(0.27 0.01 255);
+  --line-2: oklch(0.35 0.012 255);
   --fg: oklch(0.92 0.006 85);
-  --fg-2: oklch(0.72 0.008 85);
-  --fg-3: oklch(0.56 0.008 85);
-  --fg-4: oklch(0.43 0.008 255);
+  --fg-2: oklch(0.8 0.008 85);
+  --fg-3: oklch(0.66 0.008 85);
+  --fg-4: oklch(0.5 0.008 255);
 
   --needs: oklch(0.78 0.13 70);
   --needs-fg: oklch(0.84 0.11 75);

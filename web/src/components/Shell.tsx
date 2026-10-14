@@ -157,7 +157,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         <div className="rail-nav">
           {nav.map((n, i) => (
             <Fragment key={n.key}>
-              {n.experimental && !nav[i - 1]?.experimental ? <span className="rail-group">experimental</span> : null}
+              {n.experimental && !nav[i - 1]?.experimental ? (
+                /* "labs" fits the rail; data-nav keeps the divider's name for the tests. */
+                <span className="rail-group" data-nav="experimental" title="Experimental views">
+                  labs
+                </span>
+              ) : null}
               {links[i]}
             </Fragment>
           ))}

@@ -35,7 +35,7 @@
 .theme-wait {
   padding: 24px var(--gutter);
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
 }
 
 .theme-error {
@@ -49,7 +49,7 @@
   max-width: 72ch;
 }
 .theme-error h2 {
-  font-size: var(--text-lg);
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--err);
 }
@@ -87,15 +87,20 @@
   text-underline-offset: 2px;
 }
 
-/* The "experimental" divider on the rail, above the first experimental theme. */
+/* The divider on the rail above the first experimental theme: a hairline and a short
+   word ("labs") that fits the rail at every text size. */
 .rail-group {
   display: block;
-  margin: 10px 0 2px;
-  padding-top: 10px;
+  margin: 8px 0 0;
+  padding: 12px 0 4px;
   border-top: 1px solid var(--line);
-  color: var(--fg-4);
-  font-size: 11px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: 1.2;
   text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */
@@ -131,20 +136,21 @@
   gap: 8px;
 }
 .themes-row-name {
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: 500;
 }
 .themes-row-ver,
 .themes-row-id {
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
 }
 .themes-flag {
-  padding: 1px 6px;
+  padding: 1px 8px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-pill);
   color: var(--fg-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 .themes-flag--err {
   border-color: var(--err-soft);
@@ -154,6 +160,7 @@
   grid-column: 1;
   color: var(--fg-3);
   font-size: var(--text-sm);
+  line-height: 1.5;
   word-break: break-all;
 }
 .themes-row-meta code {
@@ -173,7 +180,7 @@
 }
 .themes-empty {
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
 }
 .themes-tools {
   display: flex;
@@ -184,6 +191,6 @@
 .themes-trust {
   max-width: 72ch;
   color: var(--fg-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   line-height: 1.5;
 }
