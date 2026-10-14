@@ -9,6 +9,7 @@ import { bytes } from "../lib/format";
 import { Link } from "../lib/router";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { dur } from "../lib/time";
+import { useSetupStatus } from "../setup/api";
 import { useThemes } from "../themes/host/registry";
 
 export function Connect() {
@@ -20,6 +21,7 @@ export function Connect() {
   const [busy, setBusy] = useState<"rotate" | "demo" | null>(null);
   const [qrBroken, setQrBroken] = useState(false);
   const themes = useThemes().themes;
+  const setup = useSetupStatus();
 
   const load = () =>
     store.transport
@@ -75,6 +77,12 @@ export function Connect() {
 
   return (
     <div className="page connect">
+      {setup.local !== false && (
+        <p className="page-note connect-setup">
+          First time here? <Link to="/setup">Setup →</Link>
+          <span>five steps: your sessions, the secure address, pairing, your phone, a first message.</span>
+        </p>
+      )}
       {error && <p className="page-note is-err">{error}</p>}
 
       <section className="sect sect--phone">

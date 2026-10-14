@@ -6,11 +6,17 @@ import os from "node:os";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
-export const E2E_PORT = 7311;
+// SPGUI_E2E_PORT / SPGUI_E2E_TLS_PORT move both when another run holds the defaults.
+export const E2E_PORT = Number(process.env.SPGUI_E2E_PORT ?? 7311);
 export const E2E_BASE = `http://127.0.0.1:${E2E_PORT}`;
 /** A second instance in TLS mode (dual-protocol port, rp id localhost) for tls.spec.ts. */
-export const E2E_TLS_PORT = 7312;
+export const E2E_TLS_PORT = Number(process.env.SPGUI_E2E_TLS_PORT ?? 7312);
 export const E2E_TLS_BASE = `https://localhost:${E2E_TLS_PORT}`;
+
+/** Every spec but setup.spec.ts starts as a device that has seen the setup page, so the
+ *  first-run redirect to /setup never meets a board test. */
+export const SETUP_SEEN_KEY = "sessionpipe-gui.setup.seen";
+const seenSetup = (origin: string) => ({ origin, localStorage: [{ name: SETUP_SEEN_KEY, value: "1" }] });
 
 const stateDir = path.join(os.tmpdir(), `spgui-e2e-${Date.now()}-${process.pid}`);
 process.env.SPGUI_E2E_STATE = stateDir;
@@ -34,6 +40,15 @@ export default defineConfig({
     screenshot: "only-on-failure",
     locale: "en-US",
     timezoneId: "UTC",
+    storageState: {
+      cookies: [],
+      origins: [
+        seenSetup(E2E_BASE),
+        seenSetup(`http://localhost:${E2E_PORT}`),
+        seenSetup(E2E_TLS_BASE),
+        seenSetup(`http://127.0.0.1:${E2E_TLS_PORT}`),
+      ],
+    },
   },
   projects: [
     {

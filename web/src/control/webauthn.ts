@@ -17,7 +17,7 @@ export const INSECURE_HINT = "passkeys need https or localhost: open this page o
 export function insecureHint(): string {
   const tls = tlsInfo();
   if (!tls?.on) return INSECURE_HINT;
-  return `passkeys work only at ${tls.httpsUrl} (TLS mode); trust steps are on the Connect page`;
+  return `passkeys work only at ${tls.httpsUrl} (TLS mode); the Setup page gets you there`;
 }
 
 /** Is `location.hostname` the rp id or under it (CONTROL.md §3.2)? True when `rp` is unknown. */
@@ -92,9 +92,32 @@ export function guessDeviceName(): string {
   return "this browser";
 }
 
+/** What the setup page learned about this https origin: whether the browser trusts its
+ *  certificate (its probe of the https origin succeeded, or the server says the CA is
+ *  trusted). Unknown until it says. */
+let originTrust: boolean | null = null;
+export function noteOriginTrust(trusted: boolean | null): void {
+  originTrust = trusted;
+}
+
+/** The browser refused the ceremony because it does not trust this origin's certificate.
+ *  Chrome says so in the error itself ("WebAuthn is not supported on sites with TLS
+ *  certificate errors"); otherwise a NotAllowedError on an https origin the setup page
+ *  found untrusted means the same. */
+export function certificateRefusal(e: unknown): boolean {
+  const err = e as { name?: string; message?: string } | null;
+  if (err?.name !== "NotAllowedError") return false;
+  if (/certificate|TLS/i.test(err.message ?? "")) return true;
+  return typeof location !== "undefined" && location.protocol === "https:" && originTrust === false;
+}
+
+export const UNTRUSTED_CERT_HINT =
+  "Your browser doesn't trust this certificate yet. On a Mac: Setup → Trust, then quit and reopen the browser.";
+
 /** What the person did, in words, when a ceremony ends without a credential. */
 export function webauthnError(e: unknown): string {
   const err = e as { name?: string; message?: string } | null;
+  if (certificateRefusal(e)) return UNTRUSTED_CERT_HINT;
   switch (err?.name) {
     case "NotAllowedError":
       return "The passkey prompt was dismissed or timed out.";

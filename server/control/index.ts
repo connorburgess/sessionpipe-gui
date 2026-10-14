@@ -27,8 +27,9 @@ export interface ControlDeps {
   stateDir: string;
   /** The current sink token: pairing with a sink token presents it (CONTROL.md §2 step 1). */
   sinkToken: () => string;
-  /** WebAuthn rp id passkeys are made for; "localhost" by default. */
-  rpId: string;
+  /** WebAuthn rp id passkeys are made for; "localhost" by default. A getter when it can
+   *  change while running (the setup page turning TLS mode on switches it to `<name>.local`). */
+  rpId: string | (() => string);
   /** Loopback-only test door for the conformance runner (`enqueue`, `approve`); off by default. */
   testDoor: boolean;
   /** Whether a request may use the UI API (loopback or UI-key cookie); supplied by server-core. */
@@ -45,6 +46,8 @@ export interface Control {
   machines(): Map<string, MachineControl>;
   activity(limit?: number): ControlActivity[];
   subscribe(l: (m: StreamMessage) => void): () => void;
+  /** Pairings still waiting for a person, newest first (the setup page shows this machine's inline). */
+  pendingPairings(): { code: string; check: string; expiresAt: string; machine: string; machineId: string }[];
   /** The `control` member of the well-known file (HTTP.md §1). */
   wellKnown(): {
     wait_max_s: number;
@@ -58,6 +61,7 @@ export interface Control {
 
 export function createControl(deps: ControlDeps): Control {
   const state = new ControlState(path.join(deps.stateDir, "control"));
+  const rpId = (): string => (typeof deps.rpId === "function" ? deps.rpId() : deps.rpId);
   const listeners = new Set<(m: StreamMessage) => void>();
   let machinesTimer: NodeJS.Timeout | null = null;
   state.onMachines = () => {
@@ -94,8 +98,8 @@ export function createControl(deps: ControlDeps): Control {
   return {
     register(router) {
       registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control });
-      registerUiRoutes(router, { state, rpId: deps.rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control });
-      if (deps.testDoor) registerTestDoor(router, { state, rpId: deps.rpId, base: ROUTES.control });
+      registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control });
+      if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control });
     },
     machines() {
       const out = new Map<string, MachineControl>();
@@ -103,6 +107,14 @@ export function createControl(deps: ControlDeps): Control {
       return out;
     },
     activity: (limit) => state.activity(limit),
+    pendingPairings: () =>
+      state.pendingPairings().map(({ machine, pairing }) => ({
+        code: pairing.code,
+        check: pairing.check,
+        expiresAt: pairing.expiresAt,
+        machine: machine.name,
+        machineId: machine.id,
+      })),
     subscribe(l) {
       listeners.add(l);
       return () => listeners.delete(l);
@@ -111,7 +123,7 @@ export function createControl(deps: ControlDeps): Control {
       wait_max_s: WAIT_MAX_S,
       open_pairing: true,
       session_tools: [],
-      signing: { rp_id: deps.rpId, algs: [-7, -257] },
+      signing: { rp_id: rpId(), algs: [-7, -257] },
     }),
     close: () => {
       if (machinesTimer) clearTimeout(machinesTimer);

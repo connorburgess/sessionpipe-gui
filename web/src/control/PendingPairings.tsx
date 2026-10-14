@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. The pairings still waiting for a person (GET /pairings, every
-// 3 s while the page is open), each with its six digits and a link to /pair?code=.
+// 3 s while the page is open), each with its six digits and a link to /pair?code=. When
+// passkeys cannot work on this origin (http://localhost with TLS mode on), the link goes
+// to the https origin instead, where approval can happen.
 import { useEffect, useState } from "react";
 import { Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
-import { controlApi, type Pairing } from "./api";
+import { controlApi, httpsPath, type Pairing } from "./api";
+import { passkeysAvailable } from "./webauthn";
 import "./control.css";
 
 const POLL_MS = 3000;
@@ -42,6 +45,8 @@ export function PendingPairings() {
       <ul className="pending-list">
         {list.map((p) => {
           const left = Math.max(0, Math.ceil((ms(p.expiresAt) - now) / 1000));
+          const pairPath = `/pair?code=${encodeURIComponent(p.code)}`;
+          const https = passkeysAvailable(p.rpId) ? null : httpsPath(pairPath);
           return (
             <li key={p.code} className="pending-item" data-code={p.code}>
               <span className="pending-dot" aria-hidden="true" />
@@ -55,9 +60,15 @@ export function PendingPairings() {
                 {p.machine.firstPairing ? " · first pairing" : ""} · {Math.floor(left / 60)} m{" "}
                 {String(left % 60).padStart(2, "0")} s left
               </span>
-              <Link to={`/pair?code=${encodeURIComponent(p.code)}`} className="pending-link">
-                Approve →
-              </Link>
+              {https ? (
+                <a href={https} className="pending-link" title="Passkeys work only on the https origin">
+                  Approve on {new URL(https).host} →
+                </a>
+              ) : (
+                <Link to={pairPath} className="pending-link">
+                  Approve →
+                </Link>
+              )}
             </li>
           );
         })}

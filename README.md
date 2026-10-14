@@ -16,6 +16,37 @@ here), and prints a QR code so a phone on the same Wi-Fi can open it.
 
 ![The board](docs/screenshots/board-desktop.png)
 
+## First run
+
+The first time, the banner's first line is `setup http://localhost:7373/setup`, and the
+board sends a new device there once. The page is five steps, each green once this machine
+has done its part, each with one button; it checks every two seconds, so a step turns
+green by itself.
+
+![Setup](docs/screenshots/setup-desktop.png)
+
+1. **Your sessions** — `npx sessionpipe install` if the CLI is missing; green at the first event.
+2. **Secure address** — *Turn on* makes the certificates and adds https to the running port
+   (no restart; remembered as `--tls`). On a Mac, *Trust on this Mac* adds the CA to your
+   login keychain (macOS asks for your password) and verifies the trust setting took. Then
+   *Open the secure address* continues the setup on `https://<machine>.local:7373`, where
+   passkeys work. Chrome keeps an old "Not Secure" verdict until you quit and reopen it;
+   the page says so when its probe of the https origin fails.
+3. **Pair this machine** — *Pair this Mac* runs `sessionpipe control pair` for you; the six
+   digits appear on the page and you approve them with your passkey right there. Green when
+   the daemon polls.
+4. **Your phone** — the QR code and the four iPhone steps (trust the CA once, open the
+   https address). To *send* from the phone it also needs its own passkey: on the phone,
+   *Add this device*; on Machines, approve its digits from a device the machine already trusts.
+5. **Try it** — one message to a live session on this machine; green when it comes back
+   `delivered`.
+
+The setup routes answer only from this machine (loopback or one of its own addresses); a
+phone gets a 403 and the page says where to go. *Skip setup* keeps the board as the front
+page; the rail keeps a *Setup* entry with an amber dot until the steps are green. On Linux
+the page prints the distro's steps for trusting `ca.crt` instead of doing it; the `.local`
+name needs avahi-daemon.
+
 ## What you get
 
 | Page | What it shows |
@@ -149,6 +180,7 @@ Delete a session from its page (Forget), or delete the whole directory to start 
 --rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost; with --tls, <machine>.local)
 --test-door       loopback-only test door for the conformance runner
 --open            open the board in the browser
+                  /setup on the board: the first-run page (this machine only)
 
 sessionpipe-gui tls status | trust | reset   the certificate's names, expiry and fingerprint;
                                              trust the CA on this Mac; start over

@@ -243,7 +243,7 @@ describe("TLS mode off", () => {
     expect(info.tls).toBeUndefined();
     expect(info.urls.https).toBeUndefined();
     expect(info.control.rpId).toBe("localhost");
-    expect(app.listener).toBe(app.server);
+    expect(app.httpsServer).toBeNull();
     expect((await get(`${app.url}${ROUTES.caCert}`)).status).toBe(404);
     const t = await get(`${app.url}${ROUTES.trust}`);
     expect(t.status).toBe(200);

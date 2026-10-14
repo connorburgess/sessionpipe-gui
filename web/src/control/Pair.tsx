@@ -3,13 +3,14 @@
 // printed six digits; this page shows the same six from the receiver, and the person
 // confirms with a passkey (CONTROL.md §2 step 2). The passkey's assertion over
 // sha256("sessionpipe.pair:" + machine + ":" + code) goes to the receiver, which hands it
-// to the daemon on its next status poll; the terminal finishes by itself.
+// to the daemon on its next status poll; the terminal finishes by itself. `PairBody` is
+// the page without its frame, so the setup page can show the same approval inline.
 import { useEffect, useState } from "react";
 import { HarnessGlyph } from "../components/bits";
 import { harnessMark } from "../lib/format";
 import { Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
-import { ControlError, controlApi, type Pairing } from "./api";
+import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
 import { fromB64url } from "./bytes";
 import {
   assertPasskey,
@@ -63,6 +64,19 @@ function approveErrorWords(e: unknown, machine: string): string {
 }
 
 export function PairPage({ code }: { code: string }) {
+  return (
+    <div className="page pair">
+      <PairBody code={code} />
+      <p className="page-note">
+        <Link to="/machines">← Machines</Link>
+      </p>
+    </div>
+  );
+}
+
+/** The approval itself: the digits, the facts, Approve / Reject. `compact` drops the
+ *  heading and the lead (the setup page has its own). */
+export function PairBody({ code, compact = false }: { code: string; compact?: boolean }) {
   const [phase, setPhase] = useState<Phase>({ k: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(guessDeviceName());
@@ -145,21 +159,13 @@ export function PairPage({ code }: { code: string }) {
     }
   };
 
-  if (phase.k === "loading")
-    return (
-      <div className="page pair">
-        <p className="page-note">Looking up the pairing…</p>
-      </div>
-    );
+  if (phase.k === "loading") return <p className="page-note">Looking up the pairing…</p>;
   if (phase.k === "missing")
     return (
-      <div className="page pair">
-        <h1>Pair a machine</h1>
+      <>
+        {!compact && <h1>Pair a machine</h1>}
         <p className="pair-note pair-note--err">{phase.why}</p>
-        <p className="page-note">
-          <Link to="/machines">Machines</Link>
-        </p>
-      </div>
+      </>
     );
 
   const p = phase.p;
@@ -167,16 +173,21 @@ export function PairPage({ code }: { code: string }) {
   const left = ms(p.expiresAt) - now;
   const expired = p.status === "expired" || left <= 0;
   const digits = p.check.padStart(6, "0");
+  // The daemon printed http://localhost/pair?code=…; with TLS mode on that origin cannot
+  // sign, so the same page on the https origin is one click away.
+  const https = secure ? null : httpsHere();
 
   return (
-    <div className="page pair">
-      <div>
-        <h1>Pair {m.name}</h1>
-        <p className="pair-lead">
-          A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed, then
-          approve with a passkey.
-        </p>
-      </div>
+    <div className={`pair-body ${compact ? "pair-body--compact" : ""}`}>
+      {!compact && (
+        <div>
+          <h1>Pair {m.name}</h1>
+          <p className="pair-lead">
+            A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed,
+            then approve with a passkey.
+          </p>
+        </div>
+      )}
 
       <div className="pair-check">
         <span className="pair-check-label">The terminal shows</span>
@@ -263,7 +274,18 @@ export function PairPage({ code }: { code: string }) {
               token, so its sessions show here without a second step. Only approve a request you just made.
             </p>
           )}
-          {!secure && <p className="pair-note pair-note--err">{insecureHint()}</p>}
+          {!secure && (
+            <div className="pair-note pair-note--err">
+              {insecureHint()}
+              {https && (
+                <p className="pair-https">
+                  <a className="btn btn--primary" href={https}>
+                    Open on {new URL(https).host} →
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
           {error && (
             <p className="pair-note pair-note--err" role="alert">
               {error}
@@ -311,9 +333,6 @@ export function PairPage({ code }: { code: string }) {
           )}
         </>
       )}
-      <p className="page-note">
-        <Link to="/machines">← Machines</Link>
-      </p>
     </div>
   );
 }

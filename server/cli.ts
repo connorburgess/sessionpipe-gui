@@ -3,12 +3,14 @@
 // open it (with a QR code for a phone) and the one line that connects another
 // machine. Ctrl-C stops it cleanly.
 import { execFileSync, spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
 import { defaultStateDir, packageVersion, readGuiConfig, setTlsPreference } from "./config.js";
 import { lanAddresses } from "./http/net.js";
+import { sameMachine } from "./setup/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme, ThemeInstallError } from "./themes/index.js";
 import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
 
@@ -177,6 +179,12 @@ async function banner(app: App): Promise<string> {
   const lines: string[] = [];
   lines.push(`sessionpipe-gui ${info.version} · ${app.stateDir}`);
   lines.push("");
+  // Not set up yet (no event, no TLS mode, or this machine's daemon not paired): the
+  // setup page first, since that is where a first run should go.
+  const pairedHere = [...app.control.machines().keys()].some((n) => sameMachine(n, os.hostname()));
+  if (app.store.stats().events === 0 || !info.tls || !pairedHere) {
+    lines.push(`  setup   ${info.urls.local}/setup   (first run: your sessions, https, pairing, your phone)`);
+  }
   lines.push(`  local   ${info.urls.local}`);
   for (const u of info.urls.lan) lines.push(`  network ${u}/?${UI_KEY_PARAM}=${info.uiKey}`);
   if (info.tls) {

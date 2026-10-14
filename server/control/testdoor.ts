@@ -26,7 +26,7 @@ import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js"
 
 export interface TestDoorDeps {
   state: ControlState;
-  rpId: string;
+  rpId: () => string;
   /** ROUTES.control */
   base: string;
 }
@@ -47,7 +47,7 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
   const { state, base } = d;
   let keys: Promise<{ passkey: TestPasskey; day: TestDayKey }> | null = null;
   const doorKeys = () => {
-    keys ??= Promise.all([TestPasskey.create({ rpId: d.rpId }), TestDayKey.create()]).then(([passkey, day]) => ({
+    keys ??= Promise.all([TestPasskey.create({ rpId: d.rpId() }), TestDayKey.create()]).then(([passkey, day]) => ({
       passkey,
       day,
     }));
@@ -106,7 +106,7 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
     const signed = await signCommand(passkey, day, cmd, { confirm: msg.confirm === true });
     const verdict = await verifyCommand(signed, {
       machine: m.id,
-      rpId: d.rpId,
+      rpId: d.rpId(),
       trusted: m.keys,
       now: Date.now(),
       maxAgeMs: RECEIVER_MAX_AGE_MS,

@@ -10,7 +10,8 @@ import net from "node:net";
 
 export interface DualServers {
   http: http.Server;
-  https: https.Server;
+  /** Absent or null until TLS mode is on; `setHttps` attaches one at runtime. */
+  https?: https.Server | null;
 }
 
 const TLS_HANDSHAKE = 0x16;
@@ -18,6 +19,11 @@ const TLS_HANDSHAKE = 0x16;
 export interface DualListener extends net.Server {
   /** Destroy every open connection, both protocols (shutdown). */
   destroyConnections(): void;
+  /** Attach (or detach) the https server while listening: the setup page turns TLS mode
+   *  on without a restart. A ClientHello with no https server goes to http, as before. */
+  setHttps(server: https.Server | null): void;
+  /** The https server attached right now. */
+  readonly https: https.Server | null;
 }
 
 /** A listener that routes by the first byte. Call `listen(listener, port, host)` on it. */
@@ -30,7 +36,7 @@ export function createDualListener(servers: DualServers): DualListener {
     socket.once("data", (chunk: Buffer) => {
       socket.pause();
       socket.unshift(chunk);
-      const target = chunk[0] === TLS_HANDSHAKE ? servers.https : servers.http;
+      const target = chunk[0] === TLS_HANDSHAKE && servers.https ? servers.https : servers.http;
       target.emit("connection", socket);
       process.nextTick(() => socket.resume());
     });
@@ -40,12 +46,17 @@ export function createDualListener(servers: DualServers): DualListener {
   // (headersTimeout, requestTimeout, closeAllConnections) on their `listening` event.
   listener.once("listening", () => {
     servers.http.emit("listening");
-    servers.https.emit("listening");
+    servers.https?.emit("listening");
   });
   listener.destroyConnections = () => {
     for (const s of open) s.destroy();
     open.clear();
   };
+  listener.setHttps = (server) => {
+    servers.https = server;
+    if (server && listener.listening) server.emit("listening");
+  };
+  Object.defineProperty(listener, "https", { get: () => servers.https ?? null });
   return listener;
 }
 
