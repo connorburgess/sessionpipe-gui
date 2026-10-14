@@ -7,6 +7,7 @@
 import type { TLSSocket } from "node:tls";
 import { type Info, ROUTES, UI_KEY_COOKIE, UI_KEY_PARAM } from "../../shared/api.js";
 import type { Ctx, Reply, Router } from "../http/router.js";
+import { WORDMARK_CSS, wordmarkHtml } from "../ui/brand.js";
 import { caDownloadName, type TlsMaterial } from "./certs.js";
 
 export interface TrustDeps {
@@ -148,13 +149,13 @@ export function trustPage(input: TrustPageInput): string {
 <meta name="color-scheme" content="light dark">
 <title>sessionpipe-gui · trust this receiver</title>
 <style>
-:root{color-scheme:light dark;--bg:oklch(0.985 0.004 85);--bg-3:oklch(0.955 0.006 85);--line:oklch(0.905 0.008 85);--line-2:oklch(0.84 0.01 85);--fg:oklch(0.22 0.014 265);--fg-2:oklch(0.44 0.016 265);--fg-3:oklch(0.58 0.014 265);--ok:oklch(0.6 0.1 150)}
-@media (prefers-color-scheme:dark){:root{--bg:oklch(0.165 0.008 255);--bg-3:oklch(0.225 0.01 255);--line:oklch(0.255 0.01 255);--line-2:oklch(0.33 0.012 255);--fg:oklch(0.92 0.006 85);--fg-2:oklch(0.72 0.008 85);--fg-3:oklch(0.56 0.008 85);--ok:oklch(0.7 0.1 150)}}
+:root{color-scheme:light dark;--bg:oklch(0.985 0.004 85);--bg-3:oklch(0.955 0.006 85);--line:oklch(0.905 0.008 85);--line-2:oklch(0.84 0.01 85);--fg:oklch(0.22 0.014 265);--fg-2:oklch(0.44 0.016 265);--fg-3:oklch(0.58 0.014 265);--needs:oklch(0.72 0.15 65);--ok:oklch(0.6 0.1 150)}
+@media (prefers-color-scheme:dark){:root{--bg:oklch(0.165 0.008 255);--bg-3:oklch(0.225 0.01 255);--line:oklch(0.255 0.01 255);--line-2:oklch(0.33 0.012 255);--fg:oklch(0.92 0.006 85);--fg-2:oklch(0.72 0.008 85);--fg-3:oklch(0.56 0.008 85);--needs:oklch(0.78 0.13 70);--ok:oklch(0.7 0.1 150)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 main{max-width:40em;margin:0 auto;padding:28px 20px 64px}
-header{display:flex;align-items:baseline;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line);color:var(--fg-3);font-size:13px}
-header b{color:var(--fg);font-weight:600}
+header{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line);color:var(--fg-3);font-size:13px}
+${WORDMARK_CSS}
 h1{font-size:22px;line-height:1.25;margin:24px 0 8px;font-weight:600}
 h2{font-size:15px;margin:0 0 8px;font-weight:600}
 section{padding:18px 0;border-top:1px solid var(--line)}
@@ -177,7 +178,7 @@ a{color:inherit}
 html.secure .here{display:block}
 </style>
 <main>
-<header><b>sessionpipe-gui</b> <span>${esc(info.version)}</span> <span>·</span> <span>trust this receiver</span></header>
+<header>${wordmarkHtml()} <span>${esc(info.version)}</span> <span>·</span> <span>trust this receiver</span></header>
 <p class="here">This page is already on a secure origin: passkeys work here.</p>
 ${body}
 </main>

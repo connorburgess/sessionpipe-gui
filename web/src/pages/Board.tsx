@@ -4,6 +4,7 @@
 import type { SessionState, SessionSummary } from "@shared/api";
 import { SESSION_STATES } from "@shared/api";
 import { useMemo, useState } from "react";
+import { Wordmark } from "../components/Brand";
 import { ChipSelect, SearchInput } from "../components/bits";
 import { SessionCard } from "../components/SessionCard";
 import { useAppState, useSessionTree } from "../data/hooks";
@@ -191,6 +192,7 @@ export function Board() {
 function EmptyBoard() {
   return (
     <div className="page empty">
+      <Wordmark />
       <h1 className="empty-title">Nothing here yet</h1>
       <p className="empty-lede">Sessions appear the moment an agent fires a hook. Three ways to get the first one:</p>
       <ol className="empty-ways">

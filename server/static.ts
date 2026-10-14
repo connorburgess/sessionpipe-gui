@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../shared/api.js";
 import type { Ctx, Handler, Reply } from "./http/router.js";
+import { WORDMARK_CSS, wordmarkHtml } from "./ui/brand.js";
 
 export const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -110,7 +111,12 @@ function unauthorized(): Reply {
     headers: { "cache-control": "no-store" },
     html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sessionpipe-gui · not signed in</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em;color:#222}code{background:#eee;padding:.1em .3em;border-radius:3px}</style>
+<meta name="color-scheme" content="light dark">
+<style>:root{color-scheme:light dark;--bg:oklch(0.985 0.004 85);--bg-3:oklch(0.955 0.006 85);--line:oklch(0.905 0.008 85);--fg:oklch(0.22 0.014 265);--fg-3:oklch(0.58 0.014 265);--needs:oklch(0.72 0.15 65)}
+@media (prefers-color-scheme:dark){:root{--bg:oklch(0.165 0.008 255);--bg-3:oklch(0.225 0.01 255);--line:oklch(0.255 0.01 255);--fg:oklch(0.92 0.006 85);--fg-3:oklch(0.56 0.008 85);--needs:oklch(0.78 0.13 70)}}
+body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em;background:var(--bg);color:var(--fg)}code{background:var(--bg-3);padding:.1em .3em;border-radius:3px}
+header{padding-bottom:12px;border-bottom:1px solid var(--line)}${WORDMARK_CSS}</style>
+<header>${wordmarkHtml()}</header>
 <h1>This board needs its key</h1>
 <p>You are reaching sessionpipe-gui from another device. Open it through the link or the QR code the terminal printed where it runs: that link carries the key (<code>?k=…</code>) and sets a cookie here, once.</p>
 <p>From the machine itself, <code>http://localhost</code> needs no key.</p>

@@ -29,7 +29,7 @@ export function App() {
   const { themes } = useThemes();
   const themeName = route.name === "theme" ? themes.find((t) => t.id === route.id)?.name : undefined;
   useEffect(() => {
-    document.title = `${themeName ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe`;
+    document.title = `${themeName ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe gui`;
     if (route.name !== "session") window.scrollTo({ top: 0 });
   }, [route, themeName]);
   // The installed themes: at boot, and again each time the stream (re)connects, since a

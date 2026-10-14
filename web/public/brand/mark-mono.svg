@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-labelledby="title">
+  <title id="title">sessionpipe gui</title>
+  <!-- One ink: the tile in currentColor, the desk and the dot cut out of it. -->
+  <mask id="cut">
+    <rect width="16" height="16" fill="#fff"/>
+    <rect x="3" y="8" width="5" height="2" rx="1" fill="#000"/>
+    <rect x="3" y="11" width="10" height="2" rx="1" fill="#000"/>
+    <circle cx="11" cy="5" r="2" fill="#000"/>
+  </mask>
+  <rect width="16" height="16" rx="4" fill="currentColor" mask="url(#cut)"/>
+</svg>

@@ -10,6 +10,7 @@ import { Link, type Route } from "../lib/router";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
+import { Mark } from "./Brand";
 import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 
@@ -185,9 +186,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   return (
     <div className={`shell ${splitOpen && !phone ? "shell--split" : ""}`} style={shellStyle}>
       <nav className="rail" aria-label="Pages">
-        <Link to="/" className="rail-brand" title="sessionpipe">
-          <span className="rail-mark" aria-hidden="true" />
-          <span className="sr-only">sessionpipe</span>
+        <Link to="/" className="rail-brand" title="sessionpipe gui">
+          <Mark size={20} />
+          <span className="sr-only">sessionpipe gui</span>
         </Link>
         <div className="rail-nav">
           {nav.map((n, i) => (

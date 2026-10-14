@@ -156,29 +156,8 @@
     height: 32px;
     margin-bottom: 16px;
   }
-  .rail-mark {
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
-    background: var(--fg);
-    position: relative;
-  }
-  .rail-mark::before,
-  .rail-mark::after {
-    content: "";
-    position: absolute;
-    left: 4px;
-    height: 1.5px;
-    border-radius: 1px;
-    background: var(--bg);
-  }
-  .rail-mark::before {
-    top: 6px;
-    width: 5px;
-  }
-  .rail-mark::after {
-    top: 9.5px;
-    width: 8px;
+  .rail-brand .mark {
+    display: block;
   }
   .rail-nav {
     display: flex;
@@ -847,6 +826,29 @@
 }
 .empty .btn {
   margin-top: 8px;
+}
+
+/* ---------- brand ---------- */
+
+/* The mark and the name (components/Brand.tsx): one line, the name in the UI face at
+   weight 500, "gui" a tier down. Used where a page stands alone, like the empty board. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1;
+}
+.wordmark .mark {
+  flex: none;
+}
+.wordmark-gui {
+  color: var(--fg-3);
+}
+.empty .wordmark {
+  margin-bottom: 8px;
 }
 
 /* ---------- session ---------- */

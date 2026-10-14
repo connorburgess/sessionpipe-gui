@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-labelledby="title">
+  <title id="title">sessionpipe gui</title>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .t { fill: #e6e4e0; }
+      .b { fill: #0c0f12; }
+      .d { fill: #eca851; }
+    }
+  </style>
+  <rect width="16" height="16" rx="4" fill="#171b21" class="t"/>
+  <rect x="3" y="8" width="5" height="2" rx="1" fill="#fbfaf7" class="b"/>
+  <rect x="3" y="11" width="10" height="2" rx="1" fill="#fbfaf7" class="b"/>
+  <circle cx="11" cy="5" r="2" fill="#e48e26" class="d"/>
+</svg>
