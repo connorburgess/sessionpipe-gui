@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The frame: a slim rail on wide screens, a bottom tab bar on phones. Carries the
 // connection indicator, the theme switch, and one entry per installed theme plugin
-// (web/src/themes/host), routed to /t/<id>.
+// (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and
+// a More tab whose sheet lists the rest (installed views, then the quick settings).
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, type ReactNode, useEffect, useState } from "react";
 import { useAppState } from "../data/hooks";
@@ -11,7 +12,7 @@ import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
-import { QuickSettings } from "./QuickSettings";
+import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 
 /** Whether a media query matches, live. */
@@ -135,6 +136,110 @@ export function navItems(themes: readonly InstalledTheme[]): NavItem[] {
   return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
 }
 
+/** A nav item's icon: the theme's own SVG when its manifest has one, else our line icon. */
+function NavGlyph({ n }: { n: NavItem }) {
+  if (n.svg)
+    return <span className="nav-glyph nav-glyph--svg" aria-hidden="true" dangerouslySetInnerHTML={{ __html: n.svg }} />;
+  return (
+    <svg
+      className="nav-glyph"
+      viewBox="0 0 20 20"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {n.glyph}
+    </svg>
+  );
+}
+
+/** How many pages sit on the phone's tab bar before More. */
+const TABS = 4;
+
+/** The fifth tab: a quiet sheet with the entries the bar has no room for (installed views
+ *  under an "Experimental views" hairline, any further page, then Display), in the same
+ *  rows as the quick settings. Carries aria-current when the active page is inside. */
+function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
+  const [open, setOpen] = useState(false);
+  const [display, setDisplay] = useState(false);
+  const inside = items.some((n) => n.key === active);
+  // A route change closes the sheet, whichever tab was tapped.
+  useEffect(() => setOpen(false), [active]);
+  const plugins = items.filter((n) => n.key.startsWith("t:"));
+  const plain = plugins.filter((n) => !n.experimental);
+  const experimental = plugins.filter((n) => n.experimental);
+  const pages = items.filter((n) => !n.key.startsWith("t:"));
+  const row = (n: NavItem) => (
+    <li key={n.key}>
+      <Link to={n.to} className="more-row" aria-current={active === n.key ? "page" : undefined} data-nav={n.key}>
+        <NavGlyph n={n} />
+        <span className="more-row-name">{n.label}</span>
+      </Link>
+    </li>
+  );
+  return (
+    <div className="more">
+      <button
+        type="button"
+        className={`nav-link more-tab ${inside || open ? "nav-link--on" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-current={inside ? "page" : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        data-nav="more"
+      >
+        <svg className="nav-glyph" viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <circle cx="4" cy="10" r="1.6" />
+          <circle cx="10" cy="10" r="1.6" />
+          <circle cx="16" cy="10" r="1.6" />
+        </svg>
+        <span className="nav-label">More</span>
+      </button>
+      {open && (
+        <>
+          <button type="button" className="more-scrim" aria-label="Close" onClick={() => setOpen(false)} data-dismiss />
+          <div className="more-sheet" role="dialog" aria-label="More">
+            <ul className="more-list">
+              {plain.map(row)}
+              {experimental.length > 0 && (
+                <li>
+                  <div className="more-group">Experimental views</div>
+                </li>
+              )}
+              {experimental.map(row)}
+              {pages.map(row)}
+              <li>
+                <button
+                  type="button"
+                  className="more-row"
+                  onClick={() => {
+                    setOpen(false);
+                    setDisplay(true);
+                  }}
+                  aria-haspopup="dialog"
+                  data-nav="display"
+                >
+                  <span className="nav-glyph" aria-hidden="true">
+                    <GearIcon size={20} />
+                  </span>
+                  <span className="more-row-name">Display</span>
+                  <span className="more-row-hint">appearance · theme · text size</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </>
+      )}
+      <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />
+    </div>
+  );
+}
+
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
   const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
@@ -157,24 +262,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       aria-current={active === n.key ? "page" : undefined}
       data-nav={n.key}
     >
-      {n.svg ? (
-        <span className="nav-glyph nav-glyph--svg" aria-hidden="true" dangerouslySetInnerHTML={{ __html: n.svg }} />
-      ) : (
-        <svg
-          className="nav-glyph"
-          viewBox="0 0 20 20"
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          {n.glyph}
-        </svg>
-      )}
+      <NavGlyph n={n} />
       <span className="nav-label">{n.label}</span>
       {n.key === "board" && needs > 0 ? (
         <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
@@ -236,8 +324,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">
-        {links}
-        <QuickSettings placement="tabbar" />
+        {links.slice(0, TABS)}
+        <MoreTab items={nav.slice(TABS)} active={active} />
       </nav>
       <SessionPanel phone={phone} />
     </div>

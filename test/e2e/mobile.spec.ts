@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// On a phone (the `phone` project, 390×844): the bottom tab bar is on every page,
-// nothing scrolls sideways, and the session page's control strip sits above the tabs.
+// On a phone (the `phone` project, 390×844): the bottom tab bar is on every page with at
+// most five tabs (the rest behind More), nothing scrolls sideways, and the session page's
+// control strip sits above the tabs.
 import { expect, type Page, test } from "@playwright/test";
 import { openBoard } from "./helpers.js";
 
@@ -18,11 +19,16 @@ const noSidewaysScroll = async (page: Page) => {
 const tabBarIsOn = async (page: Page) => {
   const bar = page.locator("nav.tabbar");
   await expect(bar).toBeVisible();
-  // Four pages of our own, plus one tab per installed theme plugin (see themes.spec.ts).
-  const { themes } = (await (await page.request.get("/api/ui/themes")).json()) as { themes: { error?: string }[] };
-  await expect(bar.getByRole("link")).toHaveCount(4 + themes.filter((t) => !t.error).length);
+  // Never more than five tabs: the first four pages, then More for everything else.
+  const tabs = bar.locator(":scope > a.nav-link, :scope > .more > .more-tab");
+  expect(await tabs.count()).toBeLessThanOrEqual(5);
   for (const label of ["Board", "Feed", "Machines", "Connect"])
     await expect(bar.getByRole("link", { name: label })).toBeVisible();
+  // No tab's label is cut short.
+  const clipped = await bar
+    .locator(".nav-label")
+    .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
+  expect(clipped).toEqual([]);
   const box = (await bar.boundingBox())!;
   const vh = await page.evaluate(() => window.innerHeight);
   expect(box.y + box.height, "the tab bar is pinned to the bottom edge").toBeGreaterThanOrEqual(vh - 1);
@@ -49,6 +55,45 @@ test.describe("phone", () => {
       await noSidewaysScroll(page);
       await expect(page.locator("nav.tabbar a[aria-current='page']")).toHaveText(new RegExp(label));
     }
+  });
+
+  test("every installed view and the quick settings are reachable through More", async ({ page }) => {
+    await openBoard(page);
+    const bar = page.locator("nav.tabbar");
+    const more = bar.getByRole("button", { name: "More" });
+    await expect(more).toBeVisible();
+    const { themes } = (await (await page.request.get("/api/ui/themes")).json()) as {
+      themes: { id: string; name: string; error?: string }[];
+    };
+    for (const t of themes.filter((x) => !x.error)) {
+      await more.click();
+      const sheet = page.getByRole("dialog", { name: "More" });
+      await expect(sheet).toBeVisible();
+      await sheet.locator(`a[data-nav='t:${t.id}']`).click();
+      await expect(page).toHaveURL(new RegExp(`/t/${t.id}$`));
+      await expect(sheet).toHaveCount(0);
+      // The active page lives inside More, so More carries the current mark.
+      await expect(bar.locator("[aria-current='page']")).toHaveText(/More/);
+      await tabBarIsOn(page);
+      await noSidewaysScroll(page);
+    }
+    // Display opens the quick settings from the sheet; Esc closes the popover.
+    await more.click();
+    await page
+      .getByRole("dialog", { name: "More" })
+      .getByRole("button", { name: /Display/ })
+      .click();
+    const pop = page.getByRole("dialog", { name: "Quick settings" });
+    await expect(pop).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
+    await expect(pop.locator(".qs-theme").first()).toHaveText(/Default/);
+    await page.keyboard.press("Escape");
+    await expect(pop).toHaveCount(0);
+    // Esc closes the sheet too.
+    await more.click();
+    await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
   });
 
   test("the session page keeps its control strip above the tab bar", async ({ page }) => {

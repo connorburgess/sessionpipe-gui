@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Quick settings: one tap from the rail (wide) or the tab bar (phone) to a small popover
 // with the appearance, the color theme and the text size. Each choice is per device
-// (web/src/lib/theme.ts). Esc closes it through the global keys (data-dismiss).
+// (web/src/lib/theme.ts). Esc closes it through the global keys (data-dismiss). On a
+// phone the trigger is a row in the tab bar's More sheet, which owns the open state.
 import { useEffect, useRef, useState } from "react";
 import {
   BUILTIN_COLOR_THEMES,
@@ -20,8 +21,44 @@ const APPEARANCE: { value: Theme; label: string }[] = [
 ];
 const SIZE_LABEL: Record<TextSize, string> = { 0.9: "A−", 1: "A", 1.1: "A+", 1.25: "A++" };
 
-export function QuickSettings({ placement }: { placement: "rail" | "tabbar" }) {
-  const [open, setOpen] = useState(false);
+export function GearIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="10" cy="10" r="2.5" />
+      <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6" />
+    </svg>
+  );
+}
+
+export function QuickSettings({
+  placement,
+  trigger = true,
+  open: openProp,
+  onOpenChange,
+}: {
+  placement: "rail" | "tabbar";
+  /** false: no button of its own; the caller opens it through `open`. */
+  trigger?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (next: boolean | ((o: boolean) => boolean)) => {
+    const v = typeof next === "function" ? next(open) : next;
+    setOpenState(v);
+    onOpenChange?.(v);
+  };
   const wrap = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const custom = useColorThemes();
@@ -45,31 +82,19 @@ export function QuickSettings({ placement }: { placement: "rail" | "tabbar" }) {
 
   return (
     <div className={`qs qs--${placement}`} ref={wrap}>
-      <button
-        type="button"
-        className={`theme-btn qs-trigger ${open ? "nav-link--on" : ""}`}
-        onClick={() => setOpen((o) => !o)}
-        aria-label="Quick settings"
-        title="Quick settings: appearance, color theme, text size"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        <svg
-          viewBox="0 0 20 20"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
+      {trigger && (
+        <button
+          type="button"
+          className={`theme-btn qs-trigger ${open ? "nav-link--on" : ""}`}
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Quick settings"
+          title="Quick settings: appearance, color theme, text size"
+          aria-expanded={open}
+          aria-haspopup="dialog"
         >
-          <circle cx="10" cy="10" r="2.5" />
-          <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6" />
-        </svg>
-        {placement === "tabbar" && <span className="nav-label">Display</span>}
-      </button>
+          <GearIcon />
+        </button>
+      )}
       {open && (
         <div className="qs-pop" role="dialog" aria-label="Quick settings">
           <div className="qs-row">

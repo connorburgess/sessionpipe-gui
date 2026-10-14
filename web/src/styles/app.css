@@ -287,6 +287,17 @@
     opacity: 0;
   }
 }
+/* Popovers and sheets: a short lift from just under their resting place. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 
 .badge {
   display: inline-flex;
@@ -1770,7 +1781,7 @@
 
 /* ---------- quick settings ---------- */
 
-/* Seven entries fit a 375 px phone at 12 px only with no side padding and a 44 px gear. */
+/* At most five tabs: the first four pages and More. */
 .tabbar .nav-link {
   flex: 1 1 0;
   min-width: 0;
@@ -1779,21 +1790,99 @@
 .qs {
   position: relative;
 }
+/* On the tab bar the quick settings has no button of its own: the More sheet opens it. */
 .qs--tabbar {
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
 }
-.qs--tabbar .qs-trigger {
-  width: 44px;
-  height: auto;
-  flex-direction: column;
-  gap: 4px;
-  border-radius: 0;
-  font-size: var(--text-xs);
+
+/* ---------- the More tab and its sheet (phone) ---------- */
+
+.more {
+  display: contents;
 }
-.qs--tabbar .qs-trigger .nav-label {
-  font-size: var(--text-xs);
+.more-scrim {
+  position: fixed;
+  inset: 0 0 calc(var(--tabbar) + env(safe-area-inset-bottom)) 0;
+  z-index: 22;
+  background: color-mix(in oklch, var(--bg) 40%, transparent);
+  cursor: default;
+}
+.more-sheet {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 8px);
+  z-index: 23;
+  max-height: calc(100dvh - var(--tabbar) - 48px);
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.18);
+  animation: rise var(--dur) var(--ease-out) both;
+}
+.more-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.more-group {
+  margin: 6px 0 2px;
+  padding: 10px 8px 0;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.more-list > li:first-child > .more-group {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.more-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-md);
+}
+.more-row:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.more-row[aria-current="page"] {
+  background: var(--bg-3);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.more-row .nav-glyph {
+  color: var(--fg-3);
+}
+.more-row[aria-current="page"] .nav-glyph {
+  color: var(--fg);
+}
+.more-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.more-row-hint {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
 }
 .qs-pop {
   position: fixed;
