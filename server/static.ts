@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../shared/api.js";
 import type { Ctx, Handler, Reply } from "./http/router.js";
 
-const TYPES: Record<string, string> = {
+export const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",

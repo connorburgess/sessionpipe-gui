@@ -3,10 +3,12 @@
 // open it (with a QR code for a phone) and the one line that connects another
 // machine. Ctrl-C stops it cleanly.
 import { spawn } from "node:child_process";
+import path from "node:path";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { packageVersion } from "./config.js";
+import { defaultStateDir, packageVersion } from "./config.js";
+import { addTheme, formatList, linkTheme, listThemes, removeTheme, ThemeInstallError } from "./themes/index.js";
 
 const HELP = `sessionpipe-gui ${packageVersion()} — a sessionpipe receiver with a live board
 
@@ -22,10 +24,23 @@ usage: sessionpipe-gui [options]
   --speed N         demo / replay speed
   --rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost)
   --test-door       loopback-only test door for the conformance runner
+  --themes-dir DIR  where themes are installed (default <state>/themes)
   --open            open the board in the browser
   --quiet           no banner
   --version         print the version
   --help            this
+
+themes (plugins kept outside the GUI, loaded by the page at runtime):
+
+  sessionpipe-gui theme list                 installed themes
+  sessionpipe-gui theme add <source>         install: a folder, a .tgz/.zip (path or URL),
+                                             an npm package name or a git URL
+  sessionpipe-gui theme link <folder>        symlink a folder, for development
+  sessionpipe-gui theme remove <id>          uninstall
+  --state DIR / --themes-dir DIR apply to these too.
+
+A theme is code running in the board page with access to everything it shows:
+only install themes you trust.
 `;
 
 interface Args {
@@ -41,6 +56,9 @@ interface Args {
   testDoor: boolean;
   open: boolean;
   quiet: boolean;
+  themesDir?: string;
+  /** `theme <verb> [arg]`: a subcommand instead of the server. */
+  theme?: { verb: string; arg?: string };
 }
 
 function parseArgs(argv: string[]): Args | "help" | "version" {
@@ -90,6 +108,14 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--test-door":
         a.testDoor = true;
+        break;
+      case "--themes-dir":
+        a.themesDir = next();
+        break;
+      case "theme":
+        if (a.theme) fail("one theme command at a time");
+        a.theme = { verb: argv[++i] ?? "" };
+        if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.theme.arg = argv[++i];
         break;
       case "--open":
         a.open = true;
@@ -150,6 +176,43 @@ function openBrowser(url: string): void {
   } catch {}
 }
 
+/** `sessionpipe-gui theme list|add|link|remove`. Prints what it did; exits 1 on a problem. */
+async function themeCommand(parsed: Args): Promise<void> {
+  const { verb, arg } = parsed.theme!;
+  const themesDir = parsed.themesDir ?? path.join(parsed.state ?? defaultStateDir(), "themes");
+  const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
+  try {
+    switch (verb) {
+      case "list":
+      case "ls":
+        out(formatList(themesDir, listThemes(themesDir)));
+        return;
+      case "add":
+      case "install":
+        if (!arg) fail("theme add needs a source: a folder, a .tgz/.zip, an npm package or a git URL");
+        out((await addTheme(themesDir, arg)).message);
+        return;
+      case "link":
+        if (!arg) fail("theme link needs a folder");
+        out(linkTheme(themesDir, arg).message);
+        return;
+      case "remove":
+      case "rm":
+        if (!arg) fail("theme remove needs a theme id (see `theme list`)");
+        out(removeTheme(themesDir, arg).message);
+        return;
+      default:
+        fail(`unknown theme command "${verb}" (list, add, link, remove)`);
+    }
+  } catch (e) {
+    if (e instanceof ThemeInstallError) {
+      process.stderr.write(`sessionpipe-gui: ${e.message}\n`);
+      process.exit(1);
+    }
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed === "help") {
@@ -160,6 +223,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${packageVersion()}\n`);
     return;
   }
+  if (parsed.theme) return themeCommand(parsed);
   const t0 = Date.now();
   let app: App;
   try {
@@ -175,6 +239,7 @@ async function main(): Promise<void> {
       rpId: parsed.rpId,
       testDoor: parsed.testDoor,
       quiet: parsed.quiet,
+      themesDir: parsed.themesDir,
     });
   } catch (e) {
     const err = e as NodeJS.ErrnoException;

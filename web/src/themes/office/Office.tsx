@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // The office: one room per machine, one desk per live session, a helper per live
-// subagent. Facts come from the store through useSessionTree/useAppState; postures from
-// themes/posture.ts; seating is stable per session. This file composes and budgets.
+// subagent, an empty chair for a while after a session ends. Facts come from the store
+// through useSessionTree/useAppState; postures from themes/posture.ts; seating is stable
+// per session. This file composes and budgets.
 import type { SessionKey, SessionSummary } from "@shared/api";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Segmented } from "../../components/bits";
 import { useAppState, useSessionTree } from "../../data/hooks";
 import { useListNav } from "../../lib/keys";
 import { Link, sessionPath } from "../../lib/router";
 import { useNow } from "../../lib/time";
 import {
-  BREATHE_UNTIL,
   derivePosture,
   hourBand,
   MAX_TYPING,
@@ -20,17 +21,22 @@ import {
   useSeating,
 } from "../posture";
 import { Legend } from "./Legend";
+import { PlanDefs } from "./PlanCell";
 import { OfficeDefs } from "./parts";
 import { Room, type RoomCell } from "./Room";
+import { type OfficeStyle, setOfficeStyle, useOfficeStyle } from "./style";
 import "../themes.css";
 import "./office.css";
 
 const UNNAMED = "unnamed";
-const ARRIVE_MS = 1500;
-const LEAVE_MS = 1100;
-const MAX_ROWS = 4;
+const ARRIVE_MS = 1800;
+const LEAVE_MS = 1300;
+const MAX_ROWS = 3;
+const MAX_PODS = 3;
+const CHAIR_MS = 30 * 60_000;
 
 const roomOf = (s: SessionSummary) => s.machine || UNNAMED;
+const endedAt = (s: SessionSummary) => Date.parse(s.endedAt ?? s.stateSince);
 
 function usePageHidden(): boolean {
   return useSyncExternalStore(
@@ -77,6 +83,7 @@ export function OfficePage() {
   const narrow = useMediaQuery("(max-width: 480px)");
   const hidden = usePageHidden();
   const [legend, setLegend] = useState(false);
+  const style = useOfficeStyle();
 
   const live = useMemo(() => roots.filter((s) => s.state !== "done" && !s.backfilled), [roots]);
   const liveMap = useMemo(() => new Map(live.map((s) => [s.key, s] as const)), [live]);
@@ -103,6 +110,10 @@ export function OfficePage() {
     [roomNames, live, leaving],
   );
   const slots = useSeating(occupied);
+
+  // the last slot a session held, so its chair can stay pushed in after it ends
+  const lastSlot = useRef(new Map<SessionKey, number>());
+  for (const [k, v] of slots) lastSlot.current.set(k, v);
 
   // arrivals: first seen after the first snapshot walk in (within the calm budget)
   const seen = useRef(new Map<SessionKey, { at: number; walk: boolean }>());
@@ -137,26 +148,56 @@ export function OfficePage() {
     return out;
   }, [live, leaving, childrenOf, now, liveMap]);
 
-  // keyboard order: rooms, then slots, then each desk's helpers
-  const maxCols = narrow ? 3 : 6;
+  // rooms: pods and rows, cells by slot, one pushed-in chair per pod, keyboard order
   const rooms = useMemo(() => {
     const hrefs: string[] = [];
     const since = midnight(now);
     const list = roomNames.map((name) => {
       const here = [...live, ...leaving.values()].filter((s) => roomOf(s) === name);
-      const cols = Math.max(2, Math.min(here.length, maxCols));
-      const maxSlot = here.reduce((m, s) => Math.max(m, slots.get(s.key) ?? 0), 0);
-      const rows = Math.max(1, Math.min(MAX_ROWS, Math.ceil((maxSlot + 1) / cols)));
-      const cells: RoomCell[] = here
-        .map((s) => ({
+      const pods = narrow ? 1 : Math.max(1, Math.min(MAX_PODS, Math.ceil(here.length / 2)));
+      const perRow = pods * 2;
+      const held = new Set(here.map((s) => slots.get(s.key) ?? 0));
+      let maxSlot = here.reduce((m, s) => Math.max(m, slots.get(s.key) ?? 0), 0);
+      const recent = all
+        .filter(
+          (s) =>
+            s.state === "done" &&
+            !s.backfilled &&
+            !s.parentId &&
+            roomOf(s) === name &&
+            now - endedAt(s) < CHAIR_MS &&
+            lastSlot.current.has(s.key),
+        )
+        .sort((a, b) => endedAt(b) - endedAt(a));
+      const chairs: SessionSummary[] = [];
+      const podsUsed = new Set<number>();
+      for (const s of recent) {
+        const slot = lastSlot.current.get(s.key)!;
+        const pod = Math.floor(slot / 2);
+        if (held.has(slot) || podsUsed.has(pod) || slot >= perRow * MAX_ROWS) continue;
+        held.add(slot);
+        podsUsed.add(pod);
+        chairs.push(s);
+        maxSlot = Math.max(maxSlot, slot);
+      }
+      const rows = Math.max(1, Math.min(MAX_ROWS, Math.ceil((maxSlot + 1) / perRow)));
+      const cells: RoomCell[] = [
+        ...here.map((s) => ({
           s,
           p: postures.get(s.key)!,
           slot: slots.get(s.key) ?? 0,
           walk: seen.current.get(s.key)?.walk ?? false,
-        }))
+        })),
+        ...chairs.map((s) => ({
+          s,
+          p: derivePosture(s, undefined, now, "gone"),
+          slot: lastSlot.current.get(s.key)!,
+          walk: false,
+        })),
+      ]
         .sort((a, b) => a.slot - b.slot)
         .map((c) => {
-          if (c.slot >= cols * rows) return c;
+          if (c.slot >= perRow * rows) return c;
           const index = hrefs.length;
           hrefs.push(sessionPath(c.s.harness, c.s.id));
           const helperBase = hrefs.length;
@@ -164,22 +205,16 @@ export function OfficePage() {
           return { ...c, index, helperBase };
         });
       const gone = all.filter(
-        (s) =>
-          s.state === "done" &&
-          !s.backfilled &&
-          !s.parentId &&
-          roomOf(s) === name &&
-          Date.parse(s.endedAt ?? s.stateSince) >= since,
+        (s) => s.state === "done" && !s.backfilled && !s.parentId && roomOf(s) === name && endedAt(s) >= since,
       ).length;
-      return { name, machine: machines.get(name), cells, cols, rows, gone };
+      return { name, machine: machines.get(name), cells, pods, rows, gone };
     });
     return { list, hrefs };
-  }, [roomNames, live, leaving, slots, postures, maxCols, machines, all, now]);
+  }, [roomNames, live, leaving, slots, postures, narrow, machines, all, now]);
 
   const { cursor } = useListNav(rooms.hrefs);
   const needs = live.filter((s) => s.state === "needs_you").length;
   const working = live.filter((s) => s.state === "working").length;
-  const figures = live.length + [...childrenOf.values()].flat().filter((c) => c.state !== "done").length;
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -218,22 +253,37 @@ export function OfficePage() {
     .filter(Boolean)
     .join(" · ");
 
-  const classes = ["page", "office", hidden ? "office--paused" : "", figures > BREATHE_UNTIL ? "office--crowded" : ""]
-    .filter(Boolean)
-    .join(" ");
+  const classes = ["page", "office", hidden ? "office--paused" : ""].filter(Boolean).join(" ");
 
   return (
     <div className={classes}>
       <OfficeDefs />
+      <PlanDefs />
+      <svg width="0" height="0" aria-hidden="true" style={{ position: "absolute" }}>
+        <clipPath id="o-screen-clip">
+          <rect x="36" y="15" width="24" height="16" />
+        </clipPath>
+      </svg>
       <header className="office-head">
         <h1 className="office-title">Office</h1>
         <span className="office-xp">experimental</span>
         <span className="office-sum">{summary || (roomNames.length ? "nobody is in right now" : "")}</span>
-        <Legend open={legend} onToggle={() => setLegend((v) => !v)} />
+        <div className="office-tools">
+          <Segmented<OfficeStyle>
+            value={style}
+            options={[
+              { value: "figures", label: "figures" },
+              { value: "plan", label: "plan" },
+            ]}
+            onChange={setOfficeStyle}
+            label="Drawing style"
+          />
+          <Legend open={legend} onToggle={() => setLegend((v) => !v)} style={style} />
+        </div>
       </header>
 
       {roomNames.length === 0 ? (
-        <EmptyOffice band={band} />
+        <EmptyOffice band={band} now={now} narrow={narrow} style={style} />
       ) : (
         <div className="rooms">
           {rooms.list.map((r) => (
@@ -242,11 +292,13 @@ export function OfficePage() {
               name={r.name}
               machine={r.machine}
               cells={r.cells}
-              cols={r.cols}
+              pods={r.pods}
               rows={r.rows}
               gone={r.gone}
               band={band}
               now={now}
+              narrow={narrow}
+              style={style}
               cursor={cursor}
             />
           ))}
@@ -256,10 +308,30 @@ export function OfficePage() {
   );
 }
 
-function EmptyOffice({ band }: { band: ReturnType<typeof hourBand> }) {
+function EmptyOffice({
+  band,
+  now,
+  narrow,
+  style,
+}: {
+  band: ReturnType<typeof hourBand>;
+  now: number;
+  narrow: boolean;
+  style: OfficeStyle;
+}) {
   return (
     <div className="office-empty">
-      <Room name="no machines yet" cells={[]} cols={2} rows={1} gone={0} band={band} now={0} />
+      <Room
+        name="no machines yet"
+        cells={[]}
+        pods={1}
+        rows={1}
+        gone={0}
+        band={band}
+        now={now}
+        narrow={narrow}
+        style={style}
+      />
       <ul className="office-ways">
         <li>
           <strong>This machine.</strong> Run <code>npx sessionpipe install</code> once; the GUI tails the local outbox.

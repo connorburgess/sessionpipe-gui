@@ -2,6 +2,7 @@
 // Owned by: server-core (composition root). Every module plugs in here and nowhere
 // else. Module boundaries and who owns what: ARCHITECTURE.md.
 import http from "node:http";
+import path from "node:path";
 import { DEFAULT_PORT, type Info, ROUTES } from "../shared/api.js";
 import { defaultStateDir, type GuiConfig, packageVersion, readGuiConfig, rotateSinkToken } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
@@ -12,6 +13,7 @@ import { registerReceiver, wellKnown } from "./receiver/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
+import { registerThemes, ThemeRegistry } from "./themes/index.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi } from "./ui/index.js";
 
@@ -39,6 +41,8 @@ export interface AppOptions {
   quiet?: boolean;
   /** Store timer period (tests). */
   tickMs?: number;
+  /** Where installed themes live; default <stateDir>/themes. */
+  themesDir?: string;
 }
 
 export interface App {
@@ -55,6 +59,7 @@ export interface App {
   config: () => GuiConfig;
   info: () => Info;
   outbox: OutboxSource | null;
+  themes: ThemeRegistry;
   close(): Promise<void>;
 }
 
@@ -139,6 +144,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     },
     demo: { on: () => demo !== null, set: setDemo },
   });
+  const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
+  registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
   router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 
   const server = http.createServer((req, res) => void router.handle(req, res));
@@ -166,6 +173,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     config: () => config,
     info,
     outbox,
+    themes,
     close: async () => {
       outbox?.stop();
       setDemo(false);

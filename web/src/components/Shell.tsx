@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // The frame: a slim rail on wide screens, a bottom tab bar on phones. Carries the
-// connection indicator and the theme switch.
+// connection indicator, the theme switch, and one entry per installed theme plugin
+// (web/src/themes/host), routed to /t/<id>.
+import type { InstalledTheme } from "@shared/theme-api";
 import { Fragment, type ReactNode } from "react";
 import { useAppState } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
 import { Link, type Route } from "../lib/router";
 import { cycleTheme, type Theme, useTheme } from "../lib/theme";
 import { useNow } from "../lib/time";
+import { useThemes } from "../themes/host/registry";
 
 /* Thin 1.5 px line icons on a 20 px grid. */
 const ICON: Record<string, ReactNode> = {
@@ -48,44 +51,99 @@ const ICON: Record<string, ReactNode> = {
   ),
 };
 
-const NAV: { to: string; name: Route["name"]; label: string; experimental?: boolean }[] = [
-  { to: "/", name: "board", label: "Board" },
-  { to: "/feed", name: "feed", label: "Feed" },
-  { to: "/machines", name: "machines", label: "Machines" },
-  { to: "/connect", name: "connect", label: "Connect" },
-  { to: "/office", name: "office", label: "Office", experimental: true },
+/* The default glyph for an installed theme without an icon: a plug. */
+const PLUG_ICON = (
+  <>
+    <path d="M7 3v4" />
+    <path d="M13 3v4" />
+    <path d="M4.5 7h11v3a5.5 5.5 0 0 1-11 0z" />
+    <path d="M10 15.5V18" />
+  </>
+);
+
+interface NavItem {
+  to: string;
+  key: string;
+  label: string;
+  /** Our line-icon paths on the 20 px grid, or… */
+  glyph: ReactNode;
+  /** …the theme's own inline SVG from its manifest. */
+  svg?: string;
+  experimental?: boolean;
+}
+
+const BUILTIN: NavItem[] = [
+  { to: "/", key: "board", label: "Board", glyph: ICON.board },
+  { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
+  { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
+  { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
+  { to: "/office", key: "office", label: "Office", glyph: ICON.office, experimental: true },
 ];
+
+/** A manifest icon is inline SVG the theme author wrote; it is code of the same trust
+ *  as the theme itself, but a script-bearing one is refused all the same. */
+const safeSvg = (svg: string | undefined): string | null => {
+  if (!svg) return null;
+  const s = svg.trim();
+  if (!/^<svg[\s>]/i.test(s) || /<script|on[a-z]+\s*=|javascript:|<foreignObject|<iframe/i.test(s)) return null;
+  return s;
+};
+
+export const themeNavItem = (t: InstalledTheme): NavItem => {
+  const svg = safeSvg(t.icon);
+  return {
+    to: `/t/${encodeURIComponent(t.id)}`,
+    key: `t:${t.id}`,
+    label: t.name || t.id,
+    glyph: PLUG_ICON,
+    svg: svg ?? undefined,
+    experimental: t.experimental,
+  };
+};
+
+/** Builtins first, then installed themes, the experimental ones of both after a divider. */
+export function navItems(themes: readonly InstalledTheme[]): NavItem[] {
+  const plugins = themes.filter((t) => !t.error).map(themeNavItem);
+  const all = [...BUILTIN, ...plugins];
+  return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
+}
 
 const THEME_LABEL: Record<Theme, string> = { auto: "Theme: system", dark: "Theme: dark", light: "Theme: light" };
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
-  const active = route.name === "session" ? "board" : route.name;
+  const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = [...useAppState().sessions.values()].filter((s) => s.state === "needs_you" && !s.parentId).length;
   const theme = useTheme();
-  const links = NAV.map((n) => (
+  const nav = navItems(useThemes().themes);
+  const links = nav.map((n) => (
     <Link
-      key={n.to}
+      key={n.key}
       to={n.to}
-      className={`nav-link ${active === n.name ? "nav-link--on" : ""}`}
-      aria-current={active === n.name ? "page" : undefined}
+      className={`nav-link ${active === n.key ? "nav-link--on" : ""}`}
+      aria-current={active === n.key ? "page" : undefined}
+      data-nav={n.key}
     >
-      <svg
-        className="nav-glyph"
-        viewBox="0 0 20 20"
-        width="20"
-        height="20"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        {ICON[n.name]}
-      </svg>
+      {n.svg ? (
+        <span className="nav-glyph nav-glyph--svg" aria-hidden="true" dangerouslySetInnerHTML={{ __html: n.svg }} />
+      ) : (
+        <svg
+          className="nav-glyph"
+          viewBox="0 0 20 20"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {n.glyph}
+        </svg>
+      )}
       <span className="nav-label">{n.label}</span>
-      {n.name === "board" && needs > 0 ? (
+      {n.key === "board" && needs > 0 ? (
         <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
           {needs}
         </span>
@@ -100,14 +158,35 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <span className="sr-only">sessionpipe</span>
         </Link>
         <div className="rail-nav">
-          {NAV.map((n, i) => (
-            <Fragment key={n.to}>
-              {n.experimental && !NAV[i - 1]?.experimental ? <span className="rail-group">experimental</span> : null}
+          {nav.map((n, i) => (
+            <Fragment key={n.key}>
+              {n.experimental && !nav[i - 1]?.experimental ? <span className="rail-group">experimental</span> : null}
               {links[i]}
             </Fragment>
           ))}
         </div>
         <div className="rail-foot">
+          <Link
+            to="/themes"
+            className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
+            title="Themes"
+            aria-label="Themes"
+            aria-current={route.name === "themes" ? "page" : undefined}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {PLUG_ICON}
+            </svg>
+          </Link>
           <ConnectionPill />
           <button
             type="button"
@@ -127,7 +206,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </button>
         </div>
       </nav>
-      <main className="main" id="main">
+      <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main">
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">

@@ -2,12 +2,16 @@
 import { useEffect } from "react";
 import { Shell } from "./components/Shell";
 import { PairPage } from "./control/Pair";
+import { useAppState } from "./data/hooks";
 import { useRoute } from "./lib/router";
 import { Board } from "./pages/Board";
 import { Connect } from "./pages/Connect";
 import { Feed } from "./pages/Feed";
 import { Machines } from "./pages/Machines";
 import { SessionPage } from "./pages/Session";
+import { Themes } from "./pages/Themes";
+import { fetchThemes, useThemes } from "./themes/host/registry";
+import { ThemePage } from "./themes/host/ThemePage";
 import { OfficePage } from "./themes/office/Office";
 
 const TITLES: Record<string, string> = {
@@ -18,14 +22,26 @@ const TITLES: Record<string, string> = {
   session: "Session",
   pair: "Pair a machine",
   office: "Office",
+  themes: "Themes",
 };
 
 export function App() {
   const route = useRoute();
+  const { connection } = useAppState();
+  const { themes } = useThemes();
+  const themeName = route.name === "theme" ? themes.find((t) => t.id === route.id)?.name : undefined;
   useEffect(() => {
-    document.title = `${TITLES[route.name] ?? "sessionpipe"} · sessionpipe`;
+    document.title = `${themeName ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe`;
     if (route.name !== "session") window.scrollTo({ top: 0 });
-  }, [route]);
+  }, [route, themeName]);
+  // The installed themes: at boot, and again each time the stream (re)connects, since a
+  // reconnect may follow a restart with themes added or removed.
+  useEffect(() => {
+    if (connection === "live") void fetchThemes();
+  }, [connection]);
+  useEffect(() => {
+    void fetchThemes();
+  }, []);
   return (
     <Shell route={route}>
       {route.name === "board" && <Board />}
@@ -36,6 +52,8 @@ export function App() {
       {route.name === "machines" && <Machines />}
       {route.name === "connect" && <Connect />}
       {route.name === "office" && <OfficePage />}
+      {route.name === "themes" && <Themes />}
+      {route.name === "theme" && <ThemePage key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "missing" && (
         <div className="page">

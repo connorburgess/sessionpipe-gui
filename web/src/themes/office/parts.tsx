@@ -1,155 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
-// The office's vector parts: <symbol>s defined once, placed with <use>. All of them live
-// in the 96 × 80 desk cell grid (DESIGN.md §1, §3): desk top at y = 46.5, chair at the
-// left, monitor centred at x = 61, the figure's hips at (18, 56). Colours are custom
-// properties set on the cell (--o-tone, --o-wood, --o-bezel, --o-desk, --o-needs) that
-// inherit into every <use>; a posture is a choice of parts and a tone, nothing more.
+// The figures style's vector parts: <symbol>s defined once, placed with <use>. Furniture
+// lives in the desk's own coordinates (desk top face at y = 30, 96 wide, the monitor
+// centred over x = 48); figure parts are drawn around the head's centre so one set serves
+// the seated figure, the helper and the walker. Colours are custom properties on the
+// cell: furniture (--o-top, --o-edge, --o-wood, --o-chair) and the look (--look-shirt,
+// --look-hair, --look-skin, --look-trouser).
 
-export const CELL_W = 96;
-export const CELL_H = 80;
-/** Where a standing figure's feet are, cell coordinates; the door is at the room's floor. */
-export const FIGURE_X = 20;
+export const CELL_W = 160;
+export const CELL_H = 120;
+/** The seated figure's head centre and the standing figure's feet, desk coordinates. */
+export const HEAD = { x: 48, y: 44 };
+export const FEET = { x: 48, y: 70 };
+
+const arm = (x1: number, y1: number, x2: number, y2: number, key: string, w = 2.2) => (
+  <g key={key}>
+    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--look-shirt)" strokeWidth={w} strokeLinecap="round" />
+    <circle cx={x2} cy={y2 - 0.3} r="1.5" fill="var(--look-skin)" />
+  </g>
+);
 
 export function OfficeDefs() {
   return (
     <svg className="office-defs" width="0" height="0" aria-hidden="true" focusable="false">
       <defs>
-        {/* chair, side on */}
-        <symbol id="o-chair" overflow="visible">
-          <rect x="8" y="36" width="3" height="22" rx="1.5" fill="var(--o-wood)" />
-          <rect x="9" y="56" width="18" height="2.5" rx="1" fill="var(--o-wood)" />
-          <rect x="17" y="58.5" width="2" height="11" fill="var(--o-wood)" />
-          <rect x="11" y="69.5" width="14" height="2" rx="1" fill="var(--o-wood)" />
-          <circle cx="13" cy="73.5" r="1.8" fill="var(--o-wood)" />
-          <circle cx="23" cy="73.5" r="1.8" fill="var(--o-wood)" />
-        </symbol>
-
-        {/* desk: slab (text goes on its front), two legs, keyboard */}
+        {/* desk: one top face with a darker front edge; keyboard centred under the monitor */}
         <symbol id="o-desk" overflow="visible">
-          <rect x="30" y="54" width="2" height="20" fill="var(--o-wood)" />
-          <rect x="86" y="54" width="2" height="20" fill="var(--o-wood)" />
-          <rect
-            x="28"
-            y="46.5"
-            width="62"
-            height="8"
-            rx="1"
-            fill="var(--o-desk)"
-            stroke="var(--o-wood)"
-            strokeWidth="0.75"
-          />
-          <rect x="34" y="44.5" width="12" height="2" rx="0.8" fill="var(--o-wood)" />
+          <rect x="0" y="30" width="96" height="14" rx="1" fill="var(--o-top)" />
+          <rect x="0" y="42" width="96" height="2" fill="var(--o-edge)" />
+          <rect x="38" y="36.5" width="20" height="3" rx="1" fill="var(--o-wood)" />
         </symbol>
-
-        {/* monitor frame; the screen rectangle is drawn by the cell so its fill can change */}
+        {/* monitor on the desk: 1 px bezel, foot touching the top face; the screen is drawn by the cell */}
         <symbol id="o-monitor" overflow="visible">
-          <rect x="55" y="45.3" width="12" height="1.2" fill="var(--o-wood)" />
-          <rect x="60" y="43.5" width="2" height="2.5" fill="var(--o-wood)" />
-          <rect
-            x="46"
-            y="20"
-            width="30"
-            height="24"
-            rx="1.5"
-            fill="var(--o-bezel)"
-            stroke="var(--o-wood)"
-            strokeWidth="0.75"
-          />
+          <rect x="35" y="14" width="26" height="18" rx="1" fill="var(--o-wood)" />
+          <rect x="47" y="32" width="2" height="2" fill="var(--o-wood)" />
+          <rect x="43" y="34" width="10" height="1.5" rx="0.5" fill="var(--o-wood)" />
         </symbol>
-
-        {/* figure, side on, facing the screen: torso + head, legs under the desk */}
-        <symbol id="o-torso-side" overflow="visible">
-          <path d="M13 57 V43 a6 6 0 0 1 6 -6 h4 a5 5 0 0 1 5 5 V57 Z" fill="var(--o-tone)" />
-          <rect x="18" y="33" width="5" height="6" fill="var(--o-tone)" />
-          <circle cx="20.5" cy="30" r="6" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-legs-side" overflow="visible">
-          <polyline
-            points="24,57 36,57 37,70"
-            fill="none"
-            stroke="var(--o-tone)"
-            strokeWidth="4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <rect x="35" y="69" width="8" height="3.5" rx="1.5" fill="var(--o-tone)" />
-        </symbol>
-
-        {/* figure turned to the room: shoulders square on, legs in front of the chair */}
-        <symbol id="o-torso-front" overflow="visible">
-          <path d="M11 57 V45 a8 8 0 0 1 8 -8 h3 a8 8 0 0 1 8 8 V57 Z" fill="var(--o-tone)" />
-          <rect x="18" y="33" width="5" height="6" fill="var(--o-tone)" />
-          <circle cx="20.5" cy="30" r="6" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-legs-front" overflow="visible">
-          <line x1="15.5" y1="56" x2="15.5" y2="70" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
-          <line x1="25.5" y1="56" x2="25.5" y2="70" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
-          <rect x="12.5" y="69" width="7" height="3.5" rx="1.5" fill="var(--o-tone)" />
-          <rect x="22.5" y="69" width="7" height="3.5" rx="1.5" fill="var(--o-tone)" />
-        </symbol>
-
-        {/* arms: on the keys · raised (right) with the left down · both in the lap · hanging */}
-        <symbol id="o-arm-type" overflow="visible">
-          <polyline
-            points="25,42 33,47 40,45.5"
-            fill="none"
-            stroke="var(--o-tone)"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <circle cx="40" cy="45.5" r="2" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-arm-raise" overflow="visible">
-          <polyline
-            points="28,42 34,35 35,25"
-            fill="none"
-            stroke="var(--o-tone)"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <circle cx="35" cy="24" r="2.2" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-arm-left-down" overflow="visible">
-          <polyline points="13,43 12,54" fill="none" stroke="var(--o-tone)" strokeWidth="3.5" strokeLinecap="round" />
-          <circle cx="12" cy="55" r="2" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-arm-lap" overflow="visible">
-          <polyline points="13,43 14,54" fill="none" stroke="var(--o-tone)" strokeWidth="3.5" strokeLinecap="round" />
-          <polyline points="28,43 27,54" fill="none" stroke="var(--o-tone)" strokeWidth="3.5" strokeLinecap="round" />
-          <circle cx="15" cy="55" r="2" fill="var(--o-tone)" />
-          <circle cx="26" cy="55" r="2" fill="var(--o-tone)" />
-        </symbol>
-        <symbol id="o-arm-rest" overflow="visible">
-          <polyline points="25,42 27,52" fill="none" stroke="var(--o-tone)" strokeWidth="3.5" strokeLinecap="round" />
-          <circle cx="27" cy="53" r="2" fill="var(--o-tone)" />
-        </symbol>
-
-        {/* desk lamp at the right end; the head is outlined when off and takes --o-needs when on */}
+        {/* lamp right of the monitor, drawn only on a needs_you desk */}
         <symbol id="o-lamp" overflow="visible">
-          <rect x="83" y="44.5" width="7" height="2" rx="1" fill="var(--o-wood)" />
-          <rect x="85.75" y="18" width="1.5" height="26.5" fill="var(--o-wood)" />
-          <line x1="86.5" y1="19" x2="80" y2="15" stroke="var(--o-wood)" strokeWidth="1.5" strokeLinecap="round" />
+          <rect x="66" y="33" width="8" height="1.5" rx="0.5" fill="var(--o-wood)" />
+          <rect x="69.25" y="12" width="1.5" height="21" fill="var(--o-wood)" />
+          <line x1="70" y1="13" x2="66" y2="9" stroke="var(--o-wood)" strokeWidth="1.5" strokeLinecap="round" />
           <path
-            d="M73 12 h10 l3.5 6 h-17 z"
-            fill="var(--o-bezel)"
-            stroke="var(--o-wood)"
-            strokeWidth="1"
-            strokeLinejoin="round"
-          />
-        </symbol>
-        <symbol id="o-lamp-on" overflow="visible">
-          <path
-            d="M73 12 h10 l3.5 6 h-17 z"
+            d="M60 4 h10 l1.5 5 h-13 z"
             fill="var(--o-needs)"
             stroke="var(--o-needs)"
             strokeWidth="1"
             strokeLinejoin="round"
           />
         </symbol>
-
-        {/* an error sheet on the desk corner, 6 × 4 */}
+        {/* mug, 5 × 6, at the origin: only in an idle hand */}
+        <symbol id="o-mug" overflow="visible">
+          <rect x="0" y="0" width="5" height="6" rx="0.8" fill="var(--o-wood)" />
+          <path d="M5 1.5 h1.2 a1.5 1.5 0 0 1 0 3 h-1.2" fill="none" stroke="var(--o-wood)" strokeWidth="0.9" />
+        </symbol>
+        {/* chair back, painted behind the torso; pushed in when the desk is gone */}
+        <symbol id="o-chair" overflow="visible">
+          <rect x="42" y="56" width="12" height="10" rx="3" fill="var(--o-chair)" />
+        </symbol>
+        <symbol id="o-chair-in" overflow="visible">
+          <rect x="42" y="44" width="12" height="9" rx="3" fill="var(--o-chair)" />
+        </symbol>
         <symbol id="o-sheet" overflow="visible">
           <rect
             x="0"
@@ -162,32 +72,117 @@ export function OfficeDefs() {
             strokeWidth="0.6"
           />
         </symbol>
-
-        {/* a helper (subagent) standing: 5 wide, 16 tall, feet at y = 16 */}
-        <symbol id="o-helper" overflow="visible">
-          <circle cx="2.5" cy="2.1" r="2.1" fill="var(--o-tone)" />
-          <rect x="0.6" y="4.5" width="3.8" height="7" rx="1.9" fill="var(--o-tone)" />
-          <line x1="1.5" y1="11.5" x2="1.5" y2="16" stroke="var(--o-tone)" strokeWidth="1.6" strokeLinecap="round" />
-          <line x1="3.5" y1="11.5" x2="3.5" y2="16" stroke="var(--o-tone)" strokeWidth="1.6" strokeLinecap="round" />
+        {/* side table for helpers with a laptop; the lid screen is drawn by the cell */}
+        <symbol id="o-side" overflow="visible">
+          <rect x="118" y="38" width="36" height="10" rx="1" fill="var(--o-top)" />
+          <rect x="118" y="46" width="36" height="2" fill="var(--o-edge)" />
+          <rect x="124" y="30" width="12" height="8.5" rx="1" fill="var(--o-wood)" />
         </symbol>
-        <symbol id="o-helper-raise" overflow="visible">
-          <line x1="4" y1="5.5" x2="5.8" y2="1" stroke="var(--o-tone)" strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="6" cy="-0.8" r="1" fill="var(--o-needs)" />
+        <symbol id="o-stool" overflow="visible">
+          <rect x="0" y="0" width="10" height="3" rx="1.5" fill="var(--o-chair)" />
+        </symbol>
+        {/* the plant and the clock ring (plan view) */}
+        <symbol id="o-plant" overflow="visible">
+          <circle cx="5" cy="5" r="5" fill="var(--o-leaf)" />
+        </symbol>
+        <symbol id="o-clock" overflow="visible">
+          <circle cx="6" cy="6" r="5.3" fill="none" stroke="var(--o-wood)" strokeWidth="1" />
         </symbol>
 
-        {/* a standing figure for the walk: body plus two leg frames */}
+        {/* ---- the person, around the head's centre; seen from behind, 3/4 turn ---- */}
+        <symbol id="o-head" overflow="visible">
+          <circle cx="0" cy="0" r="3.5" fill="var(--look-skin)" />
+        </symbol>
+        <symbol id="o-hair-0" overflow="visible">
+          <path d="M-3.5 0 a3.5 3.5 0 1 1 7 0 v1.6 h-7 z" fill="var(--look-hair)" />
+        </symbol>
+        <symbol id="o-hair-1" overflow="visible">
+          <path d="M-3.5 0 a3.5 3.5 0 1 1 7 0 l2 1.6 h-9 z" fill="var(--look-hair)" />
+        </symbol>
+        <symbol id="o-hair-2" overflow="visible">
+          <path d="M-3.5 0 a3.5 3.5 0 1 1 7 0 v1 h-7 z" fill="var(--look-hair)" />
+          <circle cx="0" cy="1.8" r="2" fill="var(--look-hair)" />
+        </symbol>
+        <symbol id="o-hair-3" overflow="visible">
+          <circle cx="0" cy="-0.3" r="4.4" fill="var(--look-hair)" />
+          <circle cx="-3.6" cy="-2.6" r="1.4" fill="var(--look-hair)" />
+          <circle cx="3.6" cy="-2.6" r="1.4" fill="var(--look-hair)" />
+          <circle cx="0" cy="-4.6" r="1.4" fill="var(--look-hair)" />
+          <circle cx="-4.4" cy="0.8" r="1.3" fill="var(--look-hair)" />
+          <circle cx="4.4" cy="0.8" r="1.3" fill="var(--look-hair)" />
+        </symbol>
+        <symbol id="o-glasses" overflow="visible">
+          <line x1="3.2" y1="-0.4" x2="5.2" y2="-1" stroke="var(--fg)" strokeWidth="1" strokeLinecap="round" />
+        </symbol>
+        {/* seated torso 10 × 12 with 12 px shoulders, a 1 px neck */}
+        <symbol id="o-neck" overflow="visible">
+          <rect x="-1" y="2.6" width="2" height="1.4" fill="var(--look-skin)" />
+        </symbol>
+        <symbol id="o-torso" overflow="visible">
+          <path d="M-6 7 a3 3 0 0 1 3 -4 h6 a3 3 0 0 1 3 4 v0.5 l-1 7.5 h-10 l-1 -7.5 z" fill="var(--look-shirt)" />
+        </symbol>
+        {/* arms: right to the keyboard with a left hint · right to the mug · both on the desk */}
+        <symbol id="o-arm-key" overflow="visible">
+          <line x1="-4.5" y1="6" x2="-3" y2="1" stroke="var(--look-shirt)" strokeWidth="1" strokeLinecap="round" />
+          {arm(4.5, 6, 1, -6.5, "r")}
+        </symbol>
+        <symbol id="o-arm-mug" overflow="visible">
+          {arm(4.5, 6, 8, 0, "r")}
+        </symbol>
+        <symbol id="o-arms-desk" overflow="visible">
+          {arm(-4.5, 5, -7, -6, "l")}
+          {arm(4.5, 5, 7, -6, "r")}
+        </symbol>
+        {/* standing figure, feet at the origin: 26 tall, 12 wide, 6 px legs */}
         <symbol id="o-stand" overflow="visible">
-          <circle cx="20.5" cy="33" r="6" fill="var(--o-tone)" />
-          <rect x="18" y="36" width="5" height="6" fill="var(--o-tone)" />
-          <path d="M14 58 V46 a6.5 6.5 0 0 1 6.5 -6.5 a6.5 6.5 0 0 1 6.5 6.5 V58 Z" fill="var(--o-tone)" />
+          <rect x="-1" y="-19.4" width="2" height="1.4" fill="var(--look-skin)" />
+          <path d="M-6 -15 a3 3 0 0 1 3 -4 h6 a3 3 0 0 1 3 4 v0.5 l-1 8.5 h-10 l-1 -8.5 z" fill="var(--look-shirt)" />
+        </symbol>
+        <symbol id="o-legs" overflow="visible">
+          <line
+            x1="-2.5"
+            y1="-6"
+            x2="-2.5"
+            y2="0"
+            stroke="var(--look-trouser)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <line x1="2.5" y1="-6" x2="2.5" y2="0" stroke="var(--look-trouser)" strokeWidth="2.4" strokeLinecap="round" />
         </symbol>
         <symbol id="o-legs-a" overflow="visible">
-          <line x1="17.5" y1="57" x2="15" y2="72" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
-          <line x1="23.5" y1="57" x2="26.5" y2="72" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
+          <line
+            x1="-2.5"
+            y1="-6"
+            x2="-4.5"
+            y2="0"
+            stroke="var(--look-trouser)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <line x1="2.5" y1="-6" x2="4.5" y2="0" stroke="var(--look-trouser)" strokeWidth="2.4" strokeLinecap="round" />
         </symbol>
         <symbol id="o-legs-b" overflow="visible">
-          <line x1="17.5" y1="57" x2="19.5" y2="72" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
-          <line x1="23.5" y1="57" x2="21.5" y2="72" stroke="var(--o-tone)" strokeWidth="4" strokeLinecap="round" />
+          <line
+            x1="-2.5"
+            y1="-6"
+            x2="-0.5"
+            y2="0"
+            stroke="var(--look-trouser)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <line x1="2.5" y1="-6" x2="0.5" y2="0" stroke="var(--look-trouser)" strokeWidth="2.4" strokeLinecap="round" />
+        </symbol>
+        <symbol id="o-arm-up" overflow="visible">
+          {arm(5, -16, 9, -23, "r")}
+        </symbol>
+        <symbol id="o-arm-down" overflow="visible">
+          {arm(-5, -16, -5.5, -8, "l", 1.6)}
+        </symbol>
+        <symbol id="o-arms-stand" overflow="visible">
+          {arm(-5, -16, -5.5, -8, "l", 1.6)}
+          {arm(5, -16, 5.5, -8, "r", 1.6)}
         </symbol>
       </defs>
     </svg>

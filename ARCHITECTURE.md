@@ -31,6 +31,7 @@ client against a receiver you can see into.
 | Auth | Events: `Bearer <sink token>` always. UI API + page: loopback free; otherwise cookie `spgui=<ui key>` set by `?k=`. Well-known: public. Machine calls: the machine's own token | One QR code gets a phone in; the token never has to be typed |
 | Readings | State machine in `shared/api.ts` (`needs_you` › `working` › `stale` › `idle` › `done`) | Spec §1: the receiver's reading, shown as such |
 | Control | Full receiver side (pair, hello, poll, ack, off, queue, redelivery, `taken` pause); UI signs with WebAuthn passkeys + a day key. `rp_id` is `localhost` by default | Phones need HTTPS for passkeys: that is the `--tls` follow-up, not v1 |
+| Themes | Plugins: an ES module + `theme.json` outside this repo, loaded at runtime with `ThemeApi` (`shared/theme-api.ts`, `docs/theme-authoring.md`); the official ones live in `sessionpipe-gui-themes` | Themes stay out of the main GUI and can be installed, linked for development, or removed |
 | Conformance | Our own runner for `conformance/delivery/*.json` from a sessionpipe checkout (the upstream runner's receiver mode lands in M3) | We must score 100 % |
 
 ## Modules and owners
@@ -49,6 +50,8 @@ client against a receiver you can see into.
 | `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`) |
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
 | `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |
+| `server/themes/*` | platform | theme registry (`<stateDir>/themes/<id>/theme.json`), `/api/ui/themes`, per-theme state, `/themes/:id/*` static, `theme add/link/remove/list` |
+| `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`) |
 | `web/*` | web | the app; `web/src/mock/` a mock stream so it runs with no server |
 
 A module touches only its own paths; a change it needs elsewhere is a request to the

@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:7373",
       "/.well-known": "http://127.0.0.1:7373",
+      "/themes": "http://127.0.0.1:7373",
     },
   },
 });

@@ -7,7 +7,16 @@ import type { Attention, SessionKey, SessionState, SessionSummary } from "@share
 import { useMemo, useRef, useSyncExternalStore } from "react";
 
 export type Screen = "lit" | "dim" | "pale" | "off";
-export type Phase = "arriving" | "seated" | "leaving";
+export type Phase = "arriving" | "seated" | "leaving" | "gone";
+
+/** How a person looks, fixed for the session's life (DESIGN.md §2). */
+export interface Look {
+  shirt: number;
+  hair: number;
+  hairColour: number;
+  skin: number;
+  glasses: boolean;
+}
 
 export interface Posture {
   state: SessionState;
@@ -26,17 +35,18 @@ export interface Posture {
   helpers: SessionSummary[];
   hiddenHelpers: number;
   phase: Phase;
+  look: Look;
 }
 
 export const SCREEN_BY_STATE: Record<SessionState, Screen> = {
   working: "lit",
   needs_you: "dim",
-  stale: "pale",
+  stale: "off",
   idle: "off",
   done: "off",
 };
 
-export const MAX_HELPERS = 3;
+export const MAX_HELPERS = 2;
 const TYPING_WINDOW_MS = 3000;
 const LONG_RUNNING_MS = 60_000;
 
@@ -77,13 +87,47 @@ export function derivePosture(
       s.state === "working" && toolMs > LONG_RUNNING_MS
         ? toolMs
         : s.state === "stale"
-          ? Math.max(0, now - Date.parse(s.lastAt))
+          ? Math.max(0, now - Date.parse(s.stateSince))
           : undefined,
     errors: sheets(s.counts.toolErrors),
     attention: s.state === "needs_you" ? s.openAttentions[0] : undefined,
     helpers,
     hiddenHelpers: hidden,
     phase,
+    look: lookOf(s.id),
+  };
+}
+
+/** FNV-1a, 32-bit: one stable number per session id. */
+export function fnv1a(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+export function lookOf(id: string): Look {
+  const h = fnv1a(id);
+  return {
+    shirt: h % 6,
+    hair: (h >>> 3) & 3,
+    hairColour: (h >>> 5) & 1,
+    skin: (h >>> 6) & 1,
+    glasses: ((h >>> 7) & 3) === 0,
+  };
+}
+
+/** Hour and minute hand angles for the viewer's local time, stepped to the minute. */
+export function clockAngles(at: number): { hour: number; minute: number; text: string } {
+  const d = new Date(Math.floor(at / 60_000) * 60_000);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return {
+    hour: ((h % 12) + m / 60) * 30,
+    minute: m * 6,
+    text: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
   };
 }
 

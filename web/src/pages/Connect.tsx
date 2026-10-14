@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { CopyButton, Toggle } from "../components/bits";
 import { useAppState, useStore } from "../data/hooks";
 import { bytes } from "../lib/format";
+import { Link } from "../lib/router";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { dur } from "../lib/time";
+import { useThemes } from "../themes/host/registry";
 
 export function Connect() {
   const store = useStore();
@@ -17,6 +19,7 @@ export function Connect() {
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState<"rotate" | "demo" | null>(null);
   const [qrBroken, setQrBroken] = useState(false);
+  const themes = useThemes().themes;
 
   const load = () =>
     store.transport
@@ -265,6 +268,18 @@ export function Connect() {
           </div>
         </dl>
         {info && <p className="sect-note mono">{info.storage.dir}</p>}
+      </section>
+
+      <section className="sect">
+        <header className="sect-head">
+          <h2>Themes</h2>
+          <p>
+            {themes.length === 0
+              ? "No theme plugins installed."
+              : `${themes.length} installed: ${themes.map((t) => t.name || t.id).join(", ")}.`}{" "}
+            <Link to="/themes">Manage themes</Link>
+          </p>
+        </header>
       </section>
     </div>
   );

@@ -18,7 +18,9 @@ const noSidewaysScroll = async (page: Page) => {
 const tabBarIsOn = async (page: Page) => {
   const bar = page.locator("nav.tabbar");
   await expect(bar).toBeVisible();
-  await expect(bar.getByRole("link")).toHaveCount(5);
+  // Five pages of our own, plus one tab per installed theme plugin (see themes.spec.ts).
+  const { themes } = (await (await page.request.get("/api/ui/themes")).json()) as { themes: { error?: string }[] };
+  await expect(bar.getByRole("link")).toHaveCount(5 + themes.filter((t) => !t.error).length);
   for (const label of ["Board", "Feed", "Machines", "Connect", "Office"])
     await expect(bar.getByRole("link", { name: label })).toBeVisible();
   const box = (await bar.boundingBox())!;
