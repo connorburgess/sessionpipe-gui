@@ -3,11 +3,17 @@
 // of slim events and session summaries in memory, the readings of ARCHITECTURE.md,
 // and a subscription stream the SSE route forwards. Contract: ARCHITECTURE.md "Store".
 import {
+  type Digest,
+  type DigestQuery,
   type EventSource,
   type FeedPage,
   type FeedQuery,
+  type FilesPage,
+  type FilesQuery,
   type MachineSummary,
   type ProtocolEvent,
+  type SearchPage,
+  type SearchQuery,
   type SessionDetail,
   type SessionKey,
   type SessionSummary,
@@ -19,7 +25,8 @@ import {
   splitKey,
 } from "../../shared/api.js";
 import { EventFiles, type Line } from "./files.js";
-import { applyEvent, newRecord, refreshState, type SessionRecord } from "./readings.js";
+import { applyEvent, newRecord, refreshFlags, refreshState, type SessionRecord } from "./readings.js";
+import { digest, filesChanged, type ReviewIndex, search } from "./review.js";
 import { type SlimEvent, slimEvent } from "./slim.js";
 
 export interface IngestResult {
@@ -42,7 +49,7 @@ export interface StoreOptions {
 
 /** One indexed event: the slim copy, where its full line is on disk, its event time
  *  (ms, clamped to arrival) and its arrival number. The feed orders by (t, no). */
-interface Rec {
+export interface Rec {
   ev: SlimEvent;
   offset: number;
   bytes: number;
@@ -152,10 +159,16 @@ export class Store {
       this.index(entry, ev, line.offset, line.bytes);
       applyEvent(entry, ev, ev.arrivedAt, ev.source ?? "http");
     });
-    for (const entry of this.sessions.values()) refreshState(entry, now);
+    for (const entry of this.sessions.values()) this.refresh(entry, now);
   }
 
   // ---------- helpers ----------
+
+  /** The state machine, then the flags over it; true when either changed. */
+  private refresh(entry: Entry, now: number): boolean {
+    const state = refreshState(entry, now);
+    return refreshFlags(entry, now) || state;
+  }
 
   private entry(harness: string, id: string, at: string, source: EventSource): Entry {
     const key = sessionKey(harness, id);
@@ -188,7 +201,8 @@ export class Store {
     entry.ended = fresh.ended;
     entry.live = fresh.live;
     entry.files = fresh.files;
-    refreshState(entry, now);
+    entry.track = fresh.track;
+    this.refresh(entry, now);
   }
 
   private index(entry: Entry, ev: StoredEvent, offset: number, bytes: number): Rec {
@@ -302,7 +316,7 @@ export class Store {
     if (this.closed) return;
     for (const entry of this.sessions.values()) {
       if (entry.summary.state === "done" && (entry.ended || !entry.live)) continue;
-      if (refreshState(entry, now)) this.emit({ kind: "session", session: entry.summary });
+      if (this.refresh(entry, now)) this.emit({ kind: "session", session: entry.summary });
     }
   }
 
@@ -369,7 +383,7 @@ export class Store {
         this.noteArrival(ev);
         const parent = this.noteChild(entry, ev);
         if (parent) parents.add(parent);
-        refreshState(entry, now);
+        this.refresh(entry, now);
         this.emit({ kind: "event", event: ev, session: entry.summary });
       }
       for (const p of parents) this.emit({ kind: "session", session: p.summary });
@@ -408,7 +422,7 @@ export class Store {
     const now = Date.now();
     const sessions: SessionSummary[] = [];
     for (const entry of this.sessions.values()) {
-      refreshState(entry, now);
+      this.refresh(entry, now);
       sessions.push(entry.summary);
     }
     sessions.sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : 0));
@@ -418,7 +432,7 @@ export class Store {
   session(key: SessionKey): SessionSummary | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
-    refreshState(entry, Date.now());
+    this.refresh(entry, Date.now());
     return entry.summary;
   }
 
@@ -442,7 +456,7 @@ export class Store {
   ): SessionDetail | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
-    refreshState(entry, Date.now());
+    this.refresh(entry, Date.now());
     const n = Math.max(1, Math.min(DETAIL_MAX, limit ?? DETAIL_DEFAULT));
     const page: Rec[] = [];
     const backwards = opts.tail || (typeof opts.before === "number" && Number.isFinite(opts.before));
@@ -509,6 +523,37 @@ export class Store {
     const page: FeedPage = { events };
     if (last && i >= 0) page.cursor = encodeCursor(last);
     return page;
+  }
+
+  // ---------- review (store/review.ts) ----------
+
+  private review(): ReviewIndex {
+    return {
+      byTime: this.byTime,
+      summary: (key) => this.sessions.get(key)?.summary,
+      isFirst: (rec) => this.sessions.get(sessionKey(rec.ev.harness.name, rec.ev.session.id))?.recs[0] === rec,
+      readFull: (key, recs) => {
+        const { harness, id } = splitKey(key);
+        return this.files.readAt(harness, id, recs);
+      },
+      cursor: { encode: encodeCursor, decode: decodeCursor },
+    };
+  }
+
+  /** Transcripts, tool names, attention messages, changed paths and titles; newest first. */
+  search(q: SearchQuery): SearchPage {
+    return search(this.review(), q);
+  }
+
+  /** Paths from files.changed since a time, by repo then path, with the sessions that touched each. */
+  filesChanged(q: FilesQuery = {}): FilesPage {
+    return filesChanged(this.review(), q);
+  }
+
+  /** A local day's sessions and their counts, with totals per machine and per repo. Throws
+   *  RangeError("bad_day") when `day` is not a date. */
+  digest(q: DigestQuery = {}): Digest {
+    return digest(this.review(), q);
   }
 
   /** Delete a session's file and index entry (a `session.forgotten`, or the UI). */

@@ -140,9 +140,46 @@ export interface SessionSummary {
   children: number;
   /** Last tool names, newest last, at most 8 — for a sparkline of activity. */
   recentTools: { tool: string; ok: boolean; ms?: number }[];
+  /** The store's smarter readings (ARCHITECTURE.md "The store's readings"): what is
+   *  off about the session right now, in a fixed order by kind. Empty when nothing is. */
+  flags: SessionFlag[];
+  /** From turn.started / turn.ended: completed turns, their durations, tools per turn. */
+  turnStats: TurnStats;
 }
 
 export const SNIPPET_CHARS = 280;
+
+/** slow_tool: `currentTool` has run longer than SLOW_TOOL_MS. error_streak: the last
+ *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
+ *  ran 3+ times on an identical input (tier 3 only). compacting: 2+ context.compacted
+ *  within COMPACTING_WINDOW_MS of the last event. gap: seqs are missing behind the
+ *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). */
+export type SessionFlagKind = "slow_tool" | "error_streak" | "loop" | "compacting" | "gap";
+
+export interface SessionFlag {
+  kind: SessionFlagKind;
+  /** When the condition began (ISO): the tool's start, the first error of the streak,
+   *  the first start of the loop, the second compaction, the moment the hole appeared. */
+  since: string;
+  /** One short line for a card: "Bash · 4 m", "3 tool errors in a row",
+   *  "Read ×3 on the same input", "compacted twice in 20 m", "waiting for 2 events (seq 41–42)". */
+  detail: string;
+}
+
+export interface TurnStats {
+  /** Completed turns (turn.ended seen). */
+  count: number;
+  /** Median duration of completed turns, from `ms` or the turn's span. */
+  medianMs?: number;
+  /** Duration of the last completed turn. */
+  lastMs?: number;
+  /** Tools ended so far per completed turn, to one decimal. */
+  toolsPerTurn?: number;
+}
+
+export const SLOW_TOOL_MS = 3 * 60_000;
+export const GAP_AFTER_MS = 30_000;
+export const COMPACTING_WINDOW_MS = 30 * 60_000;
 
 export interface MachineSummary {
   name: string;
@@ -189,6 +226,24 @@ export interface Snapshot {
   machines: MachineSummary[];
   stats: Stats;
   viewers?: Viewer[];
+  /** Plugins' open suggestions (shared/plugin-api.ts); present on the stream's first frame. */
+  suggestions?: Suggestion[];
+}
+
+/** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
+ *  only: the receiver holds no key and signs nothing; a person confirms it in the GUI with
+ *  their passkey, which sends the ordinary `permission.answer`. Gone when the attention
+ *  closes. */
+export interface Suggestion {
+  session: SessionKey;
+  attentionId: string;
+  decision: "allow" | "deny";
+  /** Who suggested it, as the plugin words it: "Misha on Telegram". */
+  by: string;
+  /** The plugin that made it. */
+  plugin: string;
+  note?: string;
+  at: string;
 }
 
 /** What `GET /api/ui/stream` (SSE) sends. The `event:` field of each SSE frame is the
@@ -202,7 +257,8 @@ export type StreamMessage =
   | { kind: "machine"; machine: MachineSummary }
   | { kind: "stats"; stats: Stats }
   | { kind: "control"; message: ControlActivity }
-  | { kind: "viewers"; viewers: Viewer[] };
+  | { kind: "viewers"; viewers: Viewer[] }
+  | { kind: "suggestion"; suggestion: Suggestion };
 
 /** A browser connected to this GUI's stream right now: a phone on the LAN, this
  *  laptop's own tab. The receiver's reading of "devices", from the connection only;
@@ -266,6 +322,131 @@ export interface FeedQuery {
   q?: string;
 }
 
+// ---------- review (search, files changed, daily digest; GET only, all from the index) ----------
+
+export interface SearchQuery {
+  q: string;
+  limit?: number;
+  /** The `cursor` of a previous page. */
+  before?: string;
+}
+
+/** Where a search hit was found. */
+export type SearchField = "user" | "assistant" | "title" | "tool" | "path" | "message";
+
+export interface SearchHit {
+  session: SessionSummary;
+  /** The slim event the match is in (the preview may not contain the match itself). */
+  event: StoredEvent;
+  field: SearchField;
+  /** Up to ±80 chars around the first match, with `…` where it was cut. */
+  snippet: string;
+  /** Offsets of the match within `snippet`: [start, end). */
+  match: [number, number];
+}
+
+export interface SearchPage {
+  q: string;
+  /** Newest first. */
+  hits: SearchHit[];
+  /** Pass back as `before` for the next (older) page; absent when exhausted. */
+  cursor?: string;
+  /** Events looked at for this page, and how long it took. */
+  scanned: number;
+  ms: number;
+}
+
+/** Query of GET /api/ui/files. `since` is an ISO time; `repo` an exact `session.repo`. */
+export interface FilesQuery {
+  since?: string;
+  repo?: string;
+}
+
+export interface FilesSession {
+  key: SessionKey;
+  title: string;
+  /** files.changed events of this session naming the path. */
+  count: number;
+  lastAt: string;
+}
+
+export interface FilesPath {
+  path: string;
+  count: number;
+  lastAt: string;
+  /** Newest first. */
+  sessions: FilesSession[];
+}
+
+export interface FilesRepo {
+  /** `session.repo`, or "" when the session has none (the UI shows the cwd then). */
+  repo: string;
+  lastAt: string;
+  /** Distinct sessions that touched something in this repo. */
+  sessions: number;
+  /** Newest first. */
+  paths: FilesPath[];
+}
+
+export interface FilesPage {
+  since: string;
+  /** Newest first. */
+  repos: FilesRepo[];
+  /** Distinct paths across all repos. */
+  total: number;
+}
+
+/** Query of GET /api/ui/digest: a local day and that place's UTC offset in minutes, as
+ *  `Date.prototype.getTimezoneOffset` gives it (UTC minus local: -420 for UTC-7). */
+export interface DigestQuery {
+  /** YYYY-MM-DD; today when absent. */
+  day?: string;
+  tz?: number;
+}
+
+export interface DigestCounts {
+  events: number;
+  turns: number;
+  tools: number;
+  errors: number;
+  attentions: number;
+  compactions: number;
+  /** Distinct paths from files.changed. */
+  filesTouched: number;
+}
+
+export interface DigestSession extends DigestCounts {
+  key: SessionKey;
+  title: string;
+  harness: string;
+  machine?: string;
+  repo?: string;
+  /** First and last event of the session within the day (ISO). */
+  startedAt: string;
+  endedAt: string;
+  /** endedAt − startedAt, ms. */
+  activeMs: number;
+}
+
+export interface DigestGroup extends DigestCounts {
+  name: string;
+  sessions: number;
+  activeMs: number;
+}
+
+export interface Digest {
+  day: string;
+  tz: number;
+  /** The day's bounds in UTC (ISO). */
+  from: string;
+  to: string;
+  /** By first event of the day. */
+  sessions: DigestSession[];
+  byMachine: DigestGroup[];
+  byRepo: DigestGroup[];
+  totals: DigestGroup;
+}
+
 export interface Info {
   name: "sessionpipe-gui";
   version: string;
@@ -323,6 +504,8 @@ export interface SetupStatus {
     on: boolean;
     hostname: string;
     httpsUrl: string;
+    /** The rp id passkeys are made for right now (`localhost`, or the hostname with TLS mode). */
+    rpId: string;
     caFingerprint?: string;
     /** macOS: the system trusts the CA for SSL (`security verify-cert`); null where we cannot tell. */
     caTrusted: boolean | null;
@@ -409,6 +592,12 @@ export const ROUTES = {
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",
+    /** GET /api/ui/search?q=&limit=&before= → SearchPage */
+    search: "/api/ui/search",
+    /** GET /api/ui/files?since=<iso>&repo= → FilesPage */
+    files: "/api/ui/files",
+    /** GET /api/ui/digest?day=YYYY-MM-DD&tz=<minutes> → Digest */
+    digest: "/api/ui/digest",
     /** GET → ColorThemesResponse: the JSON files under <stateDir>/color-themes. */
     colorThemes: "/api/ui/color-themes",
     /** First-run setup, this machine only (loopback or one of its own addresses; 403 otherwise):

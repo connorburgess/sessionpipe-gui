@@ -88,6 +88,17 @@
   text-align: center;
 }
 
+/* The Setup entry's amber dot: steps to go on this machine. */
+.nav-dot {
+  position: absolute;
+  top: 8px;
+  left: calc(50% + 8px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--needs);
+}
+
 .theme-btn,
 .back {
   display: inline-grid;
@@ -781,6 +792,18 @@
 .sess-counts .is-err {
   color: var(--err-soft);
 }
+/* The store's flags: one muted line under the status; only an error streak is coloured. */
+.card-flags,
+.sess-flags {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.card-flags .is-err,
+.sess-flags .is-err {
+  color: var(--err-soft);
+}
 .card-kids {
   list-style: none;
   margin: 0;
@@ -906,7 +929,8 @@
     column-gap: 24px;
     padding-top: 16px;
   }
-  .sess-head-row {
+  .sess-head-row,
+  .sess-flags {
     grid-column: 1 / -1;
   }
 }
@@ -2354,4 +2378,435 @@
 }
 .panel--sheet .panel-head {
   order: -2;
+}
+
+/* ---------- inbox ---------- */
+
+/* Rows under hairlines, like the feed; an amber inset bar on the ones that take an answer. */
+.inbox {
+  gap: 24px;
+}
+.inbox-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 32px;
+}
+.inbox-lede {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.inbox-empty {
+  color: var(--fg-2);
+  font-size: var(--text-lg);
+}
+.inbox-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.inbox-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-row--answerable {
+  box-shadow: inset 2px 0 0 var(--needs);
+  padding-left: 12px;
+}
+.inbox-row[aria-current="true"] {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+.inbox-main {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  color: inherit;
+  border-radius: var(--radius);
+}
+.inbox-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--text-md);
+}
+.inbox-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.inbox-main:hover .inbox-title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.inbox-machine,
+.inbox-age {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.inbox-age {
+  margin-left: auto;
+}
+.inbox-what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+.inbox-kind {
+  flex: none;
+  color: var(--needs-fg);
+}
+.inbox-row--terminal .inbox-kind {
+  color: var(--fg-3);
+}
+.inbox-what code {
+  color: var(--fg);
+}
+.inbox-msg {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.inbox-answer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  max-width: 100%;
+}
+.inbox-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.inbox-note--err {
+  color: var(--err);
+}
+
+/* "Notify me" (components/NotifyToggle.tsx): the switch, its name, one quiet hint. */
+.notify {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.notify-hint {
+  color: var(--fg-3);
+}
+
+/* ---------- review ---------- */
+
+/* Search hits: rows like the feed's, the snippet in one line, the match underlined with a
+   hairline (no block of colour: amber is for "needs you" and nothing else). */
+.review-meta {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.hit {
+  display: grid;
+  grid-template-columns: 58px 18px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "time glyph session field"
+    "time glyph snippet snippet";
+  column-gap: 8px;
+  row-gap: 2px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.hit:hover .hit-session {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+.hit-time {
+  grid-area: time;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding-top: 3px;
+}
+.hit .glyph-wrap {
+  grid-area: glyph;
+}
+.hit-session {
+  grid-area: session;
+  font-weight: 500;
+  min-width: 0;
+}
+.hit-field {
+  grid-area: field;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.hit-snippet {
+  grid-area: snippet;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.hit-snippet mark {
+  background: none;
+  color: var(--fg);
+  padding: 0;
+  border-radius: 0;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--fg-3);
+}
+.hit-snippet mark[title] {
+  /* a [redacted] placeholder keeps its own look */
+  background: var(--mark);
+  color: var(--mark-fg);
+  text-decoration: none;
+}
+
+/* The two tabs under the search: text and a 2 px underline, like the panel's tab strip. */
+.rv-tabs {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.rv-tab {
+  position: relative;
+  padding: 6px 0 8px;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: var(--text-md);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.rv-tab:hover {
+  color: var(--fg-2);
+}
+.rv-tab[aria-selected="true"] {
+  color: var(--fg);
+  font-weight: 500;
+}
+.rv-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--fg);
+}
+.rv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 30px;
+}
+.rv-head .page-note {
+  margin-left: auto;
+}
+
+/* Files: a section per repo, one row per path, the sessions that touched it as quiet buttons. */
+.rv-paths {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rv-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "file when"
+    "touched touched";
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-md);
+}
+.rv-file {
+  grid-area: file;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.rv-when {
+  grid-area: when;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.rv-touched {
+  grid-area: touched;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: var(--text-sm);
+}
+.rv-sess {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.rv-sess:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rv-sess .num {
+  color: var(--fg-3);
+}
+@media (min-width: 840px) {
+  .rv-path {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+    grid-template-areas: "file touched when";
+    align-items: baseline;
+  }
+}
+
+/* Day: a stepper, then one table. */
+.rv-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rv-stepper .btn {
+  min-width: 28px;
+  padding: 0 6px;
+}
+.rv-day {
+  min-width: 11ch;
+  text-align: center;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.rv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+.rv-table th,
+.rv-table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: baseline;
+}
+.rv-table th {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.rv-table th.num,
+.rv-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rv-table td.num:last-child,
+.rv-table th.num:last-child {
+  padding-right: 0;
+}
+.rv-table td.muted {
+  color: var(--fg-3);
+}
+.rv-table td.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.rv-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.rv-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rv-span {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  margin-left: 8px;
+}
+.rv-table tfoot td {
+  color: var(--fg-2);
+  border-bottom: 0;
+}
+.rv-table tfoot tr:first-child td {
+  padding-top: 12px;
+}
+.rv-table tfoot .rv-kind {
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 8px;
+}
+.rv-table tfoot tr.rv-all td {
+  color: var(--fg);
+  font-weight: 500;
+  border-top: 1px solid var(--line-2);
+}
+@media (max-width: 839px) {
+  .rv-table .rv-col-wide {
+    display: none;
+  }
+}
+
+/* A timeline row the Review page opened a session on (components/SessionView.tsx). */
+.is-target {
+  animation: target-fade 1.6s var(--ease-out) forwards;
+}
+@keyframes target-fade {
+  from {
+    box-shadow: inset 2px 0 0 var(--fg-3);
+  }
+  to {
+    box-shadow: inset 2px 0 0 transparent;
+  }
 }

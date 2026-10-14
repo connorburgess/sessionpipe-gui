@@ -453,6 +453,8 @@ export class World {
       lastAssistant,
       children: this.children(r).length,
       recentTools,
+      flags: [],
+      turnStats: { count: 0 },
     };
   }
 

@@ -13,7 +13,7 @@ import { back, Link, navigate, sessionPath } from "../lib/router";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
 import { Chip, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateBadge, TierBadge } from "./bits";
-import { plural } from "./SessionCard";
+import { FlagLine, plural } from "./SessionCard";
 
 /** The newest page a session opens on, and the size of each older page. Both slim: the
  *  full event is fetched only when a row is expanded (`fill`). */
@@ -21,6 +21,12 @@ const TAIL = 100;
 const OLDER = 200;
 /** Characters of each tool input/output or transcript kept in a list page. */
 const LIST_PREVIEW = 400;
+
+/** `#seq-N` on the URL: the row a search hit asks to open on (pages/Review.tsx), read once. */
+const hashSeq = (): number | null => {
+  const m = /^#seq-(\d+)$/.exec(location.hash);
+  return m ? Number(m[1]) : null;
+};
 
 interface Turn {
   n: number;
@@ -207,14 +213,33 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     }
   }, [store, harness, id, olderBusy, scrollHeight, scrollY]);
 
-  // Bottom-anchored first paint (the newest turn is what a session opens on), and a
-  // still viewport when older events land above it, whether or not the browser's own
-  // scroll anchoring already moved it.
+  /** Scroll to the row of a seq when it is loaded (centred, marked for a moment) and drop
+   *  the hash either way; true when the row was there. */
+  const jumpTo = useCallback((seq: number | null): boolean => {
+    if (seq === null) return false;
+    history.replaceState(null, "", location.pathname + location.search);
+    const row = rootRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
+    if (!row) return false;
+    setFollow(false);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("is-target");
+    setTimeout(() => row.classList.remove("is-target"), 1600);
+    return true;
+  }, []);
+  useEffect(() => {
+    const onHash = () => jumpTo(hashSeq());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [jumpTo]);
+
+  // Bottom-anchored first paint (the newest turn is what a session opens on, unless the
+  // URL names a row), and a still viewport when older events land above it, whether or
+  // not the browser's own scroll anchoring already moved it.
   useLayoutEffect(() => {
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      scrollTo(scrollHeight());
+      if (!jumpTo(hashSeq())) scrollTo(scrollHeight());
       return;
     }
     const a = anchor.current;
@@ -229,7 +254,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY]);
+  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo]);
 
   useEffect(() => {
     if (loading) return;
@@ -349,6 +374,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             <StateBadge state={s.state} since={s.stateSince} />
           </div>
         )}
+        <FlagLine flags={s.flags} className="sess-flags" />
         <div className="sess-facts">
           {s.machine && <Chip kind="machine">{s.machine}</Chip>}
           {repoBranch(s) && <span className="mono sess-repo">{repoBranch(s)}</span>}

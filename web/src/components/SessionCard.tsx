@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // One session on the board: the title, one line of where it is, one line of what it is
 // doing, and the last thing it said. Subagents nest as small rows at the bottom.
-import type { SessionSummary } from "@shared/api";
+import type { SessionFlag, SessionSummary } from "@shared/api";
 import { Fragment, type ReactNode, useRef } from "react";
 import { ATTENTION_LABEL, modelShort, oneLine, repoBranch, STATE_LABEL, sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
@@ -97,6 +97,8 @@ export function SessionCard({
           </Dotted>
         </p>
 
+        <FlagLine flags={s.flags} className="card-flags" />
+
         {attention && (
           <p className="card-attn">
             {attention.message ? <Redacted text={oneLine(attention.message, 240)} /> : "waiting for you"}
@@ -135,6 +137,22 @@ export function SessionCard({
         </ul>
       )}
     </article>
+  );
+}
+
+/** The store's flags as one muted line: "· 3 tool errors in a row · waiting for 2 events".
+ *  Only an error streak is coloured. Renders nothing when there are none. */
+export function FlagLine({ flags, className }: { flags: SessionFlag[] | undefined; className: string }) {
+  if (!flags?.length) return null;
+  return (
+    <p className={className}>
+      {flags.map((f, i) => (
+        <Fragment key={f.kind}>
+          <span className="sep">{i > 0 ? " · " : "· "}</span>
+          <span className={f.kind === "error_streak" ? "is-err" : undefined}>{f.detail}</span>
+        </Fragment>
+      ))}
+    </p>
   );
 }
 

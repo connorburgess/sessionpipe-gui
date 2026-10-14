@@ -2,7 +2,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, type StreamMessage, sessionKey } from "../../shared/api.js";
+import {
+  DONE_AFTER_MS,
+  GAP_AFTER_MS,
+  SLOW_TOOL_MS,
+  SNIPPET_CHARS,
+  STALE_AFTER_MS,
+  type StreamMessage,
+  sessionKey,
+} from "../../shared/api.js";
 import { Session, SID, tempDir } from "../../test/events.js";
 import { Store } from "./store.js";
 
@@ -598,5 +606,226 @@ describe("permission twins", () => {
     expect(store.session("claude-code:tw-1")!.openAttentions).toMatchObject([{ attentionId: "notif-2" }]);
     expect(store.session("claude-code:tw-1")!.openAttentions[0]!.answerable).toBeUndefined();
     await store.close();
+  });
+});
+
+describe("flags and turn stats", () => {
+  const sessionMsgs = (got: StreamMessage[]) =>
+    got.filter((m): m is Extract<StreamMessage, { kind: "session" }> => m.kind === "session");
+
+  it("reads nothing into a quiet session", () => {
+    const s = new Session();
+    store.ingest(
+      [
+        s.ev("session.started"),
+        s.ev("turn.started", { turn_id: "t1" }),
+        s.ev("tool.started", { tool: "Read", call_id: "c1", input: { file_path: "a.ts" } }),
+        s.ev("tool.ended", { tool: "Read", call_id: "c1", ok: true, ms: 5 }),
+        s.ev("turn.ended", { reason: "stop", ms: 4000 }),
+      ],
+      "http",
+    );
+    const sum = store.session(KEY)!;
+    expect(sum.flags).toEqual([]);
+    expect(sum.turnStats).toEqual({ count: 1, medianMs: 4000, lastMs: 4000, toolsPerTurn: 1 });
+    expect(store.snapshot().sessions[0]!.flags).toEqual([]);
+  });
+
+  it("flags a slow tool on the tick and clears it when the tool ends", async () => {
+    await store.close();
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-10-14T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const got: StreamMessage[] = [];
+    store.subscribe((m) => got.push(m));
+    const s = new Session();
+    s.clock = t0 - 5_000;
+    store.ingest(
+      [s.ev("session.started"), s.ev("turn.started"), s.ev("tool.started", { tool: "Bash", call_id: "c1" })],
+      "http",
+    );
+    const since = store.session(KEY)!.currentTool!.since;
+    expect(store.session(KEY)!.flags).toEqual([]);
+    got.length = 0;
+    vi.advanceTimersByTime(SLOW_TOOL_MS - 3_000);
+    expect(sessionMsgs(got)).toHaveLength(0);
+    vi.advanceTimersByTime(2_000);
+    const msgs = sessionMsgs(got);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.session.flags).toEqual([{ kind: "slow_tool", since, detail: "Bash · 3 m" }]);
+    expect(msgs[0]!.session.state).toBe("working");
+    const r = store.ingest([s.ev("tool.ended", { tool: "Bash", call_id: "c1", ok: true, ms: 181_000 })], "http");
+    expect(r.accepted).toBe(1);
+    expect(store.session(KEY)!.flags).toEqual([]);
+    const ev = got.find((m) => m.kind === "event" && m.event.type === "tool.ended");
+    expect(ev && ev.kind === "event" ? ev.session.flags : null).toEqual([]);
+  });
+
+  it("flags three tool errors in a row and clears on the next success", () => {
+    const s = new Session();
+    store.ingest([s.ev("session.started"), s.ev("turn.started")], "http");
+    const fail = (n: number) =>
+      store.ingest(
+        [
+          s.ev("tool.started", { tool: "Bash", call_id: `c${n}` }),
+          s.ev("tool.ended", { tool: "Bash", call_id: `c${n}`, ok: false, error: "exit 1" }),
+        ],
+        "http",
+      );
+    fail(1);
+    const firstErrorAt = store.session(KEY)!.lastAt;
+    fail(2);
+    expect(store.session(KEY)!.flags).toEqual([]);
+    fail(3);
+    expect(store.session(KEY)!.flags).toEqual([
+      { kind: "error_streak", since: firstErrorAt, detail: "3 tool errors in a row" },
+    ]);
+    fail(4);
+    expect(store.session(KEY)!.flags[0]).toMatchObject({ kind: "error_streak", detail: "4 tool errors in a row" });
+    store.ingest(
+      [
+        s.ev("tool.started", { tool: "Read", call_id: "ok" }),
+        s.ev("tool.ended", { tool: "Read", call_id: "ok", ok: true }),
+      ],
+      "http",
+    );
+    expect(store.session(KEY)!.flags).toEqual([]);
+    expect(store.session(KEY)!.counts.toolErrors).toBe(4);
+  });
+
+  it("flags a loop: the same tool on the same input three times in the last ten starts, tier 3 only", () => {
+    const s = new Session();
+    const read = (file: string, tier: 1 | 3 = 3) =>
+      s.ev("tool.started", { tool: "Read", input: { file_path: file } }, { tier });
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), read("a.ts"), read("b.ts"), read("a.ts")], "http");
+    const since = store.sessionDetail(KEY)!.events[2]!.time;
+    expect(store.session(KEY)!.flags).toEqual([]);
+    store.ingest([read("a.ts")], "http");
+    expect(store.session(KEY)!.flags).toEqual([{ kind: "loop", since, detail: "Read ×3 on the same input" }]);
+    // Eight different starts push the window past them.
+    store.ingest(
+      Array.from({ length: 8 }, (_, i) => s.ev("tool.started", { tool: "Bash", input: { command: `ls ${i}` } })),
+      "http",
+    );
+    expect(store.session(KEY)!.flags).toEqual([]);
+    // Below tier 3 there is no input to compare.
+    const low = new Session("low");
+    store.ingest([low.ev("session.started", {}, { tier: 1 }), read("x", 1), read("x", 1), read("x", 1)], "http");
+    expect(store.session(sessionKey("claude-code", "low"))!.flags).toEqual([]);
+  });
+
+  it("flags repeated compaction within half an hour of the last event", () => {
+    const t0 = Date.now();
+    const s = new Session();
+    s.clock = t0 - 40 * 60_000;
+    store.ingest([s.ev("session.started"), s.ev("context.compacted", { trigger: "auto" })], "http");
+    expect(store.session(KEY)!.flags).toEqual([]);
+    s.clock = t0 - 20 * 60_000 + 1_000;
+    store.ingest([s.ev("context.compacted", { trigger: "auto" })], "http");
+    const second = store.session(KEY)!.lastAt;
+    expect(store.session(KEY)!.flags).toEqual([
+      { kind: "compacting", since: second, detail: "compacted twice in 20 m" },
+    ]);
+    s.clock = t0 - 5 * 60_000;
+    store.ingest([s.ev("turn.ended", { reason: "stop" })], "http");
+    expect(store.session(KEY)!.flags).toEqual([]);
+    expect(store.session(KEY)!.counts.compactions).toBe(2);
+  });
+
+  it("flags a hole behind the highest seq after 30 s and clears it as the events arrive", async () => {
+    await store.close();
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-10-14T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const got: StreamMessage[] = [];
+    store.subscribe((m) => got.push(m));
+    const s = new Session();
+    s.clock = t0 - 60_000;
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("tool.started", { tool: "Read" })], "http");
+    store.ingest([s.ev("tool.started", { tool: "Edit" }, { seq: 5 })], "http");
+    expect(store.session(KEY)!.flags).toEqual([]);
+    got.length = 0;
+    vi.advanceTimersByTime(GAP_AFTER_MS - 1_000);
+    expect(sessionMsgs(got)).toHaveLength(0);
+    vi.advanceTimersByTime(2_000);
+    const msgs = sessionMsgs(got);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.session.flags).toEqual([
+      { kind: "gap", since: new Date(t0).toISOString(), detail: "waiting for 2 events (seq 3–4)" },
+    ]);
+    store.ingest([s.ev("tool.ended", { tool: "Read", ok: true }, { seq: 3 })], "http");
+    expect(store.session(KEY)!.flags[0]).toMatchObject({ kind: "gap", detail: "waiting for 1 event (seq 4)" });
+    store.ingest([s.ev("tool.ended", { tool: "Edit", ok: true }, { seq: 4 })], "http");
+    expect(store.session(KEY)!.flags).toEqual([]);
+    expect(store.sessionDetail(KEY)!.events.map((e) => e.session.seq)).toEqual([0, 1, 2, 3, 4, 5]);
+    // A sink that joined mid-session: nothing before its first seq is "missing", nor a
+    // hole wider than a hundred events.
+    const late = new Session("late");
+    late.clock = t0 - 60_000;
+    store.ingest([late.ev("turn.started", {}, { seq: 500 }), late.ev("tool.started", { tool: "Bash" })], "http");
+    store.ingest([late.ev("tool.ended", { tool: "Bash", ok: true }, { seq: 900 })], "http");
+    vi.advanceTimersByTime(GAP_AFTER_MS + 2_000);
+    expect(store.session(sessionKey("claude-code", "late"))!.flags).toEqual([]);
+  });
+
+  it("measures turns: median and last duration, tools per turn", () => {
+    const s = new Session();
+    store.ingest(
+      [
+        s.ev("session.started"),
+        s.ev("turn.started", { turn_id: "t1" }),
+        s.ev("tool.started", { tool: "Read", call_id: "a" }),
+        s.ev("tool.ended", { tool: "Read", call_id: "a", ok: true }),
+        s.ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 4000 }),
+      ],
+      "http",
+    );
+    expect(store.session(KEY)!.turnStats).toEqual({ count: 1, medianMs: 4000, lastMs: 4000, toolsPerTurn: 1 });
+    // No `ms` on the second turn: its span, from turn.started to turn.ended (1 s per event here).
+    store.ingest(
+      [
+        s.ev("turn.started", { turn_id: "t2" }),
+        s.ev("tool.started", { tool: "Bash", call_id: "b" }),
+        s.ev("tool.ended", { tool: "Bash", call_id: "b", ok: true }),
+        s.ev("tool.started", { tool: "Edit", call_id: "c" }),
+        s.ev("tool.ended", { tool: "Edit", call_id: "c", ok: true }),
+        s.ev("turn.ended", { turn_id: "t2", reason: "stop" }),
+      ],
+      "http",
+    );
+    expect(store.session(KEY)!.turnStats).toEqual({ count: 2, medianMs: 4500, lastMs: 5000, toolsPerTurn: 1.5 });
+    expect(store.session(KEY)!.counts.turns).toBe(2);
+  });
+
+  it("reproduces the same flags and turn stats after a reboot", async () => {
+    await store.close();
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-10-14T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const s = new Session();
+    s.clock = t0 - 60_000;
+    const events = [s.ev("session.started"), s.ev("turn.started", { turn_id: "t1" })];
+    for (let i = 0; i < 3; i++) {
+      events.push(
+        s.ev("tool.started", { tool: "Bash", call_id: `c${i}`, input: { command: "make" } }),
+        s.ev("tool.ended", { tool: "Bash", call_id: `c${i}`, ok: false }),
+      );
+    }
+    events.push(s.ev("turn.ended", { turn_id: "t1", reason: "error", ms: 9_000 }));
+    events.push(s.ev("turn.started", { turn_id: "t2" }, { seq: 12 }));
+    store.ingest(events, "http");
+    vi.advanceTimersByTime(GAP_AFTER_MS + 2_000);
+    const before = store.session(KEY)!;
+    expect(before.flags.map((f) => f.kind)).toEqual(["error_streak", "loop", "gap"]);
+    expect(before.turnStats).toEqual({ count: 1, medianMs: 9000, lastMs: 9000, toolsPerTurn: 3 });
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const after = store.session(KEY)!;
+    expect(after.flags).toEqual(before.flags);
+    expect(after.turnStats).toEqual(before.turnStats);
+    expect(store.snapshot().sessions).toEqual([before]);
   });
 });
