@@ -284,6 +284,8 @@ export const ROUTES = {
     rotateToken: "/api/ui/token/rotate",
     /** POST { on: boolean } → Info.sources.demo */
     demo: "/api/ui/demo",
+    /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
+    qr: "/api/ui/qr.svg",
     control: "/api/ui/control",
   },
 } as const;
