@@ -55,6 +55,14 @@
   --needs-fg: oklch(0.5 0.12 60);
   --needs-bg: oklch(0.965 0.03 82);
   --needs-line: oklch(0.86 0.08 75);
+  /* State colours for views that colour-code (the canvas): working is cool, stale is
+     slate; idle and done stay neutral. Amber (--needs) remains the only warm accent. */
+  --state-working: oklch(0.6 0.11 200);
+  --state-working-bg: oklch(0.955 0.025 200);
+  --state-stale: oklch(0.6 0.05 280);
+  --state-stale-bg: oklch(0.955 0.015 280);
+  --state-idle: var(--fg-3);
+  --state-done: var(--fg-4);
 
   --work: var(--fg);
   --work-fg: var(--fg-2);
@@ -97,6 +105,12 @@
     --needs-fg: oklch(0.84 0.11 75);
     --needs-bg: oklch(0.235 0.03 65);
     --needs-line: oklch(0.4 0.07 65);
+    --state-working: oklch(0.75 0.1 200);
+    --state-working-bg: oklch(0.25 0.03 200);
+    --state-stale: oklch(0.66 0.05 280);
+    --state-stale-bg: oklch(0.24 0.02 280);
+    --state-idle: var(--fg-3);
+    --state-done: var(--fg-4);
 
     --ok: oklch(0.7 0.1 150);
     --err: oklch(0.7 0.14 25);
