@@ -12,7 +12,6 @@ import { SessionPage } from "./pages/Session";
 import { Themes } from "./pages/Themes";
 import { fetchThemes, useThemes } from "./themes/host/registry";
 import { ThemePage } from "./themes/host/ThemePage";
-import { OfficePage } from "./themes/office/Office";
 
 const TITLES: Record<string, string> = {
   board: "Board",
@@ -21,7 +20,6 @@ const TITLES: Record<string, string> = {
   connect: "Connect",
   session: "Session",
   pair: "Pair a machine",
-  office: "Office",
   themes: "Themes",
 };
 
@@ -51,7 +49,6 @@ export function App() {
       {route.name === "feed" && <Feed />}
       {route.name === "machines" && <Machines />}
       {route.name === "connect" && <Connect />}
-      {route.name === "office" && <OfficePage />}
       {route.name === "themes" && <Themes />}
       {route.name === "theme" && <ThemePage key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}

@@ -87,6 +87,17 @@
   text-underline-offset: 2px;
 }
 
+/* The "experimental" divider on the rail, above the first experimental theme. */
+.rail-group {
+  display: block;
+  margin: 10px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-4);
+  font-size: 11px;
+  text-align: center;
+}
+
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */
 .nav-glyph--svg {
   display: block;

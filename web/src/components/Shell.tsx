@@ -41,7 +41,8 @@ const ICON: Record<string, ReactNode> = {
       <path d="M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" />
     </>
   ),
-  /* A room with a door, for the experimental office view when it is wired in. */
+  /* A room with a door: the office theme, now a plugin (sessionpipe-gui-themes/packages/office), ships its
+     own copy in its manifest; this one stays for anything that wants the same mark. */
   office: (
     <>
       <path d="M3 16.5V5a1.5 1.5 0 0 1 1.5-1.5h11A1.5 1.5 0 0 1 17 5v11.5" />
@@ -77,7 +78,6 @@ const BUILTIN: NavItem[] = [
   { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
   { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
-  { to: "/office", key: "office", label: "Office", glyph: ICON.office, experimental: true },
 ];
 
 /** A manifest icon is inline SVG the theme author wrote; it is code of the same trust

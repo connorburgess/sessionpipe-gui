@@ -9,7 +9,6 @@ export type Route =
   | { name: "feed" }
   | { name: "machines" }
   | { name: "connect" }
-  | { name: "office" }
   | { name: "themes" }
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
@@ -35,7 +34,6 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/feed") return { name: "feed" };
   if (path === "/machines") return { name: "machines" };
   if (path === "/connect") return { name: "connect" };
-  if (path === "/office") return { name: "office" };
   if (path === "/themes") return { name: "themes" };
   const t = /^\/t\/([^/]+)\/?$/.exec(path);
   if (t?.[1]) return { name: "theme", id: decodeURIComponent(t[1]) };

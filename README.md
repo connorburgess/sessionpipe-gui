@@ -25,7 +25,7 @@ here), and prints a QR code so a phone on the same Wi-Fi can open it.
 | **Feed** | The live event stream, like `sessionpipe tail`, with filters and search. |
 | **Machines** | Every machine that reports here, its harness versions, and its control status. |
 | **Connect** | The QR code and address for a phone, the one-line command for another machine, the sink token, and what this receiver is doing. |
-| **Office** (experimental) | The same sessions as a 2D office: each machine a room, each session a worker at a desk; posture shows the state, an amber lamp marks who needs you. |
+| **Themes** | Plugins that draw the board their own way, on the rail under *experimental*: the office from the `sessionpipe-gui-themes` repo (each machine a room, each session a person at a desk), and whatever you install with `sessionpipe-gui theme add`. |
 
 Keyboard: `/` search, `j` / `k` move, `Enter` open, `Esc` back. Dark and light follow the
 system; `prefers-reduced-motion` is honoured.
