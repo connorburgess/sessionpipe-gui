@@ -6,12 +6,20 @@ import https from "node:https";
 import type net from "node:net";
 import path from "node:path";
 import { DEFAULT_PORT, type Info, ROUTES } from "../shared/api.js";
-import { defaultStateDir, type GuiConfig, packageVersion, readGuiConfig, rotateSinkToken } from "./config.js";
+import {
+  defaultStateDir,
+  type GuiConfig,
+  packageVersion,
+  readGuiConfig,
+  rotateSinkToken,
+  setTlsPreference,
+} from "./config.js";
 import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
+import { registerSetup } from "./setup/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
@@ -21,6 +29,7 @@ import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi } from "./ui/index.js";
+import { ViewerRegistry } from "./ui/viewers.js";
 
 export interface AppOptions {
   port?: number;
@@ -57,14 +66,20 @@ export interface AppOptions {
 }
 
 export interface App {
-  /** The plain-http server; with TLS on, one of the two behind `listener`. */
+  /** The plain-http server, one of the two behind `listener`. */
   server: http.Server;
-  /** The https server when TLS mode is on. */
-  httpsServer: https.Server | null;
-  /** What is bound to the port: the dual-protocol listener with TLS on, `server` otherwise. */
+  /** The https server when TLS mode is on (at boot, or turned on while running). */
+  readonly httpsServer: https.Server | null;
+  /** What is bound to the port: the dual-protocol listener (http always; https once TLS mode is on). */
   listener: net.Server;
   /** The certificates in use, or null. */
-  tls: TlsMaterial | null;
+  readonly tls: TlsMaterial | null;
+  /** The WebAuthn rp id right now ("localhost", or `<name>.local` with TLS mode). */
+  readonly rpId: string;
+  /** Turn TLS mode on without a restart: certificates made if needed, the https side
+   *  attached to the running listener, the rp id switched, `tls: true` remembered.
+   *  Throws TlsError (no openssl). A no-op when already on. */
+  enableTls(): TlsMaterial;
   router: Router;
   store: Store;
   control: Control;
@@ -88,17 +103,17 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const store = new Store(stateDir, { tickMs: opts.tickMs });
   const router = new Router();
   let port = opts.port ?? DEFAULT_PORT;
-  const tls: TlsMaterial | null = opts.tls
+  let tls: TlsMaterial | null = opts.tls
     ? ensureCerts(path.join(stateDir, "tls"), { hostname: opts.tlsHostname, addresses: lanAddresses() })
     : null;
-  const rpId = opts.rpId ?? tls?.hostname ?? "localhost";
+  let rpId = opts.rpId ?? tls?.hostname ?? "localhost";
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 
   const control = createControl({
     stateDir,
     sinkToken: () => config.sinkToken,
-    rpId,
+    rpId: () => rpId,
     testDoor: opts.testDoor ?? false,
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
@@ -117,14 +132,27 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   }
 
   let demo: Runner | null = null;
+  /** Synthetic sessions never outlive demo mode: turning it off (or starting without
+   *  --demo) forgets every session the generator wrote. */
+  const dropDemoSessions = (): number => {
+    let n = 0;
+    for (const s of store.snapshot().sessions) if (s.source === "demo" && store.forget(s.key)) n++;
+    return n;
+  };
   const setDemo = (on: boolean): void => {
     if (on && !demo) demo = startDemo(store, { speed: opts.speed });
     else if (!on && demo) {
       demo.stop();
       demo = null;
+      dropDemoSessions();
     }
   };
   if (opts.demo) setDemo(true);
+  else {
+    const dropped = dropDemoSessions();
+    if (dropped && !opts.quiet)
+      process.stderr.write(`[sessionpipe-gui] forgot ${dropped} demo session(s) left from an earlier run\n`);
+  }
   let replay: Runner | null = null;
   if (opts.replay) replay = startReplay(store, opts.replay, { speed: opts.speed ?? 0, rebase: true, maxGapMs: 10_000 });
 
@@ -167,12 +195,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     };
   };
 
+  const viewers = new ViewerRegistry();
   registerUi(router, {
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,
     control,
     uiKey,
     info,
+    viewers,
     rotateSinkToken: () => {
       config = rotateSinkToken(stateDir, config);
       return config.sinkToken;
@@ -182,26 +212,61 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
   registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
   registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
-  router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 
   const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => void router.handle(req, res);
   const server = http.createServer(handler);
   server.keepAliveTimeout = 65_000;
-  let httpsServer: https.Server | null = null;
-  let listener: net.Server = server;
-  if (tls) {
-    httpsServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, handler);
-    httpsServer.keepAliveTimeout = 65_000;
-    listener = createDualListener({ http: server, https: httpsServer });
-  }
+  const makeHttps = (m: TlsMaterial): https.Server => {
+    const s = https.createServer({ key: m.key, cert: m.cert, minVersion: "TLSv1.2" }, handler);
+    s.keepAliveTimeout = 65_000;
+    return s;
+  };
+  let httpsServer: https.Server | null = tls ? makeHttps(tls) : null;
+  // One listener for both protocols, always: the https side can then be attached while
+  // running (the setup page's "Turn on"), without rebinding the port.
+  const listener: DualListener = createDualListener({ http: server, https: httpsServer });
+  const enableTls = (): TlsMaterial => {
+    if (tls) return tls;
+    const m = ensureCerts(path.join(stateDir, "tls"), { hostname: opts.tlsHostname, addresses: lanAddresses() });
+    httpsServer = makeHttps(m);
+    listener.setHttps(httpsServer);
+    tls = m;
+    rpId = opts.rpId ?? m.hostname;
+    config = setTlsPreference(stateDir, config, true);
+    return m;
+  };
+
+  const setup = registerSetup(router, {
+    store,
+    control,
+    info,
+    viewers,
+    tls: () => tls,
+    enableTls,
+    sinkToken: () => config.sinkToken,
+    port: () => port,
+    outbox,
+    outboxPath: opts.outboxPath,
+    testDoor: opts.testDoor ?? false,
+  });
+  router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
+
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
 
   return {
     server,
-    httpsServer,
+    get httpsServer() {
+      return httpsServer;
+    },
     listener,
-    tls,
+    get tls() {
+      return tls;
+    },
+    get rpId() {
+      return rpId;
+    },
+    enableTls,
     router,
     store,
     control,
@@ -216,6 +281,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     outbox,
     themes,
     close: async () => {
+      setup.pairer.close();
       outbox?.stop();
       setDemo(false);
       replay?.stop();
@@ -223,9 +289,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       await store.close();
       server.closeAllConnections?.();
       httpsServer?.closeAllConnections?.();
-      if (listener !== server) (listener as DualListener).destroyConnections();
+      listener.destroyConnections();
       await new Promise<void>((r) => listener.close(() => r()));
-      if (listener !== server) await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => server.close(() => r()));
       if (httpsServer) await new Promise<void>((r) => httpsServer!.close(() => r()));
     },
   };

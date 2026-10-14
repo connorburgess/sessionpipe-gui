@@ -55,6 +55,13 @@ export function Connect() {
     }
   };
   const demo = async (on: boolean) => {
+    if (
+      on &&
+      !window.confirm(
+        "Demo mode adds synthetic sessions on two pretend machines until you turn it off; they are removed when it goes off. Turn it on?",
+      )
+    )
+      return;
     setBusy("demo");
     try {
       const r = await store.transport.demo(on);
