@@ -300,6 +300,18 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+/* The page's body, reused inline by the setup page. */
+.pair-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.pair-body--compact {
+  gap: 16px;
+}
+.pair-https {
+  margin: 8px 0 0;
+}
 .pair-countdown.is-soon {
   color: var(--fg-2);
 }
@@ -364,6 +376,70 @@
 .pending-link:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ---------- devices asking to be trusted (on /machines, and a bar over a session) ---------- */
+
+.pending--bar {
+  margin-bottom: 12px;
+}
+.pending-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pending-actions select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.pending-wide {
+  flex-basis: 100%;
+}
+.pending-err {
+  color: var(--err);
+}
+.pending-item--settled {
+  color: var(--fg-3);
+}
+.pending-item--settled [data-outcome="delivered"] {
+  color: var(--fg-2);
+}
+
+/* The "this browser is not trusted" line under the strip, with its way out. */
+.ctl-untrusted {
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.ctl-untrusted a {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* The devices line on /machines: "+ Add a phone" unfolds the instruction. */
+.machine-add-phone {
+  display: inline;
+}
+.machine-add-phone summary {
+  display: inline;
+  cursor: pointer;
+  color: var(--fg);
+  font-weight: 500;
+  list-style: none;
+}
+.machine-add-phone summary::-webkit-details-marker {
+  display: none;
+}
+.machine-add-phone[open] > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg-2);
 }
 
 /* ---------- start a session ---------- */

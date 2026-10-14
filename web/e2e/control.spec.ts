@@ -539,6 +539,103 @@ test("a theme sends through api.control: availability says ok on localhost, the 
   await expect(host.locator("[data-outcome]")).toHaveText("delivered");
 });
 
+test("a phone adds its own passkey: the paired browser approves with a key.add, the daemon adds it, the phone sends", async ({
+  browser,
+}: {
+  browser: Browser;
+}) => {
+  const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
+  const phone = await phoneCtx.newPage();
+  await virtualPasskey(phoneCtx, phone);
+
+  // A secure page whose browser holds no passkey the machine trusts: the line under the
+  // strip says so and points at /add-device.
+  await phone.goto(`/s/claude-code/${SID}`);
+  const hint = phone.locator(".ctl-untrusted");
+  await expect(hint).toContainText("trusts no passkey from this browser");
+  await hint.getByRole("link", { name: /Add this device/ }).click();
+  await expect(phone).toHaveURL(/\/add-device$/);
+  await phone.getByLabel("Device name").fill("Misha's iPhone");
+  await phone.getByRole("button", { name: "Add this device" }).click();
+  const digits = phone.locator("[data-check]");
+  await expect(digits).toBeVisible({ timeout: 20_000 });
+  const check = (await digits.getAttribute("data-check")) ?? "";
+  expect(check).toMatch(/^\d{6}$/);
+  await expect(phone.locator(".pair-countdown")).toContainText("Waiting for approval");
+  await shot(phone, "add-device-waiting-phone");
+
+  // The paired browser lists the request on /machines with the same digits and approves it.
+  await page.goto("/machines");
+  const item = page.locator(".pending-devices .pending-item").filter({ hasText: "Misha's iPhone" });
+  await expect(item).toBeVisible();
+  await expect(item).toContainText(`${check.slice(0, 3)} ${check.slice(3)}`);
+  await expect(item).toContainText("iPhone");
+  await shot(page, "machines-device-pending-desktop");
+  await item.getByRole("button", { name: "Approve" }).click();
+
+  // The daemon polls a key.add naming the key store, carrying the phone's key, signed by
+  // the Mac's passkey (under its day grant), not the phone's.
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({
+    v: 1,
+    t: "sessionpipe.control",
+    machine: daemon.machine,
+    kind: "key.add",
+    session: "sessionpipe:keys",
+    name: "Misha's iPhone",
+  });
+  expect(Object.keys(msg.cmd)).toEqual(["v", "t", "machine", "kind", "session", "key", "name", "nonce", "iat"]);
+  const key = msg.cmd.key as { id: string; alg: number; spki: string };
+  expect(key.alg).toBe(-7);
+  expect(key.id).toMatch(/^[A-Za-z0-9_-]{16,}$/);
+  expect(key.spki.length).toBeGreaterThan(40);
+  expect(typeof msg.raw.csig).toBe("string");
+  expect((msg.raw.grant as { cred: string }).cred).not.toBe(key.id);
+  await expect(phone.locator(".pair-countdown")).toContainText("Approved", { timeout: 10_000 });
+
+  await daemon.ack(msg.id, "delivered");
+
+  // The phone's poll reads added; the Mac's row says so; the machine's device list grew.
+  await expect(phone.locator("[data-added]")).toContainText("Done", { timeout: 10_000 });
+  await expect(phone.locator("[data-added]")).toContainText("can now answer and send");
+  await shot(phone, "add-device-added-phone");
+  await expect(page.locator(".pending-devices [data-outcome='delivered']")).toContainText("added");
+  const block = page.getByRole("region", { name: MACHINE });
+  await expect(block).toContainText("Devices that can answer");
+  await expect(block).toContainText("Misha's iPhone");
+  await expect(block).toContainText("(this one)");
+  await shot(page, "machines-device-added-desktop");
+
+  // The phone now sends a prompt itself, under a grant its own passkey signs.
+  await phone.goto(`/s/claude-code/${SID}`);
+  const box = phone.getByLabel("Message for the next turn");
+  await expect(box).toBeEnabled();
+  await expect(phone.locator(".ctl-untrusted")).toHaveCount(0);
+  await box.fill("From the phone");
+  await box.press("Enter");
+  const sent = await daemon.next();
+  expect(sent.cmd).toMatchObject({ kind: "prompt", session: `claude-code:${SID}`, text: "From the phone" });
+  expect((sent.raw.grant as { cred: string }).cred).toBe(key.id);
+  await daemon.ack(sent.id, "delivered", { reply: "Heard from the phone." });
+  await expect(phone.locator(`li[data-message="${sent.id}"]`)).toHaveAttribute("data-outcome", "delivered");
+
+  // Reject, from the Mac: a second request from another phone is gone at once.
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
+  const p2 = await other.newPage();
+  await virtualPasskey(other, p2);
+  await p2.goto("/add-device");
+  await p2.getByLabel("Device name").fill("Spare phone");
+  await p2.getByRole("button", { name: "Add this device" }).click();
+  await expect(p2.locator("[data-check]")).toBeVisible({ timeout: 20_000 });
+  const spare = page.locator(".pending-devices .pending-item").filter({ hasText: "Spare phone" });
+  await expect(spare).toBeVisible();
+  await spare.getByRole("button", { name: "Reject" }).click();
+  await expect(spare).toHaveCount(0);
+  await expect(p2.locator(".pair-note--quiet")).toContainText("Rejected", { timeout: 10_000 });
+  await other.close();
+  await phoneCtx.close();
+});
+
 test("over plain LAN http every control affordance says passkeys need https or localhost", async ({
   browser,
 }: {

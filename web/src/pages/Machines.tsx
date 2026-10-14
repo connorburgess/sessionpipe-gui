@@ -4,8 +4,12 @@
 import type { MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
 import { Ago, HarnessGlyph } from "../components/bits";
+import { tlsInfo } from "../control/api";
+import { useRpId } from "../control/hooks";
+import { PendingDevices } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
 import { StartSession } from "../control/StartSession";
+import { storedPasskeys } from "../control/webauthn";
 import { useMachines, useStore } from "../data/hooks";
 import { harnessMark } from "../lib/format";
 import { Link } from "../lib/router";
@@ -27,6 +31,7 @@ export function Machines() {
     return (
       <div className="page">
         <PendingPairings />
+        <PendingDevices />
         <p className="page-note">
           No machine has sent anything yet. <Link to="/connect">Connect one.</Link>
         </p>
@@ -36,6 +41,7 @@ export function Machines() {
   return (
     <div className="page machines">
       <PendingPairings />
+      <PendingDevices />
       {machines.map((m) => (
         <MachineBlock key={m.name} m={m} now={now} lanUrl={lanUrl} />
       ))}
@@ -47,6 +53,10 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
   const recent = now - ms(m.lastAt) < 60_000;
   const online = recent || !!m.control?.online;
   const c = m.control;
+  const rp = useRpId();
+  // The passkeys this browser made for the rp id: one of them trusted here is "this one".
+  const mine = new Set(rp ? storedPasskeys(rp).map((k) => k.id) : []);
+  const httpsUrl = tlsInfo()?.httpsUrl ?? lanUrl;
   return (
     <section className={`machine ${online ? "machine--on" : ""}`} aria-label={m.name}>
       <header className="machine-head">
@@ -93,10 +103,21 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
                 {c.mode && <> · mode {c.mode}</>}
                 {c.version && <> · v{c.version}</>}
               </span>
-              <span className="machine-ctl-row">
-                {c.keys.length} {c.keys.length === 1 ? "key" : "keys"}
-                {c.keys.length > 0 && <>: {c.keys.map((k) => k.name ?? k.id).join(", ")}</>}
+              <span className="machine-ctl-row machine-devices">
+                Devices that can answer:{" "}
+                {c.keys.length === 0
+                  ? "none yet"
+                  : c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")}
                 {c.queued > 0 && <> · {c.queued} queued</>}
+                {" · "}
+                <details className="machine-add-phone">
+                  <summary>+ Add a phone</summary>
+                  <span>
+                    On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
+                    <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
+                    machine already trusts can vouch for one.
+                  </span>
+                </details>
               </span>
               {c.folders && c.folders.length > 0 && (
                 <span className="machine-ctl-row mono">{c.folders.join("  ")}</span>

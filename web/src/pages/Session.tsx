@@ -3,7 +3,13 @@
 // its own title row. The same view opens beside any page in the side panel
 // (components/SessionPanel.tsx).
 import { SessionView } from "../components/SessionView";
+import { PendingDevices } from "../control/PendingDevices";
 
 export function SessionPage({ harness, id }: { harness: string; id: string }) {
-  return <SessionView harness={harness} id={id} mode="page" />;
+  return (
+    <>
+      <PendingDevices bar />
+      <SessionView harness={harness} id={id} mode="page" />
+    </>
+  );
 }

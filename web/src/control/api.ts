@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. The browser's side of /api/ui/control/* (server/control/README.md):
 // pairings and their approval, a WebAuthn challenge, sending a signed command, the
-// activity and the paired machines. Same-origin fetch, JSON both ways, errors by code.
+// activity, the paired machines and device requests (a phone's own passkey waiting for
+// a trusted device's key.add). Same-origin fetch, JSON both ways, errors by code.
 import type { ControlActivity, Info, MachineControl, TlsInfo } from "@shared/api";
 import { ROUTES } from "@shared/api";
 
@@ -60,6 +61,26 @@ export interface SendBody {
 
 export type PairedMachine = MachineControl & { name: string; createdAt: string; pairedAt?: string };
 
+/** A device asking to be trusted (server/control/README.md, "Adding a device"): its own
+ *  passkey and the six digits both ends show. `sent` once a trusted device's key.add was
+ *  queued; `added` once the machine acked it delivered; `failed` with the machine's word. */
+export interface DeviceRequest {
+  requestId: string;
+  check: string;
+  key: TrustedKey;
+  name: string;
+  device: string;
+  fromIp: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "pending" | "sent" | "added" | "failed" | "expired";
+  machineId?: string;
+  activityId?: string;
+  outcome?: string;
+  code?: string;
+  detail?: string;
+}
+
 /** A refusal from the server: `status` and the body's `reason`; `code` is the verifier's
  *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …). */
 export class ControlError extends Error {
@@ -113,6 +134,10 @@ export const controlApi = {
   activity: (limit = 100) =>
     call<{ activity: ControlActivity[] }>("GET", `${BASE}/activity?limit=${limit}`).then((r) => r.activity),
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
+  deviceRequest: (body: { key: TrustedKey; name?: string }) => call<DeviceRequest>("POST", `${BASE}/devices`, body),
+  devices: () => call<{ devices: DeviceRequest[] }>("GET", `${BASE}/devices`).then((r) => r.devices),
+  device: (requestId: string) => call<DeviceRequest>("GET", `${BASE}/devices/${encodeURIComponent(requestId)}`),
+  rejectDevice: (requestId: string) => call<void>("POST", `${BASE}/devices/${encodeURIComponent(requestId)}/reject`),
 };
 
 let rpIdPromise: Promise<string> | null = null;
@@ -138,6 +163,13 @@ export function rpId(): Promise<string> {
   return rpIdPromise;
 }
 
+/** Forget the cached Info: the setup page turned TLS mode on, so the rp id and
+ *  Info.tls changed under us. The next `rpId()` / `tlsInfo()` reads again. */
+export function resetInfoCache(): void {
+  rpIdPromise = null;
+  tlsCache = undefined;
+}
+
 /** Info.tls as last read (by `rpId()`): null when the server has no TLS mode on,
  *  undefined before the first read lands. Synchronous, for hint text. */
 export function tlsInfo(): TlsInfo | null | undefined {
@@ -145,15 +177,21 @@ export function tlsInfo(): TlsInfo | null | undefined {
   return tlsCache;
 }
 
-/** This very page on the https origin passkeys work at (TLS mode), with the UI key so
+/** `pathWithSearch` on the https origin passkeys work at (TLS mode), with the UI key so
  *  the Mac's own browser is let in when the `.local` name resolves to its LAN address.
- *  Null when TLS is off or we are already there. */
-export function httpsHere(): string | null {
+ *  Null when TLS is off or we are already on that origin. */
+export function httpsPath(pathWithSearch: string): string | null {
   const tls = tlsInfo();
   if (!tls?.on || typeof location === "undefined") return null;
   const base = new URL(tls.httpsUrl);
   if (location.host === base.host && location.protocol === "https:") return null;
-  const u = new URL(location.pathname + location.search + location.hash, base);
+  const u = new URL(pathWithSearch, base);
   if (uiKeyCache && !u.searchParams.has("k")) u.searchParams.set("k", uiKeyCache);
   return u.toString();
+}
+
+/** This very page on the https origin (see `httpsPath`). */
+export function httpsHere(): string | null {
+  if (typeof location === "undefined") return null;
+  return httpsPath(location.pathname + location.search + location.hash);
 }

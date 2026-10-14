@@ -25,7 +25,8 @@ export const REFUSAL_WORDS: Record<string, string> = {
   too_old: "signed too long ago; send it again",
   future: "signed in the future: check this device's clock",
   unsigned: "no signature",
-  untrusted_key: "this browser's passkey is not trusted by the machine: pair it from the machine's terminal",
+  untrusted_key:
+    "this browser's passkey is not trusted by the machine: add this device from one that is, or pair it from the machine's terminal",
   bad_assertion: "the passkey signature did not verify",
   bad_grant: "the day grant did not verify; the next send asks for your passkey again",
   outside_grant: "signed outside the grant's window; the next send asks for your passkey again",

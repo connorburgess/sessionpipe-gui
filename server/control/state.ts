@@ -7,6 +7,9 @@
 //   control/machines.json          machines, their keys, token hashes, pairings
 //   control/queue/<machine id>.json  that machine's messages, queued and settled
 //
+// Device requests (a phone's own passkey waiting for a trusted device's `key.add`) live in
+// memory only: ten minutes, then gone.
+//
 // A receiver carries commands and never signs them (§1): nothing here can mint a
 // signature, only verify one. Tokens are stored hashed; a leaked state file hands
 // nobody a machine's queue.
@@ -34,6 +37,11 @@ const KEEP_SETTLED = 300;
 const SETTLED_TTL_MS = 7 * 86_400_000;
 /** A pairing row is forgotten this long after it expired or was handed over. */
 const PAIRING_TTL_MS = 3600_000;
+/** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
+ *  this long unapproved (CONTROL.md §2), and is remembered an hour past that so the phone's
+ *  poll reads `expired` rather than 404. Never persisted: a restart forgets it. */
+export const DEVICE_TTL_MS = 10 * 60_000;
+const DEVICE_KEEP_MS = 3600_000;
 
 export interface KeyRow {
   id: string;
@@ -74,6 +82,31 @@ export interface MachineRow {
   lastHelloAt?: string;
   lastPollAt?: string;
   pairings: PairingRow[];
+}
+
+/** A device that wants to be trusted: its passkey, made on that device, and the six
+ *  digits the person compares on a device the machine already trusts. Nothing here hands
+ *  out trust; only a signed `key.add` carried to the machine does (CONTROL.md §2). */
+export interface DeviceRequestRow {
+  requestId: string;
+  check: string;
+  key: { id: string; alg: -7 | -257; spki: string };
+  /** What the person called it on the phone ("Misha's iPhone"). */
+  name: string;
+  /** A short label from the user agent ("iPhone"), for the approving page. */
+  device: string;
+  fromIp: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "pending" | "sent" | "added" | "failed" | "expired";
+  /** Set once a trusted device's key.add for this key was queued. */
+  machineId?: string;
+  activityId?: string;
+  /** The machine's final word on the key.add, when it was not `delivered`. */
+  outcome?: ControlOutcome;
+  code?: string;
+  detail?: string;
+  doneAt?: string;
 }
 
 export interface MessageRow {
@@ -170,6 +203,8 @@ export class ControlState {
   private machinesById = new Map<string, MachineRow>();
   private queues = new Map<string, MessageRow[]>();
   private waiters = new Map<string, Set<Waiter>>();
+  /** Device requests in flight, in memory only. */
+  private devices = new Map<string, DeviceRequestRow>();
   private sweeper: NodeJS.Timeout | null = null;
   /** Called with every message whose state changed (queued, acked, expired). */
   onMessage: (m: MessageRow) => void = () => {};
@@ -466,6 +501,7 @@ export class ControlState {
     if (text !== undefined) row.text = text;
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
+    if (cmd.kind === "key.add" && cmd.key) this.deviceSent(cmd.key.id, m.id, row.id);
     this.onMessage(row);
     this.wake(m.id);
     return row;
@@ -507,12 +543,39 @@ export class ControlState {
         if (a.detail) row.detail = a.detail;
         if (a.reply !== undefined) row.reply = a.reply;
         if (a.session) row.ackSession = a.session;
+        if (row.kind === "key.add") this.keyAddSettled(m, row);
       }
       changed = true;
       this.onMessage(row);
     }
     if (changed) this.saveQueue(m.id);
     return { applied, unknown };
+  }
+
+  /** The machine's final word on a key.add. `delivered` means the machine's store grew
+   *  (CONTROL.md §2), so ours mirrors it: the receiver's early check now trusts the key
+   *  too, before the daemon's next hello. Anything else settles the device request as
+   *  failed, with the machine's code. */
+  private keyAddSettled(m: MachineRow, row: MessageRow): void {
+    let cmd: ControlCommand | undefined;
+    try {
+      cmd = JSON.parse(row.cmd) as ControlCommand;
+    } catch {
+      return;
+    }
+    if (!cmd?.key || typeof cmd.key.id !== "string") return;
+    if (row.outcome === "delivered") this.addKey(m, cmd.key, cmd.name);
+    const d = [...this.devices.values()].find((x) => x.activityId === row.id);
+    if (!d || d.status === "added" || d.status === "failed") return;
+    d.doneAt = nowIso();
+    if (row.outcome === "delivered") {
+      d.status = "added";
+      return;
+    }
+    d.status = "failed";
+    if (row.outcome) d.outcome = row.outcome;
+    if (row.code) d.code = row.code;
+    if (row.detail) d.detail = row.detail;
   }
 
   private expireQueue(id: string): void {
@@ -523,6 +586,8 @@ export class ControlState {
       row.outcome = "expired";
       row.ackedAt = new Date(now).toISOString();
       row.detail = "expired before the machine took it";
+      const m = this.machinesById.get(id);
+      if (m && row.kind === "key.add") this.keyAddSettled(m, row);
       changed = true;
       this.onMessage(row);
     }
@@ -531,7 +596,83 @@ export class ControlState {
 
   sweep(): void {
     for (const id of this.queues.keys()) this.expireQueue(id);
+    this.sweepDevices();
     this.checkOnline();
+  }
+
+  // --- device requests (CONTROL.md §2, "a trusted device vouches for a new one") -----
+
+  /** A device made its own passkey and asks to be trusted. The six digits are shown on
+   *  both ends; the request waits DEVICE_TTL_MS for a trusted device's `key.add`. */
+  createDeviceRequest(o: {
+    key: DeviceRequestRow["key"];
+    name: string;
+    device: string;
+    fromIp: string;
+  }): DeviceRequestRow {
+    this.sweepDevices();
+    // One live request per key: asking again from the same phone renews the digits.
+    for (const d of this.devices.values())
+      if (d.key.id === o.key.id && (d.status === "pending" || d.status === "sent")) this.devices.delete(d.requestId);
+    const now = Date.now();
+    let requestId: string;
+    do requestId = `d_${b64(12)}`;
+    while (this.devices.has(requestId));
+    const row: DeviceRequestRow = {
+      requestId,
+      check: String(randomInt(0, 1_000_000)).padStart(6, "0"),
+      key: o.key,
+      name: o.name,
+      device: o.device,
+      fromIp: o.fromIp,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + DEVICE_TTL_MS).toISOString(),
+      status: "pending",
+    };
+    this.devices.set(requestId, row);
+    return row;
+  }
+
+  deviceRequest(requestId: string): DeviceRequestRow | undefined {
+    this.sweepDevices();
+    return this.devices.get(requestId);
+  }
+
+  /** Requests a person at a trusted device could still approve (or has just approved and
+   *  the machine has not answered), newest first. */
+  pendingDeviceRequests(): DeviceRequestRow[] {
+    this.sweepDevices();
+    return [...this.devices.values()]
+      .filter((d) => d.status === "pending" || d.status === "sent")
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  /** Rejected on a trusted device: gone at once; the phone's next poll reads 404. */
+  dropDeviceRequest(requestId: string): boolean {
+    return this.devices.delete(requestId);
+  }
+
+  /** A trusted device's key.add carrying this key was queued for `machineId`. */
+  private deviceSent(keyId: string, machineId: string, activityId: string): void {
+    for (const d of this.devices.values()) {
+      if (d.key.id !== keyId || d.status !== "pending") continue;
+      d.status = "sent";
+      d.machineId = machineId;
+      d.activityId = activityId;
+    }
+  }
+
+  private sweepDevices(): void {
+    const now = Date.now();
+    for (const d of this.devices.values()) {
+      if ((d.status === "pending" || d.status === "sent") && Date.parse(d.expiresAt) <= now) {
+        d.status = "expired";
+        d.doneAt = new Date(now).toISOString();
+      }
+      const dead = d.doneAt ? Date.parse(d.doneAt) : Date.parse(d.expiresAt);
+      if (d.status !== "pending" && d.status !== "sent" && now - dead > DEVICE_KEEP_MS)
+        this.devices.delete(d.requestId);
+    }
   }
 
   /** Fires onMachines when the set of online machines changed since the last look. */

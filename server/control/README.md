@@ -56,6 +56,45 @@ Keys are never removed here, one at a time or otherwise (CONTROL.md §2): that i
 `sessionpipe control keys remove` at the machine's own terminal. `forget` below drops the
 whole machine row locally.
 
+## Adding a device (a phone's own passkey)
+
+CONTROL.md §2, "a trusted device vouches for a new one". A phone that can open the GUI
+(TLS mode, trust steps done) but holds no passkey the machine trusts makes one on
+`/add-device` and posts it here; the page shows six digits. A device the machine already
+trusts (the Mac that paired) sees the request on `/machines` (and at the top of a session
+page), compares the digits, and **Approve** sends a signed `key.add` (session
+`sessionpipe:keys`, `key`, `name`) through `POST /send` like any command. The machine
+verifies it (§5), adds the key and acks `delivered`; the receiver then marks the request
+`added` and mirrors the key into the machine's `keys` so its early check trusts the phone
+too. Nothing here hands out trust: these routes only hold the request.
+
+| Route | Body → answer |
+|---|---|
+| `POST /devices` | `{ key: {id, alg, spki}, name? }` → `201 DeviceRequest`; `400` on a bad key (`id`/`spki` base64url, `alg` -7 or -257) or a name over 40 characters; `422 bad_key` for a key no machine could verify with |
+| `GET /devices` | `{ devices: DeviceRequest[] }` — requests still `pending` or `sent`, newest first |
+| `GET /devices/:requestId` | `DeviceRequest`; `404` unknown or rejected |
+| `POST /devices/:requestId/reject` | → `204`; the phone's next poll gets 404 |
+
+```ts
+interface DeviceRequest {
+  requestId: string;
+  check: string;                       // the six digits, shown on both ends
+  key: { id: string; alg: -7 | -257; spki: string };
+  name: string;                        // what the phone typed ("Misha's iPhone"), else `device`
+  device: string;                      // from the user agent: "iPhone", "Mac", …
+  fromIp: string;
+  createdAt: string; expiresAt: string; // ten minutes
+  status: "pending" | "sent" | "added" | "failed" | "expired";
+  machineId?: string; activityId?: string;   // once a trusted device's key.add was queued
+  outcome?: ControlOutcome; code?: string; detail?: string;  // `failed`: the machine's word
+}
+```
+
+Requests live in memory only (a restart forgets them) and are kept an hour past their
+end so the phone reads `expired` or `failed` rather than 404. A `key.add` queued through
+`/send` whose `key.id` matches a pending request moves it to `sent`; the machine's final
+ack settles it.
+
 ## Sending a command
 
 The browser writes the command string (`cmd`, CONTROL.md §3.1, `machine` = the machine's

@@ -39,7 +39,7 @@ test.describe("feed", () => {
     const harness = page.getByRole("combobox", { name: "Harness" });
     await expect(harness).toBeVisible();
     const options = await harness.locator("option").allInnerTexts();
-    expect(options).toContain("codex");
+    expect(options).toContain("Codex");
     await harness.selectOption("codex");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();

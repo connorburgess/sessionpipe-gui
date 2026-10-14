@@ -3,22 +3,27 @@
 // signs it, sent through POST /api/ui/control/send. The string is written once and the
 // signature covers those exact bytes; the server passes it on byte for byte.
 import type { ControlActivity } from "@shared/api";
-import { type Assertion, ControlError, controlApi, type SendBody } from "./api";
+import { type Assertion, ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce, sha256 } from "./bytes";
 import { dropGrant, obtainGrant, signWithDayKey } from "./daykey";
 import { assertPasskey, storedPasskeys } from "./webauthn";
 
 export const COMMAND_TYPE = "sessionpipe.control";
+/** The session a `key.add` names: the machine's own key store (CONTROL.md §2). */
+export const KEY_STORE_SESSION = "sessionpipe:keys";
 
 export type CommandFields =
   | { kind: "prompt"; session: string; text: string }
   | { kind: "permission.answer"; session: string; for: string; decision: "allow" | "deny"; note?: string }
   | { kind: "cancel"; session: string; note?: string }
-  | { kind: "start"; session: string; text: string; cwd: string };
+  | { kind: "start"; session: string; text: string; cwd: string }
+  /** A device this browser's passkey vouches for: the machine adds `key` to its store. */
+  | { kind: "key.add"; key: TrustedKey; name?: string };
 
 /** The command string, fields in the spec's order, no field a kind does not own. */
 export function commandString(machine: string, f: CommandFields): string {
-  const o: Record<string, unknown> = { v: 1, t: COMMAND_TYPE, machine, kind: f.kind, session: f.session };
+  const session = f.kind === "key.add" ? KEY_STORE_SESSION : f.session;
+  const o: Record<string, unknown> = { v: 1, t: COMMAND_TYPE, machine, kind: f.kind, session };
   switch (f.kind) {
     case "prompt":
       o.text = f.text;
@@ -34,6 +39,10 @@ export function commandString(machine: string, f: CommandFields): string {
     case "start":
       o.text = f.text;
       o.cwd = f.cwd;
+      break;
+    case "key.add":
+      o.key = { id: f.key.id, alg: f.key.alg, spki: f.key.spki };
+      if (f.name) o.name = f.name;
       break;
   }
   o.nonce = nonce();

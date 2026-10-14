@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect } from "react";
 import { Shell } from "./components/Shell";
+import { AddDevicePage } from "./control/AddDevice";
 import { PairPage } from "./control/Pair";
 import { useAppState } from "./data/hooks";
 import { useRoute } from "./lib/router";
@@ -20,6 +21,7 @@ const TITLES: Record<string, string> = {
   connect: "Connect",
   session: "Session",
   pair: "Pair a machine",
+  "add-device": "Add this device",
   themes: "Views",
 };
 
@@ -52,6 +54,7 @@ export function App() {
       {route.name === "themes" && <Themes />}
       {route.name === "theme" && <ThemePage key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
+      {route.name === "add-device" && <AddDevicePage />}
       {route.name === "missing" && (
         <div className="page">
           <p className="page-note">Nothing at {route.path}.</p>

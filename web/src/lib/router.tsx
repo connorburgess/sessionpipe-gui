@@ -9,9 +9,11 @@ export type Route =
   | { name: "feed" }
   | { name: "machines" }
   | { name: "connect" }
+  | { name: "setup" }
   | { name: "themes" }
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
+  | { name: "add-device" }
   | { name: "missing"; path: string };
 
 const listeners = new Set<() => void>();
@@ -34,7 +36,9 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/feed") return { name: "feed" };
   if (path === "/machines") return { name: "machines" };
   if (path === "/connect") return { name: "connect" };
+  if (path === "/setup") return { name: "setup" };
   if (path === "/themes") return { name: "themes" };
+  if (path === "/add-device") return { name: "add-device" };
   const t = /^\/t\/([^/]+)\/?$/.exec(path);
   if (t?.[1]) return { name: "theme", id: decodeURIComponent(t[1]) };
   if (path === "/pair") {

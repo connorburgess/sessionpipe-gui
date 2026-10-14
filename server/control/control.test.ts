@@ -607,6 +607,191 @@ describe("the queue", () => {
   });
 });
 
+describe("device requests: a trusted device vouches for a phone's passkey (key.add)", () => {
+  let b: Booted;
+  let mac: TestPasskey;
+  let day: TestDayKey;
+  let phone: TestPasskey;
+  beforeAll(async () => {
+    b = await boot();
+    tmpDirs.push(b.stateDir);
+    mac = await TestPasskey.create();
+    day = await TestDayKey.create();
+    phone = await TestPasskey.create();
+  });
+  afterAll(() => b.close());
+
+  const create = (body: unknown, ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)") =>
+    fetch(`${b.url}${UI}/devices`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": ua },
+      body: JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> }));
+
+  it("creates a request with six digits, lists it, and refuses bad bodies", async () => {
+    const r = await create({ key: phone.key, name: "Misha's iPhone" });
+    expect(r.status).toBe(201);
+    expect(r.body.requestId).toMatch(/^d_[A-Za-z0-9_-]{16}$/);
+    expect(r.body.check).toMatch(/^\d{6}$/);
+    expect(r.body).toMatchObject({
+      status: "pending",
+      name: "Misha's iPhone",
+      device: "iPhone",
+      fromIp: "127.0.0.1",
+      key: phone.key,
+    });
+    expect(Date.parse(r.body.expiresAt as string) - Date.now()).toBeGreaterThan(9 * 60_000);
+
+    const list = await call(b.url, "GET", `${UI}/devices`);
+    expect(list.status).toBe(200);
+    expect((list.body.devices as { requestId: string }[]).map((d) => d.requestId)).toEqual([r.body.requestId]);
+    const one = await call(b.url, "GET", `${UI}/devices/${r.body.requestId}`);
+    expect(one.status).toBe(200);
+    expect(one.body).toMatchObject({ requestId: r.body.requestId, check: r.body.check, status: "pending" });
+    expect((await call(b.url, "GET", `${UI}/devices/d_nope`)).status).toBe(404);
+
+    // A name is optional and falls back to the device label.
+    const unnamed = await create({ key: (await TestPasskey.create()).key }, "Mozilla/5.0 (Linux; Android 15)");
+    expect(unnamed.status).toBe(201);
+    expect(unnamed.body.name).toBe("Android phone");
+
+    expect((await create({})).status).toBe(400);
+    expect((await create({ key: { ...phone.key, alg: -8 } })).status).toBe(400);
+    expect((await create({ key: { ...phone.key, id: "not base64url!" } })).status).toBe(400);
+    expect((await create({ key: { ...phone.key, spki: "short" } })).status).toBe(400);
+    expect((await create({ key: phone.key, name: "x".repeat(41) })).status).toBe(400);
+    expect((await create({ key: phone.key, name: 7 })).status).toBe(400);
+    const unusable = await create({ key: { ...phone.key, spki: "A".repeat(64) } });
+    expect(unusable).toMatchObject({ status: 422, body: { reason: "bad_key" } });
+
+    // Asking again from the same phone renews the request: one live row per key.
+    const again = await create({ key: phone.key, name: "Misha's iPhone" });
+    expect(again.status).toBe(201);
+    expect((await call(b.url, "GET", `${UI}/devices/${r.body.requestId}`)).status).toBe(404);
+    const now = await call(b.url, "GET", `${UI}/devices`);
+    expect((now.body.devices as unknown[]).length).toBe(2);
+  });
+
+  it("a key.add from a trusted device moves it to sent; the machine's delivered ack adds the key", async () => {
+    const m = await enrolled(b, mac, "m_devices000000000001");
+    const req = await create({ key: phone.key, name: "Misha's iPhone" });
+    const id = req.body.requestId as string;
+
+    // The Mac signs key.add with its day grant and sends it like any command.
+    const cmd = commandStr(m.machine, {
+      kind: "key.add",
+      session: "sessionpipe:keys",
+      text: undefined,
+      key: phone.key,
+      name: "Misha's iPhone",
+    });
+    const sent = await call(b.url, "POST", `${UI}/send`, {
+      body: { machineId: m.machine, ...(await signCommand(mac, day, cmd)) },
+    });
+    expect(sent.status).toBe(201);
+    expect(sent.body).toMatchObject({ kind: "key.add", session: "sessionpipe:keys", text: "trust Misha's iPhone" });
+    const activityId = sent.body.id as string;
+    expect(await call(b.url, "GET", `${UI}/devices/${id}`)).toMatchObject({
+      status: 200,
+      body: { status: "sent", machineId: m.machine, activityId },
+    });
+    // Still listed for the approving page while the machine has not answered.
+    expect((await call(b.url, "GET", `${UI}/devices`)).body.devices).toContainEqual(
+      expect.objectContaining({ requestId: id, status: "sent" }),
+    );
+
+    // The daemon polls it, byte for byte, and acks delivered.
+    const polled = await call(b.url, "GET", `${CONTROL}?machine=${m.machine}&wait=0`, { bearer: m.token });
+    expect(polled.status).toBe(200);
+    const w = polled.body.messages![0]!;
+    expect(w.id).toBe(activityId);
+    expect(JSON.parse(w.cmd as string)).toMatchObject({ kind: "key.add", session: "sessionpipe:keys", key: phone.key });
+    const before = (await call(b.url, "GET", `${UI}/machines`)).body.machines as { keys: { id: string }[] }[];
+    expect(before[0]!.keys.map((k) => k.id)).toEqual([mac.key.id]);
+    const acked = await call(b.url, "POST", `${CONTROL}/ack`, {
+      bearer: m.token,
+      body: { acks: [{ id: activityId, outcome: "delivered", at: new Date().toISOString(), mode: "sdk" }] },
+    });
+    expect(acked.status).toBe(202);
+
+    expect((await call(b.url, "GET", `${UI}/devices/${id}`)).body.status).toBe("added");
+    expect((await call(b.url, "GET", `${UI}/devices`)).body.devices).not.toContainEqual(
+      expect.objectContaining({ requestId: id }),
+    );
+    const after = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      keys: { id: string; name?: string }[];
+    }[];
+    expect(after[0]!.keys.map((k) => k.id)).toEqual([mac.key.id, phone.key.id]);
+    expect(after[0]!.keys[1]!.name).toBe("Misha's iPhone");
+
+    // The phone's own passkey now signs commands the receiver's early check accepts.
+    const phoneDay = await TestDayKey.create();
+    const fromPhone = await call(b.url, "POST", `${UI}/send`, {
+      body: {
+        machineId: m.machine,
+        ...(await signCommand(phone, phoneDay, commandStr(m.machine, { iat: Date.now(), text: "from the phone" }))),
+      },
+    });
+    expect(fromPhone.status).toBe(201);
+  });
+
+  it("a refused key.add fails the request with the machine's code", async () => {
+    const m = await enrolled(b, mac, "m_devices000000000002");
+    const key = (await TestPasskey.create()).key;
+    const req = await create({ key, name: "Tablet" });
+    const cmd = commandStr(m.machine, { kind: "key.add", session: "sessionpipe:keys", text: undefined, key });
+    const sent = await call(b.url, "POST", `${UI}/send`, {
+      body: { machineId: m.machine, ...(await signCommand(mac, day, cmd)) },
+    });
+    expect(sent.status).toBe(201);
+    await call(b.url, "POST", `${CONTROL}/ack`, {
+      bearer: m.token,
+      body: {
+        acks: [{ id: sent.body.id, outcome: "refused", code: "untrusted_key", at: new Date().toISOString() }],
+      },
+    });
+    const d = await call(b.url, "GET", `${UI}/devices/${req.body.requestId}`);
+    expect(d.body).toMatchObject({ status: "failed", outcome: "refused", code: "untrusted_key" });
+    const machines = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      machineId: string;
+      keys: unknown[];
+    }[];
+    expect(machines.find((x) => x.machineId === m.machine)!.keys).toHaveLength(1);
+  });
+
+  it("a request expires after ten minutes and a rejected one is gone at once", async () => {
+    const rejected = await create({ key: (await TestPasskey.create()).key });
+    expect((await call(b.url, "POST", `${UI}/devices/${rejected.body.requestId}/reject`)).status).toBe(204);
+    expect((await call(b.url, "GET", `${UI}/devices/${rejected.body.requestId}`)).status).toBe(404);
+    expect((await call(b.url, "POST", `${UI}/devices/${rejected.body.requestId}/reject`)).status).toBe(404);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const waiting = await create({ key: (await TestPasskey.create()).key });
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      expect((await call(b.url, "GET", `${UI}/devices/${waiting.body.requestId}`)).body.status).toBe("expired");
+      expect((await call(b.url, "GET", `${UI}/devices`)).body.devices).not.toContainEqual(
+        expect.objectContaining({ requestId: waiting.body.requestId }),
+      );
+      vi.setSystemTime(Date.now() + 61 * 60_000);
+      expect((await call(b.url, "GET", `${UI}/devices/${waiting.body.requestId}`)).status).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the device routes need the UI's auth", async () => {
+    const locked = await boot({ uiAuth: false });
+    tmpDirs.push(locked.stateDir);
+    try {
+      expect((await call(locked.url, "GET", `${UI}/devices`)).status).toBe(401);
+      expect((await call(locked.url, "POST", `${UI}/devices`, { body: { key: phone.key } })).status).toBe(401);
+    } finally {
+      await locked.close();
+    }
+  });
+});
+
 describe("persistence", () => {
   it("machines, keys, tokens and the queue survive a restart", async () => {
     const b = await boot();
