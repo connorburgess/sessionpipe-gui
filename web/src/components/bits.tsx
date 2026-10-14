@@ -4,6 +4,7 @@
 import type { SessionState, Tier } from "@shared/api";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, useNow } from "../lib/time";
 
 /** `decorative` when the state's word is already visible beside it. */
@@ -41,7 +42,9 @@ export function StateBadge({ state, since: sinceIso }: { state: SessionState; si
   );
 }
 
-/** The harness as a two-letter monogram in plain small text: "Cl", "Cx". */
+/** The harness as a small monochrome mark (lib/harnessIcons.ts): 14 px beside text
+ *  (`sm`), 16 px in a header (`md`). A harness without a mark keeps its two-letter
+ *  monogram, "Cl", "Cx". */
 export function HarnessGlyph({
   name,
   size = "md",
@@ -52,12 +55,31 @@ export function HarnessGlyph({
   withLabel?: boolean;
 }) {
   const m = harnessMark(name);
+  const icon = HARNESS_ICONS[name];
+  const px = size === "sm" ? 14 : size === "md" ? 16 : 18;
   return (
     <span className={`glyph-wrap ${withLabel ? "glyph-wrap--label" : ""}`} title={m.label}>
-      <span className={`glyph glyph--${size}`} aria-hidden="true">
-        {m.glyph}
-      </span>
-      {withLabel ? <span className="glyph-label">{m.label}</span> : <span className="sr-only">{m.label}</span>}
+      {icon ? (
+        <svg
+          className={`glyph glyph--${size} glyph--icon`}
+          width={px}
+          height={px}
+          viewBox={icon.viewBox}
+          role="img"
+          aria-label={m.label}
+        >
+          <path fill="currentColor" d={icon.path} />
+        </svg>
+      ) : (
+        <span className={`glyph glyph--${size}`} aria-hidden="true">
+          {m.glyph}
+        </span>
+      )}
+      {withLabel ? (
+        <span className="glyph-label">{m.label}</span>
+      ) : icon ? null : (
+        <span className="sr-only">{m.label}</span>
+      )}
     </span>
   );
 }
@@ -239,12 +261,18 @@ export function ChipSelect({
   onChange,
   all,
   label,
+  optionLabel = (o) => o,
+  icon,
 }: {
   value: string;
   options: string[];
   onChange: (v: string) => void;
   all: string;
   label: string;
+  /** What an option is called; the value stays the raw id. */
+  optionLabel?: (o: string) => string;
+  /** Drawn before the chosen option's name in the chip (a native select has no icons). */
+  icon?: (o: string) => ReactNode;
 }) {
   if (options.length === 0) return null;
   return (
@@ -254,11 +282,12 @@ export function ChipSelect({
         <option value="">{all}</option>
         {options.map((o) => (
           <option key={o} value={o}>
-            {o}
+            {optionLabel(o)}
           </option>
         ))}
       </select>
-      <span className="chipsel-text ellipsis">{value || all}</span>
+      {value && icon ? icon(value) : null}
+      <span className="chipsel-text ellipsis">{value ? optionLabel(value) : all}</span>
       <span aria-hidden="true" className="chipsel-caret">
         ▾
       </span>

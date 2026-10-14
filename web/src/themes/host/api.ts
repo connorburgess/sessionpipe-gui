@@ -18,6 +18,7 @@ import { createRoot } from "react-dom/client";
 import { createControlApi } from "../../control/themeControl";
 import type { AppState, Store } from "../../data/store";
 import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
+import { harnessIconSvg } from "../../lib/harnessIcons";
 import { navigate, sessionPath } from "../../lib/router";
 import { openSplit } from "../../lib/split";
 import { ago, dur } from "../../lib/time";
@@ -194,6 +195,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
       title: (s: SessionSummary) => sessionTitle(s),
       repoBranch: (s: SessionSummary) => repoBranch(s),
       monogram: (harness) => harnessMark(harness).glyph,
+      harnessIcon: (harness) => harnessIconSvg(harness),
     },
   };
 

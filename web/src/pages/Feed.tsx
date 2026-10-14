@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Redacted, SearchInput, Spinner } from "../components/bits";
 import { BesideButton } from "../components/SessionCard";
 import { useAppState, useStore } from "../data/hooks";
-import { eventSummary, sessionTitle, storedKey } from "../lib/format";
+import { eventSummary, harnessMark, sessionTitle, storedKey } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { Link, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
@@ -144,7 +144,15 @@ export function Feed() {
       <div className="toolbar">
         <SearchInput value={q} onChange={setQ} placeholder="Search events" />
         <div className="filters">
-          <ChipSelect value={harness} options={harnesses} onChange={setHarness} all="all harnesses" label="Harness" />
+          <ChipSelect
+            value={harness}
+            options={harnesses}
+            onChange={setHarness}
+            all="all harnesses"
+            label="Harness"
+            optionLabel={(h) => harnessMark(h).label}
+            icon={(h) => <HarnessGlyph name={h} size="sm" />}
+          />
           <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
           <ChipSelect value={type} options={TYPES} onChange={setType} all="all types" label="Type" />
           <label className={`chipsel ${session ? "chipsel-on" : ""}`}>

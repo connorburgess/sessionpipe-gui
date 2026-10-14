@@ -79,6 +79,19 @@ px; the empty board, the trust page and the 401 page show the wordmark at 20 px.
 - Don't set the name in another face, another case or another weight. It is
   "sessionpipe gui", lowercase, with "gui" one tier lighter.
 
+## Third-party marks
+
+Where the board names the harness a session runs in, it shows that product's mark in
+one colour beside the text (`web/src/lib/harnessIcons.ts`): the Anthropic mark for
+Claude Code, the OpenAI mark for Codex, the Gemini mark for Gemini CLI. The path data
+comes from [simple-icons](https://simple-icons.org) (CC0); the marks themselves are
+trademarks of Anthropic, OpenAI and Google, used here only to identify the software a
+session runs in. This project is not affiliated with, sponsored by or endorsed by any
+of them. Antigravity has no icon there, so it gets a plain glyph of ours, a ring with an
+arrow, not a guess at Google's logo. Harnesses without a mark keep their two-letter
+monogram. The marks stay monochrome and never take a brand colour; the amber is still
+the only accent.
+
 ## Trademark
 
 "sessionpipe" and the sessionpipe logo are marks of Michael Makarov

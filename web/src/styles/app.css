@@ -334,6 +334,11 @@
 .glyph--lg {
   font-size: var(--text-sm);
 }
+/* The mark form (lib/harnessIcons.ts): one colour, the muted tier, sized by the component. */
+.glyph--icon {
+  display: block;
+  color: var(--fg-3);
+}
 .glyph-label {
   font-size: var(--text-md);
   color: var(--fg-2);

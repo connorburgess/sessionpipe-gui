@@ -5,7 +5,7 @@ import type { SessionState, SessionSummary } from "@shared/api";
 import { SESSION_STATES } from "@shared/api";
 import { useMemo, useState } from "react";
 import { Wordmark } from "../components/Brand";
-import { ChipSelect, SearchInput } from "../components/bits";
+import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
 import { SessionCard } from "../components/SessionCard";
 import { useAppState, useSessionTree } from "../data/hooks";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
@@ -101,6 +101,8 @@ export function Board() {
               onChange={setHarness}
               all="all harnesses"
               label="Harness"
+              optionLabel={(h) => harnessMark(h).label}
+              icon={(h) => <HarnessGlyph name={h} size="sm" />}
             />
           )}
           {filtered && (
