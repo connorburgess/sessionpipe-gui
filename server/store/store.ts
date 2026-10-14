@@ -59,6 +59,21 @@ const decodeCursor = (c: string): { t: number; no: number } | null => {
 const before = (a: { t: number; no: number }, b: { t: number; no: number }): boolean =>
   a.t < b.t || (a.t === b.t && a.no < b.no);
 
+/** The record for a seq, by binary search over recs (ordered by seq). */
+function findRec(entry: Entry, seq: number): Rec | undefined {
+  const recs = entry.recs;
+  let lo = 0;
+  let hi = recs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const s = recs[mid]!.ev.session.seq;
+    if (s < seq) lo = mid + 1;
+    else if (s > seq) hi = mid;
+    else return recs[mid];
+  }
+  return undefined;
+}
+
 interface Entry extends SessionRecord {
   /** Ordered by seq. */
   recs: Rec[];
@@ -121,14 +136,22 @@ export class Store {
     all.sort((a, b) =>
       a.line.event.arrivedAt < b.line.event.arrivedAt ? -1 : a.line.event.arrivedAt > b.line.event.arrivedAt ? 1 : 0,
     );
+    // A seq stored twice (a tier-0 copy over HTTP and the tier-3 copy from the outbox,
+    // see ingest) keeps its richest line: the highest tier, the later one on a tie.
+    const best = new Map<string, number>();
+    all.forEach(({ key, line }, i) => {
+      const k = `${key}#${line.event.session.seq}`;
+      const prev = best.get(k);
+      if (prev === undefined || all[prev]!.line.event.tier <= line.event.tier) best.set(k, i);
+    });
     const now = Date.now();
-    for (const { key, line } of all) {
+    all.forEach(({ key, line }, i) => {
+      if (best.get(`${key}#${line.event.session.seq}`) !== i) return;
       const entry = this.sessions.get(key)!;
       const ev = line.event;
-      if (entry.seqs.has(ev.session.seq)) continue;
       this.index(entry, ev, line.offset, line.bytes);
       applyEvent(entry, ev, ev.arrivedAt, ev.source ?? "http");
-    }
+    });
     for (const entry of this.sessions.values()) refreshState(entry, now);
   }
 
@@ -147,6 +170,25 @@ export class Store {
       this.sessions.set(key, e);
     }
     return e;
+  }
+
+  /** Recompute a session's readings from its (slim) records, after one of them changed. */
+  private rebuild(entry: Entry, now: number): void {
+    const first = entry.recs[0];
+    const fresh = newRecord(
+      entry.summary.harness,
+      entry.summary.id,
+      first?.ev.arrivedAt ?? entry.summary.startedAt,
+      entry.summary.source,
+    );
+    fresh.childKeys = entry.childKeys;
+    fresh.summary.children = entry.summary.children;
+    for (const r of entry.recs) applyEvent(fresh, r.ev, r.ev.arrivedAt, r.ev.source ?? "http");
+    entry.summary = fresh.summary;
+    entry.ended = fresh.ended;
+    entry.live = fresh.live;
+    entry.files = fresh.files;
+    refreshState(entry, now);
   }
 
   private index(entry: Entry, ev: StoredEvent, offset: number, bytes: number): Rec {
@@ -271,6 +313,7 @@ export class Store {
     const arrivedAt = new Date(now).toISOString();
     const result: IngestResult = { accepted: 0, duplicates: 0, rejected: [], stored: [] };
     const groups = new Map<SessionKey, { harness: string; id: string; events: StoredEvent[] }>();
+    const upgrades: { key: SessionKey; harness: string; id: string; ev: StoredEvent; rec: Rec }[] = [];
     const forgotten: SessionKey[] = [];
     for (const ev of events) {
       const id = ev && typeof ev.id === "string" ? ev.id : "";
@@ -292,7 +335,13 @@ export class Store {
       const entry = this.sessions.get(key);
       let group = groups.get(key);
       if (entry?.seqs.has(seq) || group?.events.some((e) => e.session.seq === seq)) {
+        // A duplicate for the sender (HTTP.md §2), but when the same event arrives again
+        // at a higher tier (the outbox's tier-3 copy after a tier-0 sink copy, or the
+        // other way round) the richer one replaces what we keep.
         result.duplicates++;
+        const have = entry ? findRec(entry, seq) : undefined;
+        if (have && ev.tier > have.ev.tier)
+          upgrades.push({ key, harness, id: sid, ev: { ...ev, arrivedAt, source }, rec: have });
         continue;
       }
       if (!group) {
@@ -324,6 +373,23 @@ export class Store {
         this.emit({ kind: "event", event: ev, session: entry.summary });
       }
       for (const p of parents) this.emit({ kind: "session", session: p.summary });
+      if (entry.summary.machine) machines.add(entry.summary.machine);
+    }
+    for (const u of upgrades) {
+      if (forgotten.includes(u.key)) continue;
+      const entry = this.sessions.get(u.key);
+      if (!entry) continue;
+      const { lines, size } = this.files.append(u.harness, u.id, [u.ev], entry.size);
+      this.storageBytes += size - entry.size;
+      entry.size = size;
+      const line = lines[0];
+      if (!line) continue;
+      // Same place in every order (seq, time, arrival); only the content is richer.
+      u.rec.ev = slimEvent(line.event);
+      u.rec.offset = line.offset;
+      u.rec.bytes = line.bytes;
+      this.rebuild(entry, now);
+      this.emit({ kind: "session", session: entry.summary });
       if (entry.summary.machine) machines.add(entry.summary.machine);
     }
     this.emitMachines(machines);

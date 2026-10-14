@@ -458,3 +458,58 @@ describe("reboot", () => {
     expect(detail.events[0]!.arrivedAt).toBeDefined();
   });
 });
+
+describe("tier upgrade", () => {
+  it("keeps the richer copy when the same seq arrives again at a higher tier, and after a reboot", async () => {
+    const { Store } = await import("./store.js");
+    const { mkdtempSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = mkdtempSync(path.join(os.tmpdir(), "spgui-upgrade-"));
+    const store = new Store(dir, { tickMs: 3600_000, statsMs: 3600_000 });
+    const base = {
+      protocol: 1 as const,
+      time: "2026-10-14T10:00:00.000Z",
+      harness: { name: "claude-code" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+    };
+    const sess = { id: "up-1", seq: 0, machine: "m1" };
+    const started = {
+      ...base,
+      id: "01K00000000000000000000001",
+      type: "session.started",
+      tier: 0 as const,
+      session: sess,
+      data: { source: "startup" },
+    };
+    const t0 = {
+      ...base,
+      id: "01K00000000000000000000002",
+      type: "attention.needed",
+      tier: 0 as const,
+      session: { ...sess, seq: 1 },
+      data: { attention_id: "a1", kind: "permission" },
+    };
+    const t3 = {
+      ...t0,
+      tier: 3 as const,
+      data: { attention_id: "a1", kind: "permission", tool: "Bash", message: "rm -rf dist" },
+    };
+    expect(store.ingest([started, t0], "http")).toMatchObject({ accepted: 2, duplicates: 0 });
+    expect(store.session("claude-code:up-1")?.openAttentions[0]?.tool).toBeUndefined();
+    expect(store.ingest([t3], "outbox")).toMatchObject({ accepted: 0, duplicates: 1 });
+    const s = store.session("claude-code:up-1")!;
+    expect(s.maxTier).toBe(3);
+    expect(s.openAttentions[0]?.tool).toBe("Bash");
+    expect(s.counts.events).toBe(2);
+    const detail = store.sessionDetail("claude-code:up-1")!;
+    expect(detail.events.find((e) => e.session.seq === 1)?.tier).toBe(3);
+    await store.close();
+    const again = new Store(dir, { tickMs: 3600_000, statsMs: 3600_000 });
+    const s2 = again.session("claude-code:up-1")!;
+    expect(s2.maxTier).toBe(3);
+    expect(s2.counts.events).toBe(2);
+    expect(again.sessionDetail("claude-code:up-1")!.events.find((e) => e.session.seq === 1)?.tier).toBe(3);
+    await again.close();
+  });
+});

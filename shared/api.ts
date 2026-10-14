@@ -56,11 +56,12 @@ export interface ProtocolSession {
  *  needs_you: an attention is open. working: a turn started and nothing ended it, with
  *  an event in the last STALE_AFTER_MS. stale: working, but silent longer than that.
  *  idle: the last turn ended and the session did not. done: session.ended arrived, or
- *  only a backfill is known, or nothing for DONE_AFTER_MS. */
+ *  only a backfill is known, or nothing for DONE_AFTER_MS (a day: an open window left
+ *  idle for an afternoon is still idle). */
 export type SessionState = "needs_you" | "working" | "stale" | "idle" | "done";
 
 export const STALE_AFTER_MS = 10 * 60_000;
-export const DONE_AFTER_MS = 6 * 3600_000;
+export const DONE_AFTER_MS = 24 * 3600_000;
 
 export const SESSION_STATES: SessionState[] = ["needs_you", "working", "stale", "idle", "done"];
 
