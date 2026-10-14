@@ -315,9 +315,18 @@ function tlsCommand(parsed: Args): void {
       const keychain = path.join(process.env.HOME ?? "~", "Library", "Keychains", "login.keychain-db");
       out(`Adding "sessionpipe-gui local CA · ${m.hostname}" to ${keychain} (macOS asks for your password)…`);
       try {
-        execFileSync("security", ["add-trusted-cert", "-d", "-r", "trustRoot", "-k", keychain, m.caCertPath], {
-          stdio: "inherit",
-        });
+        // The user trust domain (no -d): -d is the admin domain, which needs sudo and
+        // otherwise imports the certificate without any trust setting.
+        execFileSync(
+          "security",
+          ["add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-p", "basic", "-k", keychain, m.caCertPath],
+          { stdio: "inherit" },
+        );
+        const dump = execFileSync("security", ["dump-trust-settings"], { encoding: "utf8" });
+        if (!dump.includes("sessionpipe-gui local CA"))
+          fail(
+            `The certificate was imported but has no trust setting. By hand: open ${m.caCertPath} in Keychain Access and set "Always Trust" for SSL.`,
+          );
       } catch {
         fail(
           `security add-trusted-cert did not finish. By hand: open ${m.caCertPath} in Keychain Access and set "Always Trust" for SSL.`,
