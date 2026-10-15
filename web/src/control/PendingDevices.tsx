@@ -6,6 +6,7 @@
 // the machine's `delivered` ack settles the request on the server. Shown on /machines and,
 // as a bar, at the top of a session page.
 import { useEffect, useState } from "react";
+import { Select } from "../components/Select";
 import { useMachines } from "../data/hooks";
 import { ms, useNow } from "../lib/time";
 import { ControlError, controlApi, type DeviceRequest } from "./api";
@@ -141,18 +142,15 @@ export function PendingDevices({ bar = false }: { bar?: boolean }) {
               </span>
               <span className="pending-actions">
                 {paired.length > 1 && (
-                  <select
+                  <Select<string>
+                    size="sm"
+                    align="end"
                     aria-label="Machine to trust it on"
                     value={m?.control?.machineId ?? ""}
-                    onChange={(e) => setTarget((t) => ({ ...t, [d.requestId]: e.target.value }))}
+                    onChange={(id) => setTarget((t) => ({ ...t, [d.requestId]: id }))}
                     disabled={!!busy}
-                  >
-                    {paired.map((p) => (
-                      <option key={p.name} value={p.control!.machineId}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={paired.map((p) => ({ value: p.control!.machineId, label: p.name }))}
+                  />
                 )}
                 <button
                   type="button"

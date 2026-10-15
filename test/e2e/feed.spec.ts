@@ -36,11 +36,16 @@ test.describe("feed", () => {
   test("the harness filter restricts rows and search narrows them", async ({ page }) => {
     await openPage(page, "/feed");
     await expect(rows(page).first()).toBeVisible();
+    // The filter is the custom select (components/Select.tsx): a combobox trigger, a listbox.
     const harness = page.getByRole("combobox", { name: "Harness" });
     await expect(harness).toBeVisible();
-    const options = await harness.locator("option").allInnerTexts();
+    await harness.click();
+    const list = page.getByRole("listbox", { name: "Harness" });
+    const options = await list.getByRole("option").allInnerTexts();
     expect(options).toContain("Codex");
-    await harness.selectOption("codex");
+    await list.getByRole("option", { name: "Codex" }).click();
+    await expect(list).toHaveCount(0);
+    await expect(harness).toHaveAttribute("data-value", "codex");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();
     const harnessOf = () =>
@@ -52,7 +57,9 @@ test.describe("feed", () => {
     await expect.poll(() => rows(page).count(), { timeout: 20_000 }).toBeGreaterThan(n);
     expect(new Set(await harnessOf())).toEqual(new Set(["Codex"]));
 
-    await harness.selectOption("");
+    await harness.click();
+    await page.getByRole("listbox", { name: "Harness" }).getByRole("option", { name: "all harnesses" }).click();
+    await expect(harness).toHaveAttribute("data-value", "");
     await page.getByRole("searchbox", { name: "Search events" }).fill("session.started");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();

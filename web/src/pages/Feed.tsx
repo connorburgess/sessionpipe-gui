@@ -4,13 +4,17 @@
 import type { FeedQuery, StoredEvent } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Redacted, SearchInput, Spinner } from "../components/bits";
+import { LensChip, LensNote } from "../components/LensChip";
 import { BesideButton } from "../components/SessionCard";
 import { useAppState, useStore } from "../data/hooks";
 import { eventSummary, harnessMark, sessionTitle, storedKey } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { Link, sessionPath } from "../lib/router";
+import { useAppSettings, useLens } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
-import { clock, dayLabel, useNow } from "../lib/time";
+import { atTier } from "../lib/tier";
+import { clock, dayLabel, useToday } from "../lib/time";
 
 const CAP = 1500;
 const TYPES = ["session", "turn", "tool", "files", "attention", "subagent", "context"];
@@ -38,7 +42,7 @@ export function Feed() {
   const [type, setType] = useState("");
   const [session, setSession] = useState("");
   const [q, setQ] = useState("");
-  const [rows, setRows] = useState<StoredEvent[]>([]);
+  const [loaded, setRows] = useState<StoredEvent[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,16 +137,33 @@ export function Feed() {
       .finally(() => setLoading(false));
   }, [store, filter, cursor]);
 
+  // The tier lens: rows a receiver at that tier would not have got leave; the rest lose
+  // the fields it would not carry (lib/tier.ts).
+  const lens = useLens();
+  const beside = useAppSettings().openSessions === "beside";
+  const rows = useMemo(
+    () => (lens === null ? loaded : loaded.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null)),
+    [loaded, lens],
+  );
+  const hiddenByLens = loaded.length - rows.length;
   const hrefs = useMemo(() => rows.map((e) => sessionPath(e.harness.name, e.session.id)), [rows]);
   const keys = useMemo(() => rows.map(storedKey), [rows]);
   const { cursor: cur } = useListNav(hrefs, true, keys);
-  const now = useNow();
+  useShortcut("feed.pause", () => (paused ? resume() : setPaused(true)));
+  useShortcut("feed.new", () => {
+    if (!paused) return false;
+    resume();
+    window.scrollTo({ top: 0 });
+  });
+  // A row's day label changes at midnight, not every second (the page has 1500 rows).
+  const now = useToday();
 
   let lastDay = "";
   return (
     <div className="page feed">
       <div className="toolbar">
         <SearchInput value={q} onChange={setQ} placeholder="Search events" />
+        <LensChip />
         <div className="filters">
           <ChipSelect
             value={harness}
@@ -155,20 +176,14 @@ export function Feed() {
           />
           <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
           <ChipSelect value={type} options={TYPES} onChange={setType} all="all types" label="Type" />
-          <label className={`chipsel ${session ? "chipsel-on" : ""}`}>
-            <select value={session} onChange={(e) => setSession(e.target.value)} aria-label="Session">
-              <option value="">all sessions</option>
-              {sessionOptions.map((k) => (
-                <option key={k} value={k}>
-                  {sessionLabel(k)}
-                </option>
-              ))}
-            </select>
-            <span className="chipsel-text ellipsis">{session ? sessionLabel(session) : "all sessions"}</span>
-            <span aria-hidden="true" className="chipsel-caret">
-              ▾
-            </span>
-          </label>
+          <ChipSelect
+            value={session}
+            options={sessionOptions}
+            onChange={setSession}
+            all="all sessions"
+            label="Session"
+            optionLabel={sessionLabel}
+          />
           <button
             type="button"
             className={`btn btn--sm feed-pause ${paused ? "btn--on" : "btn--ghost"}`}
@@ -182,6 +197,7 @@ export function Feed() {
       </div>
 
       {error && <p className="page-note is-err">{error}</p>}
+      <LensNote lens={lens} hidden={hiddenByLens} />
 
       <ol className="rows" aria-busy={loading}>
         {rows.map((e, i) => {
@@ -204,7 +220,16 @@ export function Feed() {
               <Link
                 to={sessionPath(e.harness.name, e.session.id)}
                 className="ev-session ellipsis"
+                data-nav-item=""
                 title={e.session.id}
+                plainClick={
+                  beside
+                    ? () =>
+                        openSplit(storedKey(e), {
+                          from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
+                        })
+                    : undefined
+                }
                 modClick={(o) =>
                   openSplit(storedKey(e), {
                     from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),

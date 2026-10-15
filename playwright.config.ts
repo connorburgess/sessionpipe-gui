@@ -16,7 +16,16 @@ export const E2E_TLS_BASE = `https://localhost:${E2E_TLS_PORT}`;
 /** Every spec but setup.spec.ts starts as a device that has seen the setup page, so the
  *  first-run redirect to /setup never meets a board test. */
 export const SETUP_SEEN_KEY = "sessionpipe-gui.setup.seen";
-const seenSetup = (origin: string) => ({ origin, localStorage: [{ name: SETUP_SEEN_KEY, value: "1" }] });
+/** The suite describes the full interface; Simple mode (the default for a device that has not
+ *  chosen) is exercised by settings.spec.ts on purpose. */
+export const SETTINGS_KEY = "sessionpipe-gui.settings";
+const seenSetup = (origin: string) => ({
+  origin,
+  localStorage: [
+    { name: SETUP_SEEN_KEY, value: "1" },
+    { name: SETTINGS_KEY, value: JSON.stringify({ mode: "advanced" }) },
+  ],
+});
 
 const stateDir = path.join(os.tmpdir(), `spgui-e2e-${Date.now()}-${process.pid}`);
 process.env.SPGUI_E2E_STATE = stateDir;
@@ -58,7 +67,7 @@ export default defineConfig({
     },
     {
       name: "phone",
-      testMatch: /(mobile|screenshots|split)\.spec\.ts/,
+      testMatch: /(mobile|screenshots|split|select)\.spec\.ts/,
       use: {
         ...devices["iPhone 13"],
         browserName: "chromium",

@@ -6,6 +6,8 @@
 import type { MachineControl, MachineSummary } from "@shared/api";
 import { sessionKey } from "@shared/api";
 import { useId, useState } from "react";
+import { HarnessGlyph } from "../components/bits";
+import { Select } from "../components/Select";
 import { harnessMark } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
 import { ActivityRow } from "./Activity";
@@ -30,6 +32,7 @@ export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl })
   const [sent, setSent] = useState<{ id: string; harness: string; sid: string } | null>(null);
   const msg = useMessage(sent?.id ?? null);
   const folderId = useId();
+  const harnessId = useId();
 
   const canSend = secure && !!rp && !busy && !!harness && cwd.trim().startsWith("/") && !!text.trim();
 
@@ -72,26 +75,31 @@ export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl })
             }}
           >
             <div className="start-row">
-              <label>
+              <label htmlFor={harnessId}>
                 harness
-                <select value={harness} onChange={(e) => setHarness(e.target.value)} disabled={busy}>
-                  {harnesses.map((h) => (
-                    <option key={h} value={h}>
-                      {harnessMark(h).label}
-                    </option>
-                  ))}
-                </select>
+                <Select<string>
+                  id={harnessId}
+                  value={harness}
+                  onChange={setHarness}
+                  disabled={busy}
+                  options={harnesses.map((h) => ({
+                    value: h,
+                    label: harnessMark(h).label,
+                    icon: <HarnessGlyph name={h} size="sm" />,
+                  }))}
+                />
               </label>
               <label htmlFor={folderId}>
                 folder
                 {c.folders && c.folders.length > 0 ? (
-                  <select id={folderId} value={cwd} onChange={(e) => setCwd(e.target.value)} disabled={busy}>
-                    {c.folders.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                  <Select<string>
+                    id={folderId}
+                    value={cwd}
+                    onChange={setCwd}
+                    disabled={busy}
+                    className="mono"
+                    options={c.folders.map((f) => ({ value: f, label: f }))}
+                  />
                 ) : (
                   <input
                     id={folderId}

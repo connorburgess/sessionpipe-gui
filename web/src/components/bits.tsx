@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Small shared pieces: state marks, harness monograms, chips, ticking times, spinner,
-// copy button, redaction highlighting, search input, segmented control.
+// copy button, redaction highlighting, search input, segmented control, chip select,
+// slider, switch. The select itself lives in Select.tsx.
 import type { SessionState, Tier } from "@shared/api";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
-import { ago, durCoarse, ms, since, useNow } from "../lib/time";
+import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
+import { Select } from "./Select";
 
 /** `decorative` when the state's word is already visible beside it. */
 export function StateDot({
@@ -32,7 +34,7 @@ export function StateDot({
 
 /** "● working · 12 s": the state as text, no box. */
 export function StateBadge({ state, since: sinceIso }: { state: SessionState; since?: string }) {
-  const now = useNow();
+  const now = useNow(sinceIso ? tickFor(Date.now() - ms(sinceIso)) : "off");
   return (
     <span className={`badge badge--${state}`} title={STATE_HINT[state]}>
       <StateDot state={state} decorative />
@@ -110,7 +112,8 @@ export function TierBadge({ tier }: { tier: Tier }) {
 
 /** "12 s ago", ticking. */
 export function Ago({ iso, prefix }: { iso: string | undefined; prefix?: string }) {
-  const now = useNow();
+  // `ago` shows seconds only for the first minute.
+  const now = useNow(iso ? tickFor(Date.now() - ms(iso), 60_000) : "off");
   if (!iso) return null;
   return (
     <time dateTime={iso} className="num" title={new Date(iso).toLocaleString()}>
@@ -122,7 +125,9 @@ export function Ago({ iso, prefix }: { iso: string | undefined; prefix?: string 
 
 /** Elapsed since an instant, ticking: "4 m 12 s"; `coarse` drops the seconds past a minute. */
 export function Since({ iso, coarse = false }: { iso: string | undefined; coarse?: boolean }) {
-  const now = useNow();
+  // Seconds show for an hour (`dur`), or for a minute when coarse; after that the text
+  // changes once a minute, and a ten-second tick is plenty.
+  const now = useNow(iso ? tickFor(Date.now() - ms(iso), coarse ? 60_000 : 3_600_000) : "off");
   if (!iso) return null;
   return (
     <time dateTime={iso} className="num" title={new Date(iso).toLocaleString()}>
@@ -254,7 +259,8 @@ export function Segmented<T extends string | number>({
   );
 }
 
-/** A select rendered as quiet text with a caret. */
+/** A filter as quiet text with a caret: the custom Select (components/Select.tsx) without
+ *  its border, "" standing for `all`. */
 export function ChipSelect({
   value,
   options,
@@ -271,27 +277,62 @@ export function ChipSelect({
   label: string;
   /** What an option is called; the value stays the raw id. */
   optionLabel?: (o: string) => string;
-  /** Drawn before the chosen option's name in the chip (a native select has no icons). */
+  /** Drawn before an option's name, in the chip and in the list. */
   icon?: (o: string) => ReactNode;
 }) {
   if (options.length === 0) return null;
   return (
-    <label className={`chipsel ${value ? "chipsel-on" : ""}`}>
-      <span className="sr-only">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
-        <option value="">{all}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {optionLabel(o)}
-          </option>
-        ))}
-      </select>
-      {value && icon ? icon(value) : null}
-      <span className="chipsel-text ellipsis">{value ? optionLabel(value) : all}</span>
-      <span aria-hidden="true" className="chipsel-caret">
-        ▾
-      </span>
-    </label>
+    <Select<string>
+      value={value}
+      onChange={onChange}
+      aria-label={label}
+      className={`chipsel ${value ? "chipsel-on" : ""}`}
+      options={[
+        { value: "", label: all },
+        ...options.map((o) => ({ value: o, label: optionLabel(o), icon: icon?.(o) })),
+      ]}
+    />
+  );
+}
+
+/** A 2 px hairline track with a 14 px knob; an `<input type=range>` underneath, so it is
+ *  a slider to assistive tech and to Playwright's `fill`. */
+export function Slider({
+  value,
+  onChange,
+  min = 0,
+  max = 1,
+  step = 0.05,
+  label,
+  id,
+  disabled,
+  className = "",
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  label: string;
+  id?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
+  return (
+    <input
+      type="range"
+      id={id}
+      className={`slider ${className}`}
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      disabled={disabled}
+      aria-label={label}
+      onChange={(e) => onChange(Number(e.target.value))}
+      style={{ "--slider-pct": `${pct}%` } as CSSProperties}
+    />
   );
 }
 
@@ -320,3 +361,6 @@ export function Toggle({
     </button>
   );
 }
+
+/** The same 36×20 switch under the name the design notes use. */
+export const Switch = Toggle;

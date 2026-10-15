@@ -483,8 +483,9 @@ test("a session is started from /machines in one of the machine's folders", asyn
   await expect(block).toContainText("paired");
   await expect(block).toContainText("daemon online");
   const form = block.getByRole("form", { name: `Start a session on ${MACHINE}` });
-  await expect(form.getByLabel("harness")).toHaveValue("claude-code");
-  await expect(form.getByLabel("folder")).toHaveValue("/tmp/proj");
+  // Custom selects (components/Select.tsx): the trigger carries its value in data-value.
+  await expect(form.getByLabel("harness")).toHaveAttribute("data-value", "claude-code");
+  await expect(form.getByLabel("folder")).toHaveAttribute("data-value", "/tmp/proj");
   await form.getByLabel("first message").fill("Set up the Oct release branch");
   await shot(page, "machines-start-desktop");
   await form.getByRole("button", { name: "Start session" }).click();

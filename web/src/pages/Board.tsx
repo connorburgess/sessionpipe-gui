@@ -6,12 +6,14 @@ import { SESSION_STATES } from "@shared/api";
 import { useMemo, useState } from "react";
 import { Wordmark } from "../components/Brand";
 import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
+import { LensChip, LensNote } from "../components/LensChip";
 import { PALETTE_KEY } from "../components/Palette";
-import { SessionCard } from "../components/SessionCard";
+import { cardHides, SessionCard } from "../components/SessionCard";
 import { useAppState, useSessionTree } from "../data/hooks";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { Link, sessionPath } from "../lib/router";
+import { useAppSettings, useLens } from "../lib/settings";
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -43,6 +45,10 @@ export function Board() {
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
   const [showDone, setShowDone] = useState(false);
+  const lens = useLens();
+  const { mode, openSessions } = useAppSettings();
+  const simple = mode === "simple";
+  const beside = openSessions === "beside";
 
   const machines = useMemo(() => [...new Set(all.map((s) => s.machine).filter((m): m is string => !!m))].sort(), [all]);
   const harnesses = useMemo(() => [...new Set(all.map((s) => s.harness))].sort(), [all]);
@@ -73,6 +79,7 @@ export function Board() {
   const keys = useMemo(() => ordered.map((s) => s.key), [ordered]);
   const { cursor } = useListNav(hrefs, true, keys);
   const cursorKey = ordered[cursor]?.key;
+  const hiddenByLens = useMemo(() => ordered.reduce((n, s) => n + cardHides(s, lens), 0), [ordered, lens]);
 
   if (snapshotAt && all.length === 0) return <EmptyBoard />;
   if (!snapshotAt)
@@ -91,6 +98,7 @@ export function Board() {
     <div className="page board">
       <div className="toolbar">
         <SearchInput value={q} onChange={setQ} placeholder={`Search sessions · ${PALETTE_KEY} for everything`} />
+        <LensChip />
         <div className="filters">
           {machines.length > 1 && (
             <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
@@ -122,6 +130,8 @@ export function Board() {
         </div>
       </div>
 
+      <LensNote lens={lens} hidden={hiddenByLens} />
+
       {visible.length === 0 && (
         <p className="page-note">
           Nothing matches{q ? ` “${q}”` : ""}
@@ -150,6 +160,9 @@ export function Board() {
                   s={s}
                   children={childrenOf.get(s.key)}
                   cursor={s.key === cursorKey ? cursor : undefined}
+                  lens={lens}
+                  simple={simple}
+                  openBeside={beside}
                 />
               ))}
             </div>
@@ -182,6 +195,9 @@ export function Board() {
                   s={s}
                   children={childrenOf.get(s.key)}
                   cursor={s.key === cursorKey ? cursor : undefined}
+                  lens={lens}
+                  simple={simple}
+                  openBeside={beside}
                 />
               ))}
             </div>

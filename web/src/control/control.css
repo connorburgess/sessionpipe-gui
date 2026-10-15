@@ -12,7 +12,7 @@
   max-height: 160px;
   padding: 8px 12px;
   border-radius: var(--radius);
-  border: 1px solid var(--line-2);
+  border: var(--hairline) solid var(--line-2);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -21,8 +21,9 @@
   resize: none;
   field-sizing: content;
 }
-.ctl-ask textarea:focus {
-  outline: none;
+.ctl-ask textarea:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--fg);
+  outline-offset: 1px;
   border-color: var(--fg-3);
 }
 .ctl-ask textarea::placeholder {
@@ -80,12 +81,12 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px 0;
-  border-top: 1px solid var(--line);
+  border-top: var(--hairline) solid var(--line);
   font-size: var(--text-sm);
   color: var(--fg-3);
 }
 .ctl-act--expired {
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 .ctl-act-head {
   display: flex;
@@ -151,7 +152,7 @@
 .ctl-act-reply {
   margin: 4px 0 2px;
   padding: 2px 0 2px 12px;
-  border-left: 1px solid var(--line-2);
+  border-left: var(--hairline) solid var(--line-2);
   color: var(--fg-2);
   font-size: var(--text-md);
   line-height: 1.5;
@@ -259,22 +260,21 @@
 }
 .pair-form input,
 .start-form input,
-.start-form select,
 .start-form textarea {
   height: 36px;
   padding: 0 12px;
   border-radius: var(--radius);
-  border: 1px solid var(--line-2);
+  border: var(--hairline) solid var(--line-2);
   background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: var(--text-md);
 }
-.pair-form input:focus,
-.start-form input:focus,
-.start-form select:focus,
-.start-form textarea:focus {
-  outline: none;
+.pair-form input:focus-visible,
+.start-form input:focus-visible,
+.start-form textarea:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--fg);
+  outline-offset: 1px;
   border-color: var(--fg-3);
 }
 .pair-form input::placeholder,
@@ -334,7 +334,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
+  border-top: var(--hairline) solid var(--line);
 }
 .pending-item {
   display: flex;
@@ -343,7 +343,7 @@
   flex-wrap: wrap;
   min-height: 40px;
   padding: 4px 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--hairline) solid var(--line);
   font-size: var(--text-md);
 }
 .pending-dot {
@@ -388,16 +388,6 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.pending-actions select {
-  height: 28px;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line-2);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--text-sm);
 }
 .pending-wide {
   flex-basis: 100%;
@@ -465,7 +455,7 @@
   flex: 1 1 160px;
   min-width: 0;
 }
-.start-form select,
+.start-form .sel,
 .start-form input {
   width: 100%;
   min-width: 0;
@@ -494,4 +484,25 @@
   .pair-facts dd {
     margin-bottom: 6px;
   }
+}
+
+/* A plugin's suggested answer beside the pair: who said so, and one Confirm that signs
+   the ordinary answer. Advice only; it never sends by itself. */
+.ctl-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.ctl-suggestion-text {
+  color: var(--fg-2);
+}
+.ctl-suggestion[data-suggestion="allow"] .ctl-suggestion-confirm {
+  border-color: var(--ok-soft, var(--line-2));
+  color: var(--ok, var(--fg));
+}
+.ctl-suggestion[data-suggestion="deny"] .ctl-suggestion-confirm {
+  border-color: var(--err-soft);
+  color: var(--err);
 }
