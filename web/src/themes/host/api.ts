@@ -20,6 +20,8 @@ import type { AppState, Store } from "../../data/store";
 import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
 import { harnessIconSvg } from "../../lib/harnessIcons";
 import { navigate, sessionPath } from "../../lib/router";
+import { type AppSettings, effectiveLens, getSettings, subscribeSettings } from "../../lib/settings";
+import { activeMap, registerViewActions } from "../../lib/shortcuts";
 import { openSplit } from "../../lib/split";
 import { ago, dur } from "../../lib/time";
 import tokensCss from "../../styles/tokens.css?raw";
@@ -59,7 +61,11 @@ function watchScheme(onChange: () => void): () => void {
   };
 }
 
-export function toSnapshot(s: AppState, scheme: "dark" | "light"): ThemeSnapshot {
+export function toSnapshot(
+  s: AppState,
+  scheme: "dark" | "light",
+  settings: AppSettings = getSettings(),
+): ThemeSnapshot {
   return Object.freeze({
     connection: CONNECTION[s.connection],
     sessions: s.sessions,
@@ -69,6 +75,8 @@ export function toSnapshot(s: AppState, scheme: "dark" | "light"): ThemeSnapshot
     recent: s.recent,
     scheme,
     viewers: s.viewers,
+    tierLens: effectiveLens(settings),
+    mode: settings.mode,
   });
 }
 
@@ -83,13 +91,14 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
   const id = manifest.id;
   const baseUrl = `${location.origin}${manifest.url}`;
 
-  // One immutable snapshot per change of the store or the scheme, built on demand.
+  // One immutable snapshot per change of the store, the scheme or the settings, built on demand.
   let scheme = resolvedScheme();
-  let cached: { base: AppState; scheme: "dark" | "light"; snap: ThemeSnapshot } | null = null;
+  let cached: { base: AppState; scheme: "dark" | "light"; settings: AppSettings; snap: ThemeSnapshot } | null = null;
   const get = (): ThemeSnapshot => {
     const base = store.get();
-    if (!cached || cached.base !== base || cached.scheme !== scheme) {
-      cached = { base, scheme, snap: toSnapshot(base, scheme) };
+    const settings = getSettings();
+    if (!cached || cached.base !== base || cached.scheme !== scheme || cached.settings !== settings) {
+      cached = { base, scheme, settings, snap: toSnapshot(base, scheme, settings) };
     }
     return cached.snap;
   };
@@ -106,6 +115,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
     }
   };
   const unsubStore = store.subscribe(notify);
+  const unsubSettings = subscribeSettings(notify);
   const unwatch = watchScheme(() => {
     const next = resolvedScheme();
     if (next === scheme) return;
@@ -114,6 +124,8 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
   });
 
   const statePath = `${THEME_ROUTES.state}/${encodeURIComponent(id)}/state`;
+  /** The view's registered keys, removed on dispose. */
+  const unregisters = new Set<() => void>();
   const localKey = (k: string) => `sessionpipe-gui.theme.${id}.${k}`;
 
   const api: ThemeApi = {
@@ -188,6 +200,23 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
       },
     },
     control: createControlApi({ machines: () => store.get().machines, sessions: () => store.get().sessions }),
+    shortcuts: {
+      register(actions) {
+        const off = registerViewActions(id, manifest.name || id, Array.isArray(actions) ? actions : []);
+        unregisters.add(off);
+        return () => {
+          unregisters.delete(off);
+          off();
+        };
+      },
+      active() {
+        const all = activeMap();
+        const out: Record<string, string[]> = {};
+        const prefix = `${id}:`;
+        for (const [k, v] of Object.entries(all)) out[k.startsWith(prefix) ? k.slice(prefix.length) : k] = v;
+        return out;
+      },
+    },
     react: { React, ReactDOM, createRoot },
     format: {
       ago: (iso, now = Date.now()) => ago(iso, now),
@@ -203,8 +232,11 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
     api,
     dispose: () => {
       unsubStore();
+      unsubSettings();
       unwatch();
       subscribers.clear();
+      for (const off of unregisters) off();
+      unregisters.clear();
     },
   };
 }

@@ -209,6 +209,14 @@ bindings (`active()["zoom-in"]`, and the host's under their ids, `active()["list
 so your hints stay true. A host without `api.shortcuts` (older than this) is fine to
 fall back on with your own listener: `api.shortcuts?.register(…) ?? listenYourself()`.
 
+**Who wins.** While your page is mounted, a bare key (no modifier, not one of the
+host's `g …` sequences, not Esc) belongs to you whenever focus is inside your container
+or nowhere in particular (the body): the host does not run its own single-key bindings
+there (`?`, `/`, `j`, `a` …), whether you registered yours or still listen for them
+yourself. A key you `preventDefault()` is never looked at by the host. The host keeps
+its modifier chords (`mod+k`, `mod+1` …), its `g …` navigation and Esc on every page.
+Register your keys anyway: that is how the person sees them in `?` and can change them.
+
 What a view must do to stay keyboard-accessible, since nothing outside your container
 can reach into it:
 
@@ -316,31 +324,46 @@ sessionpipe-gui view remove tally
 
 `theme` is an alias of `view` (`sessionpipe-gui theme add …` still works). Views are one
 of three kinds of extension the same installer handles; the others are plugins
-(server-side code, `plugin-authoring.md`) and skins (token/font/CSS packages, next).
+(server-side code, `plugin-authoring.md`) and skins (tokens, fonts, shape and an optional
+stylesheet, no code, `skin-authoring.md`).
 
 The id always comes from the theme's own `theme.json`; the installed copy records
 where it came from in `source`. `--state DIR` (or `--themes-dir DIR`) chooses the
 folder; the server reads it at boot and on **Reload** on the Themes page
 (`POST /api/ui/themes/reload`, from the receiver machine only).
 
+### Bundled views
+
+Canvas and Office come with the GUI: `npm run build` copies them from the themes repo
+(`scripts/build.mjs --bundle-from <path>`, default the sibling `../sessionpipe-gui-themes`,
+skipped with a note when it is absent) into `dist/bundled/views/<id>/`, which the npm
+package ships. The server lists them **after** the person's own folder, so `view add` of
+a package with the same id overrides the bundled copy, and `view remove` of that install
+brings the bundled one back. They are listed with `source: "bundled"` and `bundled: true`,
+served at the same `/themes/<id>/` paths, and cannot be removed: `view remove canvas`
+says so and points at `view disable canvas`, which hides it from the rail (and `/t/canvas`
+says it is disabled) by adding `view:canvas` to `disabled` in `config.json`; `view enable
+canvas`, or the Disable / Enable button on the Views page (receiver machine only,
+`POST /api/ui/themes/:id/disable|enable`), brings it back. Any view can be disabled the
+same way.
+
 A **linked** theme is imported afresh on every visit to its page (a cache-busting
 query string, and the server sends `no-cache` for `.js`, `.css` and `.json`), so an
 edit shows after navigating away and back; no restart.
 
-## Color themes are not themes
+## Skins are not themes
 
-A **color theme** is a token set, like a VS Code color theme: a JSON file that sets
-some of the custom properties in `web/src/styles/tokens.css` (`--bg`, `--fg`,
-`--needs`, …) and the scheme it is for. People pick one from the page's quick settings
-(the gear on the rail or the tab bar), beside the appearance and the text size; the
-built-ins are Default, Paper, Graphite, Ink and Sepia. To add your own, drop a file into
-`<stateDir>/color-themes/<id>.json` with the shape of
-[`color-theme.example.json`](color-theme.example.json): `id`, `name`, `scheme` (`dark`
-or `light`), and `tokens` with at least `--bg` and `--fg`; unknown token names are
-refused and the file is listed with its error. The server serves them at
-`GET /api/ui/color-themes`, read on every request, so an edit shows on the next open
-of the popover. Because every theme plugin draws with the same tokens by name, a color
-theme restyles every view at once; a plugin never needs to know which one is on.
+A **skin** restyles the GUI without code: a `skin.json` with the custom properties of
+`web/src/styles/tokens.css` to set (`--bg`, `--fg`, `--needs`, …, per scheme), bundled
+fonts, a typeface, a radius, the hairline width, a density and an optional stylesheet.
+People pick one from the page's quick settings (the gear on the rail or the tab bar),
+beside the appearance and the text size; the built-ins are Spacesheep (the default),
+Plain, Paper, Graphite, Ink and Sepia, and `sessionpipe-gui skin add` installs more.
+How to write one: [`skin-authoring.md`](skin-authoring.md). A plain color-theme JSON
+file in `<stateDir>/color-themes/` ([`color-theme.example.json`](color-theme.example.json))
+still works and is listed with the skins. Because every view draws with the same tokens
+by name (`api.tokens`), a skin restyles every view at once; a view never needs to know
+which one is on.
 
 ## Rules of the house
 

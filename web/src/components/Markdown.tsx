@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: Apache-2.0
+// Markdown as React, from the tree lib/markdown.ts builds. Every node becomes an element
+// or a text node, never injected HTML. Links open only for http(s) destinations; any
+// other destination shows as its text. Images are named ("[alt]"), never fetched.
+import { Fragment, type ReactNode, useMemo } from "react";
+import { type Block, type Inline, parseMarkdown } from "../lib/markdown";
+import { CopyButton, Redacted } from "./bits";
+import "../styles/markdown.css";
+
+export function Markdown({ text, className }: { text: string; className?: string }) {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  return <div className={className ? `md ${className}` : "md"}>{blocks.map(renderBlock)}</div>;
+}
+
+const hostOf = (href: string): string | undefined => {
+  try {
+    return new URL(href).host;
+  } catch {
+    return undefined;
+  }
+};
+
+const renderInlines = (nodes: Inline[]): ReactNode[] => nodes.map((n, i) => renderInline(n, i));
+
+function renderInline(n: Inline, key: number): ReactNode {
+  switch (n.type) {
+    case "text":
+      return (
+        <Fragment key={key}>
+          <Redacted text={n.text} />
+        </Fragment>
+      );
+    case "code":
+      return <code key={key}>{n.text}</code>;
+    case "strong":
+      return <strong key={key}>{renderInlines(n.children)}</strong>;
+    case "em":
+      return <em key={key}>{renderInlines(n.children)}</em>;
+    case "br":
+      return <br key={key} />;
+    case "image":
+      return <Fragment key={key}>[{n.alt}]</Fragment>;
+    case "link":
+      // Only http(s) opens; anything else (javascript:, mailto:, relative) is just its text.
+      if (!/^https?:\/\//i.test(n.href)) return <Fragment key={key}>{renderInlines(n.children)}</Fragment>;
+      return (
+        <a key={key} href={n.href} target="_blank" rel="noopener noreferrer" title={hostOf(n.href)}>
+          {renderInlines(n.children)}
+        </a>
+      );
+  }
+}
+
+function renderBlock(b: Block, i: number): ReactNode {
+  switch (b.type) {
+    case "paragraph":
+      return <p key={i}>{renderInlines(b.children)}</p>;
+    case "heading": {
+      const H = `h${b.level}` as "h1" | "h2" | "h3" | "h4";
+      return <H key={i}>{renderInlines(b.children)}</H>;
+    }
+    case "code":
+      return (
+        <div key={i} className="md-pre">
+          <div className="md-pre-head">
+            <span className="md-pre-lang">{b.lang}</span>
+            <CopyButton text={b.text} small />
+          </div>
+          <pre className="md-code">
+            <code>{b.text}</code>
+          </pre>
+        </div>
+      );
+    case "list": {
+      const items = b.items.map((item, j) => <li key={j}>{item.map(renderBlock)}</li>);
+      return b.ordered ? (
+        <ol key={i} start={b.start === 1 ? undefined : b.start}>
+          {items}
+        </ol>
+      ) : (
+        <ul key={i}>{items}</ul>
+      );
+    }
+    case "blockquote":
+      return <blockquote key={i}>{b.children.map(renderBlock)}</blockquote>;
+    case "hr":
+      return <hr key={i} />;
+    case "table":
+      return (
+        <table key={i} className="md-table">
+          <thead>
+            <tr>
+              {b.header.map((cell, j) => (
+                <th key={j}>{renderInlines(cell)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {b.rows.map((row, r) => (
+              <tr key={r}>
+                {row.map((cell, j) => (
+                  <td key={j}>{renderInlines(cell)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+  }
+}

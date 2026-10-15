@@ -158,7 +158,8 @@ test.describe("session page", () => {
     expect(expandableAt1, "at tier 1 only a failed tool has something to open (its error)").toBeLessThanOrEqual(
       errorsAt1,
     );
-    await expect(page.locator("li.tool .tool-io")).toHaveCount(0);
+    // Whatever opens at tier 1 holds the error alone: no input, no output.
+    await expect(page.locator("li.tool .tool-io-label", { hasNotText: /^error$/ })).toHaveCount(0);
   });
 
   test("follow toggles and back returns to the board", async ({ page }) => {

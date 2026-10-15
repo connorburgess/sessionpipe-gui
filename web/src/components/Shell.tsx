@@ -4,10 +4,13 @@
 // (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and
 // a More tab whose sheet lists the rest (installed views, then the quick settings).
 import type { InstalledTheme } from "@shared/theme-api";
-import { type CSSProperties, Fragment, type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useAnswerableCount, useAppState } from "../data/hooks";
+import { useFocusTrap } from "../lib/focus";
 import { useGlobalKeys } from "../lib/keys";
-import { Link, type Route } from "../lib/router";
+import { Link, navigate, type Route, usePath } from "../lib/router";
+import { useSimple } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useSetupStatus } from "../setup/api";
@@ -16,6 +19,7 @@ import { useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
 import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
+import { ShortcutHelp } from "./ShortcutHelp";
 
 /** Whether a media query matches, live. */
 function useMedia(query: string): boolean {
@@ -109,6 +113,27 @@ const ICON: Record<string, ReactNode> = {
   ),
 };
 
+/** Three sliders: the settings dialog (the gear is the appearance popover's). */
+export function SlidersIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M3 5.5h14M3 10h14M3 14.5h14" />
+      <circle cx="7" cy="5.5" r="1.8" fill="var(--bg)" />
+      <circle cx="13" cy="10" r="1.8" fill="var(--bg)" />
+      <circle cx="9" cy="14.5" r="1.8" fill="var(--bg)" />
+    </svg>
+  );
+}
+
 /* The default glyph for an installed theme without an icon: a plug. */
 const PLUG_ICON = (
   <>
@@ -162,11 +187,15 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
 
 const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Setup", glyph: ICON.setup };
 
+/** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
+const ADVANCED_ONLY = new Set(["feed", "review"]);
+
 /** Builtins first (Setup among them while this machine is not set up), then installed
- *  themes, the experimental ones of both after a divider. */
-export function navItems(themes: readonly InstalledTheme[], o: { setup?: boolean } = {}): NavItem[] {
-  const plugins = themes.filter((t) => !t.error).map(themeNavItem);
-  const all = [...BUILTIN, ...(o.setup ? [SETUP_ITEM] : []), ...plugins];
+ *  themes, the experimental ones of both after a divider. `simple` drops Feed and Review. */
+export function navItems(themes: readonly InstalledTheme[], o: { setup?: boolean; simple?: boolean } = {}): NavItem[] {
+  const plugins = themes.filter((t) => !t.error && !t.disabled).map(themeNavItem);
+  const builtin = o.simple ? BUILTIN.filter((n) => !ADVANCED_ONLY.has(n.key)) : BUILTIN;
+  const all = [...builtin, ...(o.setup ? [SETUP_ITEM] : []), ...plugins];
   return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
 }
 
@@ -202,6 +231,8 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
   const inside = items.some((n) => n.key === active);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(sheetRef, open, { onClose: () => setOpen(false) });
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
   const plugins = items.filter((n) => n.key.startsWith("t:"));
@@ -237,7 +268,7 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
       {open && (
         <>
           <button type="button" className="more-scrim" aria-label="Close" onClick={() => setOpen(false)} data-dismiss />
-          <div className="more-sheet" role="dialog" aria-label="More">
+          <div className="more-sheet" role="dialog" aria-modal="true" aria-label="More" ref={sheetRef}>
             <ul className="more-list">
               {plain.map(row)}
               {experimental.length > 0 && (
@@ -265,6 +296,15 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
                   <span className="more-row-hint">appearance · theme · text size</span>
                 </button>
               </li>
+              <li>
+                <Link to="/settings" className="more-row" data-nav="settings">
+                  <span className="nav-glyph" aria-hidden="true">
+                    <SlidersIcon size={20} />
+                  </span>
+                  <span className="more-row-name">Settings</span>
+                  <span className="more-row-hint">mode · lens · data</span>
+                </Link>
+              </li>
             </ul>
           </div>
         </>
@@ -282,7 +322,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();
   const showSetup = setup.local === true && !!setup.status && !setupComplete(setup.status);
-  const nav = navItems(useThemes().themes, { setup: showSetup });
+  const simple = useSimple();
+  const nav = navItems(useThemes().themes, { setup: showSetup, simple });
   const phone = useMedia("(max-width: 839px)");
   useResize();
   // Boot: the last visit's tabs when the URL carries none.
@@ -291,6 +332,33 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, []);
   const splitOpen = useSplitKey() !== null;
   const splitWidth = useSplitWidth();
+  // A route change moves focus to the page (not on the first paint, where Tab must start
+  // at the skip link) and says the page's name through the live region.
+  const mainRef = useRef<HTMLElement>(null);
+  const [announce, setAnnounce] = useState("");
+  const path = usePath().split("?")[0] ?? "/";
+  const firstPath = useRef(true);
+  useEffect(() => {
+    if (firstPath.current) {
+      firstPath.current = false;
+      return;
+    }
+    mainRef.current?.focus({ preventScroll: true });
+    const t = setTimeout(
+      () => setAnnounce(document.title.replace(/ · sessionpipe gui$/, "").replace(/^\(\d+\) /, "")),
+      60,
+    );
+    return () => clearTimeout(t);
+  }, [path]);
+  // `g 1` … `g 9`: the n-th installed view, in rail order.
+  const views = nav.filter((n) => n.key.startsWith("t:"));
+  for (let i = 1; i <= 9; i++) {
+    useShortcut(`nav.view${i}`, () => {
+      const v = views[i - 1];
+      if (!v) return false;
+      navigate(v.to);
+    });
+  }
   const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
   const links = nav.map((n) => (
     <Link
@@ -312,6 +380,20 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   ));
   return (
     <div className={`shell ${splitOpen && !phone ? "shell--split" : ""}`} style={shellStyle}>
+      {/* biome-ignore lint/a11y/useValidAnchor: a real in-page link to #main; the handler only keeps the hash out of the URL */}
+      <a
+        href="#main"
+        className="skip"
+        onClick={(e) => {
+          e.preventDefault();
+          mainRef.current?.focus();
+        }}
+      >
+        Skip to content
+      </a>
+      <div className="sr-only" aria-live="polite" aria-atomic="true" data-announcer>
+        {announce}
+      </div>
       <nav className="rail" aria-label="Pages">
         <Link to="/" className="rail-brand" title="sessionpipe gui">
           <Mark size={20} />
@@ -337,8 +419,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <Link
             to="/themes"
             className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
-            title="Themes"
-            aria-label="Themes"
+            data-tip="Views"
+            aria-label="Views"
             aria-current={route.name === "themes" ? "page" : undefined}
           >
             <svg
@@ -357,9 +439,19 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </Link>
           <ConnectionPill />
           <QuickSettings placement="rail" />
+          <Link
+            to="/settings"
+            className={`theme-btn ${route.name === "settings" ? "nav-link--on" : ""}`}
+            data-tip="Settings"
+            aria-label="Settings"
+            aria-current={route.name === "settings" ? "page" : undefined}
+            data-nav="settings"
+          >
+            <SlidersIcon />
+          </Link>
         </div>
       </nav>
-      <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main">
+      <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">
@@ -367,13 +459,15 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         <MoreTab items={nav.slice(TABS)} active={active} />
       </nav>
       <SessionPanel phone={phone} />
+      <ShortcutHelp />
     </div>
   );
 }
 
 export function ConnectionPill() {
   const { connection, retryAt } = useAppState();
-  const now = useNow();
+  // The countdown ticks only while there is one.
+  const now = useNow(retryAt ? "fine" : "off");
   const wait = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
   const label =
     connection === "live"

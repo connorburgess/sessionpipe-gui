@@ -13,6 +13,7 @@ import { storedPasskeys } from "../control/webauthn";
 import { useMachines, useStore } from "../data/hooks";
 import { harnessMark } from "../lib/format";
 import { Link } from "../lib/router";
+import { useSimple } from "../lib/settings";
 import { ms, useNow } from "../lib/time";
 
 export function Machines() {
@@ -57,6 +58,8 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
   // The passkeys this browser made for the rp id: one of them trusted here is "this one".
   const mine = new Set(rp ? storedPasskeys(rp).map((k) => k.id) : []);
   const httpsUrl = tlsInfo()?.httpsUrl ?? lanUrl;
+  // Simple mode: online, paired or the pair line, the start button; the daemon's details wait in Advanced.
+  const simple = useSimple();
   return (
     <section className={`machine ${online ? "machine--on" : ""}`} aria-label={m.name}>
       <header className="machine-head">
@@ -75,7 +78,7 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
             {m.needsYou > 0 && <span className="is-needs"> · {m.needsYou} need you</span>}
           </dd>
         </div>
-        <div>
+        <div hidden={simple}>
           <dt>harnesses</dt>
           <dd className="machine-harnesses">
             {Object.entries(m.harnesses).map(([h, v]) => (
@@ -91,36 +94,44 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
           <dt>control</dt>
           {c ? (
             <dd>
-              <span className="paired">paired</span>
-              <span className="machine-ctl-row">
-                {c.online ? "daemon online" : "daemon offline"}
-                {c.lastPollAt && (
-                  <>
-                    {" "}
-                    · polled <Ago iso={c.lastPollAt} />
-                  </>
-                )}
-                {c.mode && <> · mode {c.mode}</>}
-                {c.version && <> · v{c.version}</>}
+              <span className="paired">
+                paired{simple ? ` · ${c.online ? "daemon online" : "daemon offline"}` : ""}
               </span>
-              <span className="machine-ctl-row machine-devices">
-                Devices that can answer:{" "}
-                {c.keys.length === 0
-                  ? "none yet"
-                  : c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")}
-                {c.queued > 0 && <> · {c.queued} queued</>}
-                {" · "}
-                <details className="machine-add-phone">
-                  <summary>+ Add a phone</summary>
-                  <span>
-                    On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
-                    <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
-                    machine already trusts can vouch for one.
+              {simple ? null : (
+                <>
+                  <span className="machine-ctl-row">
+                    {c.online ? "daemon online" : "daemon offline"}
+                    {c.lastPollAt && (
+                      <>
+                        {" "}
+                        · polled <Ago iso={c.lastPollAt} />
+                      </>
+                    )}
+                    {c.mode && <> · mode {c.mode}</>}
+                    {c.version && <> · v{c.version}</>}
                   </span>
-                </details>
-              </span>
-              {c.folders && c.folders.length > 0 && (
-                <span className="machine-ctl-row mono">{c.folders.join("  ")}</span>
+                  <span className="machine-ctl-row machine-devices">
+                    Devices that can answer:{" "}
+                    {c.keys.length === 0
+                      ? "none yet"
+                      : c.keys
+                          .map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`)
+                          .join(", ")}
+                    {c.queued > 0 && <> · {c.queued} queued</>}
+                    {" · "}
+                    <details className="machine-add-phone">
+                      <summary>+ Add a phone</summary>
+                      <span>
+                        On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
+                        <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
+                        machine already trusts can vouch for one.
+                      </span>
+                    </details>
+                  </span>
+                  {c.folders && c.folders.length > 0 && (
+                    <span className="machine-ctl-row mono">{c.folders.join("  ")}</span>
+                  )}
+                </>
               )}
             </dd>
           ) : (

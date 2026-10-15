@@ -216,6 +216,13 @@ export interface InstalledTheme extends ThemeManifest {
   dir?: string;
   /** Linked from a folder for development (changes show on reload). */
   linked?: boolean;
+  /** Shipped with the GUI (dist/bundled/views/<id>), not installed by the person: listed
+   *  after their own installs (an install of the same id overrides it), `source: "bundled"`,
+   *  cannot be removed, only disabled. */
+  bundled?: boolean;
+  /** Turned off (config.json `disabled`): kept in the list for the Views page, but off the
+   *  rail, and /t/<id> says so instead of mounting it. */
+  disabled?: boolean;
   /** Why this entry cannot be loaded (bad manifest, api too new, …); such a theme is
    *  listed so the problem is visible, but gets no nav entry. */
   error?: string;
@@ -230,6 +237,9 @@ export const THEME_ROUTES = {
   files: "/themes",
   /** POST /api/ui/themes/reload (loopback): re-read manifests */
   reload: "/api/ui/themes/reload",
+  /** POST /api/ui/themes/:id/disable | /enable (loopback): hide a view (a bundled one
+   *  cannot be removed) or show it again → { themes } */
+  toggle: "/api/ui/themes",
 } as const;
 
 export const THEME_ID_RE = /^[a-z][a-z0-9-]{1,40}$/;

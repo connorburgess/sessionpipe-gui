@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // A history router: pushState, no hash. `useRoute()` gives the parsed location; `navigate`
 // and `<Link>` move; the browser's back button works because we listen to popstate.
-import { type CSSProperties, type MouseEvent, type ReactNode, useSyncExternalStore } from "react";
+import { type CSSProperties, type MouseEvent, type ReactNode, useMemo, useSyncExternalStore } from "react";
 
 export type Route =
   | { name: "board" }
@@ -13,6 +13,8 @@ export type Route =
   | { name: "setup" }
   | { name: "themes" }
   | { name: "review" }
+  | { name: "settings" }
+  | { name: "shortcuts" }
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
   | { name: "add-device" }
@@ -42,6 +44,8 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/setup") return { name: "setup" };
   if (path === "/themes") return { name: "themes" };
   if (path === "/review") return { name: "review" };
+  if (path === "/settings") return { name: "settings" };
+  if (path === "/shortcuts") return { name: "shortcuts" };
   if (path === "/add-device") return { name: "add-device" };
   const t = /^\/t\/([^/]+)\/?$/.exec(path);
   if (t?.[1]) return { name: "theme", id: decodeURIComponent(t[1]) };
@@ -54,9 +58,10 @@ export function parseRoute(pathWithSearch: string): Route {
   return { name: "missing", path };
 }
 
+/** The parsed location; the same object while the URL stays, so effects keyed on it stay put. */
 export function useRoute(): Route {
   const p = useSyncExternalStore(subscribe, current, current);
-  return parseRoute(p);
+  return useMemo(() => parseRoute(p), [p]);
 }
 
 export function usePath(): string {
@@ -85,11 +90,19 @@ function keepParams(to: string): string {
 }
 const keepMock = keepParams;
 
+/** Pages this app pushed since it loaded; 0 means the page was opened by its URL, so there
+ *  is nothing of ours behind it (a dialog closing then goes to its fallback, not away). */
+let pushed = 0;
+export const hasInAppHistory = (): boolean => pushed > 0;
+
 export function navigate(to: string, opts: { replace?: boolean } = {}) {
   const target = keepParams(to);
   if (target === current()) return;
   if (opts.replace) history.replaceState(null, "", target);
-  else history.pushState(null, "", target);
+  else {
+    history.pushState(null, "", target);
+    pushed++;
+  }
   emit();
 }
 
@@ -136,6 +149,7 @@ export function Link({
   className,
   title,
   modClick,
+  plainClick,
   ...rest
 }: {
   to: string;
@@ -144,12 +158,17 @@ export function Link({
   title?: string;
   "aria-current"?: "page" | undefined;
   "data-cursor"?: string;
+  /** Marks the item a list's roving tabindex walks (lib/keys.ts useListNav). */
+  "data-nav-item"?: string;
   "aria-label"?: string;
   style?: CSSProperties;
   tabIndex?: number;
   /** Shift- or Alt-click: open beside (the side panel); ⌘/ctrl-click: beside, as a
    *  background tab. Plain clicks navigate. */
   modClick?: (opts: { background: boolean }) => void;
+  /** When set, a plain click runs this instead of navigating (the href stays, so the
+   *  browser's own open-in-new-tab and a modifier click work as before). */
+  plainClick?: () => void;
 }) {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.defaultPrevented || e.button !== 0) return;
@@ -166,7 +185,8 @@ export function Link({
       return;
     }
     e.preventDefault();
-    navigate(to);
+    if (plainClick) plainClick();
+    else navigate(to);
   };
   return (
     <a href={keepMock(to)} onClick={onClick} className={className} title={title} {...rest}>

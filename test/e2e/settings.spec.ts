@@ -1,32 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// Quick settings: the popover on the rail switches the color theme (tokens on :root and
-// the scheme it forces) and the text size (the root font-size), and both survive a reload.
-import { expect, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+// Settings: the appearance popover on the rail (skin, text size) and the settings dialog
+// at /settings (the mode, the app-wide tier lens), each remembered per device.
+import { expect, type Page, test } from "@playwright/test";
+import { openBoard, openPage } from "./helpers.js";
 
 test.describe("quick settings", () => {
-  test("color theme and text size apply, and persist across a reload", async ({ page }) => {
+  test("skin and text size apply, and persist across a reload", async ({ page }) => {
     await openBoard(page);
     const trigger = page.locator("nav.rail button[aria-label='Quick settings']");
     await trigger.click();
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     await expect(pop).toBeVisible();
-    // Built-ins first, in order, Default on.
-    await expect(pop.locator(".qs-theme")).toHaveText([/Default/, /Paper/, /Graphite/, /Ink/, /Sepia/]);
-    await expect(pop.locator("[data-color-theme='default']")).toHaveAttribute("aria-pressed", "true");
+    // Built-ins first, in order, Spacesheep on.
+    await expect(pop.locator(".qs-theme[data-skin-source='builtin']")).toHaveText([
+      /Spacesheep/,
+      /Plain/,
+      /Paper/,
+      /Graphite/,
+      /Ink/,
+      /Sepia/,
+    ]);
+    await expect(pop.locator("[data-skin='spacesheep']")).toHaveAttribute("aria-pressed", "true");
 
-    await pop.locator("[data-color-theme='paper']").click();
+    await pop.locator("[data-skin='paper']").click();
     const root = page.locator("html");
     await expect(root).toHaveAttribute("data-theme", "light");
-    await expect(root).toHaveAttribute("data-color-theme", "paper");
+    await expect(root).toHaveAttribute("data-skin", "paper");
     const bg = await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"));
     expect(bg).toBe("oklch(0.968 0.012 80)");
     // The body really paints with it (the token is used, not just set).
     const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     expect(bodyBg).toMatch(/^(oklch|color|rgb)/);
-    // Appearance is the color theme's while one is on.
-    await expect(pop.locator("fieldset.seg").first()).toHaveAttribute("disabled", "");
+    // Appearance is the skin's while a single-scheme one is on.
+    const appearance = pop.locator("fieldset.seg", { has: page.locator("legend", { hasText: "Appearance" }) });
+    await expect(appearance).toHaveJSProperty("disabled", true);
 
     const before = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
     // The radios are visually hidden inside their labels; click the label, as a person does.
@@ -37,7 +45,7 @@ test.describe("quick settings", () => {
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(root).toHaveAttribute("data-theme", "light");
-    await expect(root).toHaveAttribute("data-color-theme", "paper");
+    await expect(root).toHaveAttribute("data-skin", "paper");
     expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe(
       "oklch(0.968 0.012 80)",
     );
@@ -45,24 +53,201 @@ test.describe("quick settings", () => {
       (await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))) / before,
     ).toBeCloseTo(1.1, 2);
 
-    // Back to Default clears the tokens and frees the appearance; Esc closes the popover.
+    // Plain clears the tokens and frees the appearance; Esc closes the popover.
     await trigger.click();
-    await pop.locator("[data-color-theme='default']").click();
-    await expect(root).not.toHaveAttribute("data-color-theme", /./);
+    await pop.locator("[data-skin='plain']").click();
+    await expect(root).toHaveAttribute("data-skin", "plain");
     expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe("");
-    await expect(pop.locator("fieldset.seg").first()).not.toHaveAttribute("disabled", /.*/);
+    await expect(appearance).toHaveJSProperty("disabled", false);
     await pop.locator("label.seg-opt", { hasText: /^A$/ }).click();
+    await pop.locator("[data-skin='spacesheep']").click();
     await page.keyboard.press("Escape");
     await expect(pop).toHaveCount(0);
   });
 
-  test("custom color themes from the state dir are listed after the built-ins", async ({ page, request }) => {
-    const { themes } = (await (await request.get("/api/ui/color-themes")).json()) as { themes: { id: string }[] };
+  test("every skin the server lists is a row: built-ins, then the installed ones", async ({ page, request }) => {
+    const { skins } = (await (await request.get("/api/ui/skins")).json()) as { skins: { id: string }[] };
     await openBoard(page);
     await page.locator("nav.rail button[aria-label='Quick settings']").click();
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     const rows = pop.locator(".qs-theme");
-    await expect(rows).toHaveCount(5 + themes.length);
-    for (const t of themes) await expect(pop.locator(`[data-color-theme='${t.id}']`)).toBeVisible();
+    await expect(rows).toHaveCount(skins.length);
+    for (const s of skins) await expect(pop.locator(`[data-skin='${s.id}']`)).toBeVisible();
+  });
+
+  test("the popover ends in a row to all settings", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("nav.rail button[aria-label='Quick settings']").click();
+    await page.getByRole("dialog", { name: "Quick settings" }).locator("[data-nav='all-settings']").click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Quick settings" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/settings$/);
+  });
+});
+
+const dialog = (page: Page) => page.getByRole("dialog", { name: "Settings", exact: true });
+const mode = (page: Page, which: "Simple" | "Advanced") =>
+  dialog(page)
+    .locator("fieldset.seg", { has: page.locator("legend", { hasText: "Mode" }) })
+    .locator("label.seg-opt", {
+      hasText: which,
+    });
+
+test.describe("a device that has not chosen", () => {
+  // No stored settings at all: Simple is the default; the dialog's General row says so.
+  test.use({ storageState: { cookies: [], origins: [] } });
+  test("starts in Simple mode, with the switch to Advanced one line away", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.setup.seen", "1"));
+    await openBoard(page);
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
+    await openPage(page, "/settings");
+    await expect(dialog(page).locator(".settings-row").first()).toContainText("Simple mode");
+    await expect(dialog(page).locator(".settings-row").first()).toContainText("Switch to Advanced");
+    await mode(page, "Advanced").click();
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
+    await page.reload();
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
+  });
+});
+
+test.describe("settings dialog", () => {
+  test("opens from the gear and at /settings, with its sections", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("nav.rail a[aria-label='Settings']").click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("General");
+    for (const s of ["Tier lens", "Notifications", "Keyboard", "Views, skins & plugins", "Data", "About"]) {
+      await dialog(page).getByRole("tab", { name: s }).click();
+      await expect(dialog(page).getByRole("tabpanel")).toBeVisible();
+    }
+    // Data knows the receiver's storage; About its version.
+    await dialog(page).getByRole("tab", { name: "Data" }).click();
+    await expect(dialog(page).locator("[data-storage]")).toHaveText(/\d/);
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    // Straight to a section by URL.
+    await openPage(page, "/settings?section=data");
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
+  });
+
+  test("Simple mode hides Feed and Review from the rail and the card footers, and persists", async ({ page }) => {
+    await openBoard(page);
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
+    await expect(page.locator("article.card .card-foot").first()).toBeVisible();
+    await openPage(page, "/settings");
+    await mode(page, "Simple").click();
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
+    await expect(page.locator("nav.rail a[data-nav='review']")).toHaveCount(0);
+    await expect(page.locator("nav.rail a[data-nav='inbox']")).toBeVisible();
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
+    // The lens chip is gone with it.
+    await expect(page.locator(".lens-chip")).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
+    // Feed is still a page (⌘K and the URL reach it).
+    await openPage(page, "/feed");
+    await expect(page.locator(".page.feed")).toBeVisible();
+
+    await openPage(page, "/settings");
+    await mode(page, "Advanced").click();
+    await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
+  });
+
+  test("the lens chip cycles; at lens 1 the board hides snippets and says so", async ({ page }) => {
+    await openBoard(page);
+    const chip = page.locator(".lens-chip-btn");
+    await expect(chip).toHaveText("lens · all");
+    await expect(page.locator("article.card .card-text").first()).toBeVisible();
+    await chip.click();
+    await expect(chip).toHaveText("lens · 0");
+    await chip.click();
+    await expect(chip).toHaveText("lens · 1");
+    await expect(page.locator("article.card .card-text")).toHaveCount(0);
+    const note = page.locator("[data-lens-note]");
+    await expect(note).toHaveText(/^tier 1 lens · \d+ hidden/);
+    // `l` cycles too.
+    await page.keyboard.press("l");
+    await expect(chip).toHaveText("lens · 2");
+    await expect(page.locator("article.card .card-text").first()).toBeVisible();
+    // The reset on the line brings everything back.
+    await chip.click();
+    await chip.click();
+    await expect(chip).toHaveText("lens · all");
+  });
+
+  test("the session page's lens and the board's chip stay in sync", async ({ page }) => {
+    await openBoard(page);
+    const chip = page.locator(".lens-chip-btn");
+    await chip.click();
+    await chip.click();
+    await expect(chip).toHaveText("lens · 1");
+    await page.locator("article.card a.card-link").first().click();
+    await expect(page.locator(".page.session")).toBeVisible();
+    // A session page has the full control instead of the chip.
+    await expect(chip).toHaveCount(0);
+    const seg = page.locator(".lens fieldset.seg");
+    await expect(seg.locator(".seg-on")).toHaveText("1");
+    await expect(page.locator(".lens-hint")).toContainText("actions");
+    await seg.locator("label.seg-opt", { hasText: /^2$/ }).click();
+    await page.goBack();
+    await expect(chip).toHaveText("lens · 2");
+    // Picked from the settings section as well.
+    await openPage(page, "/settings?section=lens");
+    await dialog(page).locator("label.seg-opt", { hasText: /^all$/ }).click();
+    await page.keyboard.press("Escape");
+    await expect(chip).toHaveText("lens · all");
+  });
+
+  test("a view route has no lens chip and nothing covers the view's own controls", async ({ page }) => {
+    await openPage(page, "/t/e2e-counter");
+    await expect(page.locator(".lens-chip")).toHaveCount(0);
+    const button = page.locator("[data-theme-id='e2e-counter'] button").first();
+    await expect(button).toBeVisible();
+    expect(
+      await button.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2) === el;
+      }),
+    ).toBe(true);
+  });
+
+  test("an unknown path shows the board with a quiet note; /settings opens over the split panel", async ({ page }) => {
+    await openPage(page, "/nothing-here");
+    await expect(page.locator("[data-missing]")).toContainText("No page at /nothing-here");
+    await expect(page.locator("section.group").first()).toBeVisible();
+    const href = (await page.locator("article.card a.card-link").first().getAttribute("href"))!;
+    const key = href.replace(/^\/s\//, "").replace("/", ":");
+    await openPage(page, `/settings?section=notifications&s=${encodeURIComponent(key)}`);
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Notifications");
+    await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/^[^?]*\/\?s=/);
+  });
+
+  test("Simple mode shows a session as a chat", async ({ page }) => {
+    await openPage(page, "/settings");
+    await mode(page, "Simple").click();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("section.group").first()).toBeVisible();
+    await page.locator("article.card a.card-link").first().click();
+    const view = page.locator(".page.session");
+    await expect(view).toHaveAttribute("data-ui", "simple");
+    await expect(view.locator(".sess-counts")).toHaveCount(0);
+    await expect(view.locator(".lens")).toHaveCount(0);
+    await expect(view.locator("ol.timeline--chat")).toBeVisible();
+    expect(await view.locator(".turn--chat").count()).toBeGreaterThan(0);
+    await expect(view.locator(".ctl--chat textarea")).toHaveAttribute("placeholder", "Message this session…");
+    await expect(view.locator(".ctl-context")).toContainText("Add it");
+    await openPage(page, "/settings");
+    await mode(page, "Advanced").click();
   });
 });

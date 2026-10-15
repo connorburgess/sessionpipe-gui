@@ -13,6 +13,24 @@ interface Info {
   sources: { demo: boolean };
 }
 
+test.describe("connect keeps its scroll", () => {
+  test.use({ viewport: { width: 1100, height: 600 } });
+  test("scrolled to the bottom, the page stays put through eight seconds of live events", async ({ page, request }) => {
+    await openPage(page, "/connect");
+    await page.waitForLoadState("networkidle");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(300);
+    const y = await page.evaluate(() => window.scrollY);
+    expect(y).toBeGreaterThan(200);
+    // A stream event lands meanwhile (the demo keeps them coming; one more for good measure).
+    const info = (await (await request.get(INFO)).json()) as Info;
+    await request.get(INFO, { headers: { accept: "application/json" } });
+    expect(info.sinkToken.length).toBeGreaterThan(0);
+    await page.waitForTimeout(8000);
+    expect(await page.evaluate(() => window.scrollY)).toBe(y);
+  });
+});
+
 test.describe("machines", () => {
   test("lists both demo machines with harness versions and the pair command", async ({ page, request }) => {
     const info = (await (await request.get(INFO)).json()) as Info;

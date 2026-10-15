@@ -68,6 +68,9 @@ test.describe("auth from a non-loopback address", () => {
       // Navigating by URL again still works: the cookie carries the session.
       await page.goto("/connect");
       await expect(page.locator(".sect--phone")).toBeVisible();
+      // A fresh context has not chosen a mode, so it is in Simple: the token block is behind "Advanced".
+      const fold = page.locator("[data-connect-advanced]");
+      if (await fold.isVisible()) await fold.click();
       await expect(page.getByRole("button", { name: "Rotate" })).toBeDisabled();
     } finally {
       await ctx.close();

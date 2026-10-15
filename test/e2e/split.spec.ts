@@ -3,8 +3,8 @@
 // The side panel: a session open beside the page. Shift-click on a board card opens it
 // (URL `?s=`, the page shrinks), reload keeps it, Esc closes it, the divider resizes it,
 // a theme opens it through api.openSession({ split: true }); on a phone it is a sheet.
-import { expect, type Page, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -20,6 +20,46 @@ async function openBeside(page: Page): Promise<string> {
   await expect(panel(page).locator(".panel-title")).toHaveText(title);
   await expect(page).toHaveURL(/[?&]s=[^&]+(:|%3A)/);
   return title;
+}
+
+/** One tier-3 session with everything that once widened the panel: a long machine, repo,
+ *  branch and model, a long tool error, a reply with a wide code block and a table. */
+async function postLongSession(request: APIRequestContext): Promise<string> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const b = tier1Batch({ title: "A long session for the narrow panel", machine: "e2e-box-with-a-long-name" });
+  const wide = "x".repeat(60);
+  for (const e of b.events) {
+    e.tier = 3;
+    Object.assign(e.session as Record<string, unknown>, {
+      repo: `github.com/e2e/${wide}`,
+      branch: `feature/${wide}`,
+      model: `model-${wide}`,
+    });
+    const d = e.data as Record<string, unknown>;
+    if (e.type === "tool.ended") Object.assign(d, { ok: false, error: `Exit code 1 ${wide} ${wide} ${wide}` });
+  }
+  const end = b.events[b.events.length - 1]!;
+  const turnId = (end.data as Record<string, unknown>).turn_id;
+  const session = { ...(end.session as Record<string, unknown>), seq: 5 };
+  b.events.splice(4, 0, {
+    ...end,
+    id: `${(end.id as string).slice(0, 10)}ZZZZZZZZZZZZZZZZ`,
+    type: "turn.transcript",
+    session,
+    data: {
+      turn: 1,
+      turn_id: turnId,
+      user: `A prompt ${wide}`,
+      assistant: `Reply.\n\n\`\`\`ts\nconst a = "${wide}${wide}";\n\`\`\`\n\n| a | b |\n|---|---|\n| https://example.com/${wide}/${wide} | c |`,
+    },
+  });
+  (end.session as Record<string, unknown>).seq = 6;
+  const res = await request.post(EVENTS, {
+    headers: { authorization: `Bearer ${sinkToken}` },
+    data: { events: b.events },
+  });
+  expect(res.status()).toBe(202);
+  return `${b.harness}:${b.sessionId}`;
 }
 
 test.describe("split panel", () => {
@@ -94,6 +134,34 @@ test.describe("split panel", () => {
       await expect(page).toHaveURL((u) => u.pathname + u.search === href);
       await expect(page.locator("h1.sess-title")).toBeVisible();
       await expect(panel(page)).not.toHaveClass(/panel--open/);
+    });
+
+    test("nothing scrolls sideways in the panel at 420, 520 and 640, nor the page at 768", async ({
+      page,
+      request,
+    }) => {
+      const key = await postLongSession(request);
+      for (const width of [420, 520, 640]) {
+        await page.addInitScript((w) => localStorage.setItem("sessionpipe-gui.splitWidth", String(w)), width);
+        await page.goto(`/?s=${encodeURIComponent(key)}`);
+        await live(page);
+        const body = panel(page).locator(".panel-body:not(.panel-body--off)");
+        await expect(body.locator("ol.timeline li.turn").first()).toBeVisible();
+        await body.locator(".tool--x summary").first().click();
+        expect(await body.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+        expect(await page.locator("main.main").evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(
+          0,
+        );
+      }
+      await page.setViewportSize({ width: 768, height: 900 });
+      await page.goto(`/s/${key.replace(":", "/")}`);
+      await live(page);
+      await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();
+      await page.locator(".tool--x summary").first().click();
+      expect(await page.locator("main.main").evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      ).toBe(0);
     });
 
     test("a theme opens the panel through api.openSession({ split: true, from })", async ({ page }) => {

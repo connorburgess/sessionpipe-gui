@@ -2,23 +2,34 @@
 // One session's body, used by the Session page and by the side panel: the sticky facts
 // header, the timeline grouped by turn (newest page first, older pages on demand, the
 // stream appending), the tier lens, Follow, Forget and the control strip. The page
-// scrolls the window; the panel scrolls its own element (`scrollRef`).
+// scrolls the window; the panel scrolls its own element (`scrollRef`). In Simple mode
+// (lib/settings.ts) the same view is a chat: the person's prompts as bubbles on the
+// right, the assistant's replies as cards on the left, the tools of a turn folded into
+// one line, a composer at the bottom. Replies render as markdown in both modes.
 import type { SessionSummary, StoredEvent, Tier } from "@shared/api";
 import { sessionKey } from "@shared/api";
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PromptBody } from "../control/Attachments";
 import { SessionControl } from "../control/SessionControl";
-import { useAppState, useStore } from "../data/hooks";
-import { ATTENTION_LABEL, eventSummary, modelShort, repoBranch, sessionTitle } from "../lib/format";
+import { useMachinesMap, useSession, useStore } from "../data/hooks";
+import { useFocusTrap } from "../lib/focus";
+import { ATTENTION_LABEL, eventSummary, harnessMark, modelShort, repoBranch, sessionTitle } from "../lib/format";
 import { back, Link, navigate, sessionPath } from "../lib/router";
+import { setTierLens, useAppSettings, useLens } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
 import { Chip, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateBadge, TierBadge } from "./bits";
+import { Markdown } from "./Markdown";
 import { FlagLine, plural } from "./SessionCard";
 
 /** The newest page a session opens on, and the size of each older page. Both slim: the
  *  full event is fetched only when a row is expanded (`fill`). */
 const TAIL = 100;
 const OLDER = 200;
+/** While following a live session, rows past this many are let go from the top (they
+ *  are one "Older turns" click away), so a tab left open for hours stays small. */
+const LIVE_CAP = TAIL + 2 * OLDER;
 /** Characters of each tool input/output or transcript kept in a list page. */
 const LIST_PREVIEW = 400;
 
@@ -97,21 +108,31 @@ export interface SessionViewProps {
 export function SessionView({ harness, id, mode, scrollRef, onSession, onForgotten }: SessionViewProps) {
   const store = useStore();
   const key = sessionKey(harness, id);
-  const live = useAppState().sessions.get(key);
-  const machines = useAppState().machines;
+  const live = useSession(key);
+  const machines = useMachinesMap();
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const [summary, setSummary] = useState<SessionSummary | undefined>();
   const [children, setChildren] = useState<SessionSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [lens, setLens] = useState<Tier>(3);
+  // The tier lens is the app's (Settings › Tier lens, the chip, `l`); this control reads
+  // and writes it. "all" is tier 3 here. Simple mode: the chat, everything shown.
+  const lensSetting = useLens();
+  const lens: Tier = lensSetting ?? 3;
+  const setLens = (t: Tier) => setTierLens(t);
+  const { mode: uiMode, confirmForget } = useAppSettings();
+  const chat = uiMode === "simple";
   const [follow, setFollow] = useState(true);
+  const followRef = useRef(follow);
+  followRef.current = follow;
   const [confirm, setConfirm] = useState(false);
   const [forgetting, setForgetting] = useState(false);
   const lastSeq = useRef(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLSpanElement>(null);
+  useFocusTrap(confirmRef, confirm, { onClose: () => setConfirm(false), initial: ".btn--danger" });
 
   const [hasOlder, setHasOlder] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
@@ -262,9 +283,14 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       if (s.key !== key) return;
       setEvents((prev) => {
         if (prev.some((p) => p.session.seq === e.session.seq)) return prev;
-        const next = [...prev, e];
+        let next = [...prev, e];
         if (e.session.seq < lastSeq.current) next.sort((a, b) => a.session.seq - b.session.seq);
         lastSeq.current = Math.max(lastSeq.current, e.session.seq);
+        if (followRef.current && next.length > LIVE_CAP) {
+          next = next.slice(next.length - LIVE_CAP);
+          firstSeq.current = next[0]!.session.seq;
+          setHasOlder(true);
+        }
         return next;
       });
       setTailSeq(e.session.seq);
@@ -273,11 +299,6 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   }, [store, key, loading]);
 
   const s = live ?? summary;
-  useEffect(() => {
-    if (s) setLens((l) => (l === 3 && s.maxTier < 3 ? s.maxTier : l));
-    // only when the session first arrives
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s?.key]);
   useEffect(() => {
     if (s) onSession?.(s);
   }, [s, onSession]);
@@ -339,6 +360,48 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     }
   }, [store, harness, id, key, onForgotten]);
 
+  // The session keys (lib/shortcuts.ts). A view in the panel answers only while it is the
+  // active tab; the page's view wins over the panel's unless focus is inside the panel.
+  const inert = () => !rootRef.current || !!rootRef.current.closest(".panel-body--off") || !s;
+  const click = (sel: string) => {
+    if (inert()) return false;
+    const el = rootRef.current?.querySelector<HTMLButtonElement>(sel);
+    if (!el || el.disabled) return false;
+    el.click();
+    return true;
+  };
+  const keyOpts = { within: rootRef, priority: mode === "page" ? 1 : 0 };
+  useShortcut("session.allow", () => click(".ctl .btn--allow:not(:disabled)"), keyOpts);
+  useShortcut("session.deny", () => click(".ctl .btn--deny:not(:disabled)"), keyOpts);
+  useShortcut(
+    "session.cancel",
+    () => {
+      if (inert()) return false;
+      const el = rootRef.current?.querySelector<HTMLButtonElement>(".ctl-cancel:not(:disabled)");
+      if (!el) return false;
+      if (window.confirm("Cancel the running turn?")) el.click();
+    },
+    keyOpts,
+  );
+  useShortcut(
+    "session.prompt",
+    () => {
+      if (inert()) return false;
+      const ta = rootRef.current?.querySelector<HTMLTextAreaElement>(".ctl textarea:not(:disabled)");
+      if (!ta) return false;
+      ta.focus();
+      ta.scrollIntoView({ block: "nearest" });
+    },
+    keyOpts,
+  );
+  useShortcut("session.follow", () => (inert() || !isLive ? false : setFollow((f) => !f)), keyOpts);
+  useShortcut(
+    "session.openPage",
+    () => (inert() || mode === "page" ? false : navigate(sessionPath(harness, id))),
+    keyOpts,
+  );
+  useShortcut("session.older", () => (inert() || !hasOlder || olderBusy ? false : void loadOlder()), keyOpts);
+
   if (!s && loading) {
     return (
       <div className="page">
@@ -362,8 +425,12 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   const kids = children.length ? children : childrenFromStore(store, key);
 
   return (
-    <div className={`page session ${mode === "panel" ? "session--panel" : ""}`} ref={rootRef}>
-      <header className="sess-head">
+    <div
+      className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""}`}
+      ref={rootRef}
+      data-ui={chat ? "simple" : "advanced"}
+    >
+      <header className={`sess-head ${chat ? "sess-head--chat" : ""}`}>
         {mode === "page" && (
           <div className="sess-head-row">
             <button type="button" className="back" onClick={() => back("/")} aria-label="Back">
@@ -372,59 +439,78 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             <HarnessGlyph name={s.harness} />
             <h1 className="sess-title">{sessionTitle(s)}</h1>
             <StateBadge state={s.state} since={s.stateSince} />
+            {chat && (
+              <span className="sess-where ellipsis">
+                {[s.machine, repoBranch(s) || s.cwd].filter(Boolean).join(" · ")}
+              </span>
+            )}
           </div>
         )}
-        <FlagLine flags={s.flags} className="sess-flags" />
-        <div className="sess-facts">
-          {s.machine && <Chip kind="machine">{s.machine}</Chip>}
-          {repoBranch(s) && <span className="mono sess-repo">{repoBranch(s)}</span>}
-          {s.cwd && !s.repo && <span className="mono sess-repo">{s.cwd}</span>}
-          {s.model && <Chip kind="model">{modelShort(s.model)}</Chip>}
-          <TierBadge tier={s.maxTier} />
-          {parent && (
-            <Link to={sessionPath(s.harness, s.parentId!)} className="chip chip--plain">
-              ↰ parent session
-            </Link>
-          )}
-          {s.url && (
-            <a href={s.url} target="_blank" rel="noreferrer noopener" className="chip chip--link">
-              open in {s.harness === "claude-code" ? "claude.ai" : "harness"} ↗
-            </a>
-          )}
-        </div>
-        <div className="sess-counts num">
-          <span>
-            started <Since iso={s.startedAt} coarse /> ago
-          </span>
-          <span>{plural(s.counts.turns, "turn")}</span>
-          <span>{plural(s.counts.tools, "tool")}</span>
-          {s.counts.toolErrors > 0 && <span className="is-err">{plural(s.counts.toolErrors, "error")}</span>}
-          {s.counts.filesChanged > 0 && <span>{plural(s.counts.filesChanged, "file")}</span>}
-          {s.counts.subagents > 0 && <span>{plural(s.counts.subagents, "subagent")}</span>}
-          {s.counts.compactions > 0 && <span>{plural(s.counts.compactions, "compaction")}</span>}
-          <span className="sess-counts-ev">{total} events</span>
-        </div>
+        {chat && mode === "panel" && (
+          <div className="sess-facts">
+            {s.machine && <Chip kind="machine">{s.machine}</Chip>}
+            {repoBranch(s) && <span className="mono sess-repo">{repoBranch(s)}</span>}
+          </div>
+        )}
+        {!chat && <FlagLine flags={s.flags} className="sess-flags" />}
+        {!chat && (
+          <div className="sess-facts">
+            {s.machine && <Chip kind="machine">{s.machine}</Chip>}
+            {repoBranch(s) && <span className="mono sess-repo">{repoBranch(s)}</span>}
+            {s.cwd && !s.repo && <span className="mono sess-repo">{s.cwd}</span>}
+            {s.model && <Chip kind="model">{modelShort(s.model)}</Chip>}
+            <TierBadge tier={s.maxTier} />
+            {parent && (
+              <Link to={sessionPath(s.harness, s.parentId!)} className="chip chip--plain">
+                ↰ parent session
+              </Link>
+            )}
+            {s.url && (
+              <a href={s.url} target="_blank" rel="noreferrer noopener" className="chip chip--link">
+                open in {s.harness === "claude-code" ? "claude.ai" : "harness"} ↗
+              </a>
+            )}
+          </div>
+        )}
+        {!chat && (
+          <div className="sess-counts num">
+            <span>
+              started <Since iso={s.startedAt} coarse /> ago
+            </span>
+            <span>{plural(s.counts.turns, "turn")}</span>
+            <span>{plural(s.counts.tools, "tool")}</span>
+            {s.counts.toolErrors > 0 && <span className="is-err">{plural(s.counts.toolErrors, "error")}</span>}
+            {s.counts.filesChanged > 0 && <span>{plural(s.counts.filesChanged, "file")}</span>}
+            {s.counts.subagents > 0 && <span>{plural(s.counts.subagents, "subagent")}</span>}
+            {s.counts.compactions > 0 && <span>{plural(s.counts.compactions, "compaction")}</span>}
+            <span className="sess-counts-ev">{total} events</span>
+          </div>
+        )}
       </header>
 
-      <div className="sess-tools">
-        <div className="lens">
-          <span className="lens-label">Tier lens</span>
-          <Segmented<Tier>
-            value={lens}
-            onChange={setLens}
-            label="Tier lens"
-            options={([0, 1, 2, 3] as Tier[]).map((t) => ({
-              value: t,
-              label: String(t),
-              title: `${TIER_LABEL[t]}: ${TIER_HINT[t]}`,
-            }))}
-          />
-          <span className="lens-hint">
-            {TIER_LABEL[lens]}
-            {hidden > 0 ? ` · ${hidden} hidden` : ""}
-            {lens > s.maxTier ? ` · arrived at tier ${s.maxTier}` : ""}
-          </span>
-        </div>
+      <div className={`sess-tools ${chat ? "sess-tools--chat" : ""}`}>
+        {chat ? (
+          <span />
+        ) : (
+          <div className="lens">
+            <span className="lens-label">Tier lens</span>
+            <Segmented<Tier>
+              value={lens}
+              onChange={setLens}
+              label="Tier lens"
+              options={([0, 1, 2, 3] as Tier[]).map((t) => ({
+                value: t,
+                label: String(t),
+                title: `${TIER_LABEL[t]}: ${TIER_HINT[t]}`,
+              }))}
+            />
+            <span className="lens-hint">
+              {TIER_LABEL[lens]}
+              {hidden > 0 ? ` · ${hidden} hidden` : ""}
+              {lens > s.maxTier ? ` · arrived at tier ${s.maxTier}` : ""}
+            </span>
+          </div>
+        )}
         <div className="sess-actions">
           {isLive && (
             <button
@@ -437,7 +523,13 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             </button>
           )}
           {confirm ? (
-            <span className="confirm" role="alertdialog" aria-label="Forget this session?">
+            <span
+              className="confirm"
+              role="alertdialog"
+              aria-modal="true"
+              aria-label="Forget this session?"
+              ref={confirmRef}
+            >
               <span>Delete everything held for this session here?</span>
               <button
                 type="button"
@@ -452,8 +544,13 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
               </button>
             </span>
           ) : (
-            <button type="button" className="btn btn--sm btn--ghost" onClick={() => setConfirm(true)}>
-              Forget
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={() => (confirmForget ? setConfirm(true) : void forget())}
+              disabled={forgetting}
+            >
+              {forgetting ? "Forgetting…" : "Forget"}
             </button>
           )}
         </div>
@@ -461,7 +558,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
 
       {error && <p className="page-note is-err">{error}</p>}
 
-      <ol className="timeline">
+      <ol className={`timeline ${chat ? "timeline--chat" : ""}`}>
         {hasOlder && (
           <li className="older">
             <button
@@ -491,14 +588,16 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             kids={kids}
             liveTurn={s.currentTurn ? t === turns[turns.length - 1] : false}
             fill={fill}
+            chat={chat}
+            harness={s.harness}
           />
         ))}
         {!loading && visible.length === 0 && <li className="page-note">No events at this tier.</li>}
       </ol>
       <div ref={endRef} />
 
-      <div className="sess-ctl">
-        <SessionControl session={s} control={control} attentions={s.openAttentions} />
+      <div className={`sess-ctl ${chat ? "sess-ctl--chat" : ""}`}>
+        <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
       </div>
     </div>
   );
@@ -532,6 +631,8 @@ function TurnBlock({
   liveTurn,
   fill,
   label,
+  chat = false,
+  harness = "",
 }: {
   turn: Turn;
   lens: Tier;
@@ -539,8 +640,14 @@ function TurnBlock({
   liveTurn: boolean;
   fill: Fill;
   label: string;
+  /** Simple mode: the turn as a chat exchange (see ChatTurn). */
+  chat?: boolean;
+  harness?: string;
 }) {
-  const now = useNow();
+  // Only a running turn or a running tool shows a moving duration; the other blocks
+  // (most of the page) have nothing to redraw each second.
+  const hasRunningTool = turn.items.some((i) => i.kind === "tool" && !i.ended);
+  const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | Extract<Item, { kind: "event" }>
     | undefined;
@@ -562,6 +669,23 @@ function TurnBlock({
       ? now - startMs
       : undefined;
 
+  if (chat)
+    return (
+      <ChatTurn
+        turn={turn}
+        lens={lens}
+        liveTurn={liveTurn}
+        fill={fill}
+        now={now}
+        harness={harness}
+        prompt={prompt}
+        promptChars={promptChars}
+        transcript={transcript}
+        progress={progress}
+        ended={ended}
+      />
+    );
+
   return (
     <li className={`turn ${liveTurn ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}>
       <header className="turn-head">
@@ -573,7 +697,7 @@ function TurnBlock({
       {turn.start &&
         (prompt ? (
           <blockquote className="prompt">
-            <Redacted text={prompt} />
+            <PromptBody text={prompt} />
           </blockquote>
         ) : (
           <p className="prompt prompt--hidden">
@@ -589,7 +713,7 @@ function TurnBlock({
             if (it !== transcript) return null;
             return (
               <li key={it.key} className="reply" data-seq={e.session.seq}>
-                <Redacted text={String(e.data.assistant ?? "")} />
+                <Markdown text={String(e.data.assistant ?? "")} />
                 <Cut e={e} field="assistant" fill={fill} />
               </li>
             );
@@ -655,12 +779,122 @@ function TurnBlock({
         })}
         {progress && String(progress.e.data.assistant ?? "").trim() && (
           <li className="reply reply--live" data-seq={progress.e.session.seq}>
-            <Redacted text={String(progress.e.data.assistant)} />
+            <Markdown text={String(progress.e.data.assistant)} />
             <span className="caret" aria-hidden="true" />
             <Cut e={progress.e} field="assistant" fill={fill} />
           </li>
         )}
       </ol>
+    </li>
+  );
+}
+
+type EventItem = Extract<Item, { kind: "event" }>;
+type ToolItem = Extract<Item, { kind: "tool" }>;
+
+/** One turn as a chat exchange (Simple mode): "You · 7:05" over the prompt on the right,
+ *  the tools of the turn folded into one muted line ("12 tools · Bash, Read, Edit · 2
+ *  errors", open for the usual rows), any permission prompt as its card, then the reply
+ *  under the harness's mark and name, as markdown. Subagent and compaction markers, turn
+ *  ends and the rest stay out of the way; a turn that ended in error says so. */
+function ChatTurn({
+  turn,
+  lens,
+  liveTurn,
+  fill,
+  now,
+  harness,
+  prompt,
+  promptChars,
+  transcript,
+  progress,
+  ended,
+}: {
+  turn: Turn;
+  lens: Tier;
+  liveTurn: boolean;
+  fill: Fill;
+  now: number;
+  harness: string;
+  prompt: string | undefined;
+  promptChars: number | undefined;
+  transcript: EventItem | undefined;
+  progress: EventItem | undefined;
+  ended: EventItem | undefined;
+}) {
+  const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
+  const attentions = turn.items.filter((i): i is EventItem => i.kind === "event" && i.e.type === "attention.needed");
+  const names = [...new Set(tools.map((t) => String((t.ended ?? t.started)?.data.tool ?? "")))].filter(Boolean);
+  const errors = tools.filter((t) => t.ended && t.ended.data.ok === false).length;
+  const running = tools.find((t) => !t.ended);
+  const endErr = ended && String(ended.e.data.reason) === "error" ? ((ended.e.data.error as string) ?? "error") : null;
+  const reply = transcript ? String(transcript.e.data.assistant ?? "") : "";
+  const live = progress && !transcript ? String(progress.e.data.assistant ?? "") : "";
+  const replyItem = transcript ?? progress;
+  return (
+    <li className={`turn turn--chat ${liveTurn ? "turn--live" : ""}`} data-seq={turn.start?.session.seq}>
+      {turn.start && (
+        <div className="chat-you">
+          <span className="chat-meta">
+            You · <span className="num">{clock(turn.start.time)}</span>
+          </span>
+          {prompt ? (
+            <blockquote className="chat-bubble">
+              <PromptBody text={prompt} />
+            </blockquote>
+          ) : (
+            <p className="chat-bubble chat-bubble--hidden">
+              {promptChars !== undefined ? `a prompt of ${promptChars} chars` : "a prompt"}
+            </p>
+          )}
+        </div>
+      )}
+      {tools.length > 0 && (
+        <details className="chat-tools">
+          <summary className="chat-tools-sum">
+            {running ? <Spinner /> : null}
+            {running ? `running ${String((running.started ?? running.ended)?.data.tool ?? "a tool")} · ` : ""}
+            {plural(tools.length, "tool")}
+            {names.length > 0 ? ` · ${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""}` : ""}
+            {errors > 0 ? ` · ${plural(errors, "error")}` : ""}
+          </summary>
+          <ol className="turn-items">
+            {tools.map((it) => (
+              <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />
+            ))}
+          </ol>
+        </details>
+      )}
+      {attentions.map((it) => {
+        const e = it.e;
+        const kind = String(e.data.kind);
+        return (
+          <div key={it.key} className="marker marker--attn chat-attn" data-seq={e.session.seq}>
+            <span className="marker-time num">{clock(e.time)}</span>
+            <span className="marker-kind">{ATTENTION_LABEL[kind] ?? kind}</span>
+            {typeof e.data.tool === "string" && <code>{e.data.tool}</code>}
+            {typeof e.data.message === "string" && (
+              <span className="marker-msg">
+                <Redacted text={e.data.message} />
+              </span>
+            )}
+          </div>
+        );
+      })}
+      {endErr && <p className="chat-err">turn ended · {endErr}</p>}
+      {replyItem && (reply || live.trim()) && (
+        <div className={`chat-ai ${live && !reply ? "chat-ai--live" : ""}`}>
+          <span className="chat-meta">
+            <HarnessGlyph name={harness} size="sm" />
+            {harnessMark(harness).label}
+          </span>
+          <div className="chat-card" data-seq={replyItem.e.session.seq}>
+            <Markdown text={reply || live} />
+            {!reply && <span className="caret" aria-hidden="true" />}
+            <Cut e={replyItem.e} field="assistant" fill={fill} />
+          </div>
+        </div>
+      )}
     </li>
   );
 }

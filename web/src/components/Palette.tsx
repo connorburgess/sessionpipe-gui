@@ -27,6 +27,8 @@ import { byStateThenRecent, useAppState, useStore } from "../data/hooks";
 import { modelShort, repoShort, sessionTitle } from "../lib/format";
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
+import { useSimple } from "../lib/settings";
+import { matches, useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { ago, useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
@@ -87,19 +89,10 @@ function openDisplaySettings(): void {
   requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-nav='display']")?.click());
 }
 
-/** Global ⌘K / ctrl+K; the dialog while open. */
+/** ⌘K / ctrl+K (the `palette.toggle` action, rebindable on /shortcuts); the dialog while open. */
 export function Palette() {
   const open = usePaletteOpen();
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.key !== "k" && e.key !== "K")) return;
-      e.preventDefault();
-      if (isOpen) closePalette();
-      else openPalette();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useShortcut("palette.toggle", () => (isOpen ? closePalette() : openPalette()));
   return open ? <PaletteDialog /> : null;
 }
 
@@ -173,6 +166,8 @@ function PaletteDialog() {
   const { themes } = useThemes();
   const rp = useRpId();
   const now = useNow();
+  // Simple mode: fewer action rows (a message, open as page); the rest stay in Advanced.
+  const simple = useSimple();
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState<Mode>({ kind: "search" });
@@ -335,7 +330,7 @@ function PaletteDialog() {
           const can = sendable(s);
           if (!can.ok) setNote({ text: can.why, err: true });
         });
-        if (!(isCtx && splitActive === s.key && !onItsPage(s)))
+        if (!simple && !(isCtx && splitActive === s.key && !onItsPage(s)))
           add("Open beside", () => {
             closePalette();
             openSplit(s.key);
@@ -345,7 +340,7 @@ function PaletteDialog() {
             closePalette();
             navigate(sessionPath(s.harness, s.id));
           });
-        add("Forget…", () => setMode({ kind: "forget", session: s }));
+        if (!simple) add("Forget…", () => setMode({ kind: "forget", session: s }));
       }
       if (text) rows.sort((a, b) => b.score - a.score);
       out.push(...rows.slice(0, only === "Actions" ? 40 : 8));
@@ -371,7 +366,13 @@ function PaletteDialog() {
         });
       }
       places.push({ label: "Views", detail: "install, link, remove", run: () => navigate("/themes") });
+      places.push({
+        label: "Shortcuts",
+        detail: "every key, and change any",
+        run: () => navigate("/shortcuts"),
+      });
       places.push({ label: "Display settings", detail: "appearance · theme · text size", run: openDisplaySettings });
+      places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
       const rows: Item[] = [];
       for (const p of places) {
         const m = text ? fuzzyFields(text, [p.label]) : null;
@@ -393,7 +394,7 @@ function PaletteDialog() {
       out.push(...rows);
     }
     return out;
-  }, [q, sessions, now, ctx, ctxKey, splitActive, themes, answered, rp, sendable, act, onItsPage]);
+  }, [q, sessions, now, ctx, ctxKey, splitActive, themes, answered, rp, sendable, act, onItsPage, simple]);
 
   // A new query starts at the top; a shorter list pulls the cursor in.
   useEffect(() => setCursor(0), [q]);
@@ -447,7 +448,9 @@ function PaletteDialog() {
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     // Nothing here reaches the page's own keys (`/`, j/k, Esc on the panel).
     e.stopPropagation();
-    if (e.key === "Escape") {
+    // The palette's own keys come from the keymap too (scope "palette", rebindable).
+    const is = (id: string) => matches(e.nativeEvent, id);
+    if (e.key === "Escape" || is("palette.close")) {
       e.preventDefault();
       if (mode.kind !== "search") {
         setMode({ kind: "search" });
@@ -480,10 +483,10 @@ function PaletteDialog() {
       }
       return;
     }
-    if (e.key === "ArrowDown" || (e.key === "n" && e.ctrlKey)) {
+    if (is("palette.down")) {
       e.preventDefault();
       setCursor((c) => Math.min(items.length - 1, c + 1));
-    } else if (e.key === "ArrowUp" || (e.key === "p" && e.ctrlKey)) {
+    } else if (is("palette.up")) {
       e.preventDefault();
       setCursor((c) => Math.max(0, c - 1));
     } else if (e.key === "Home" && !q) {
@@ -492,10 +495,10 @@ function PaletteDialog() {
     } else if (e.key === "End" && !q) {
       e.preventDefault();
       setCursor(Math.max(0, items.length - 1));
-    } else if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+    } else if ((is("palette.beside") || is("palette.run")) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       const it = items[cursor];
-      if (it && !busy) void it.run({ beside: e.shiftKey });
+      if (it && !busy) void it.run({ beside: is("palette.beside") });
     }
   };
 
