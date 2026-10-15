@@ -3,6 +3,7 @@
 // signs it, sent through POST /api/ui/control/send. The string is written once and the
 // signature covers those exact bytes; the server passes it on byte for byte.
 import type { ControlActivity } from "@shared/api";
+import { noteOwnSend } from "../lib/toasts";
 import { type Assertion, ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce, sha256 } from "./bytes";
 import { dropGrant, obtainGrant, signWithDayKey } from "./daykey";
@@ -89,7 +90,9 @@ export async function sendCommand(
     const signed = await signCommand(rp, cmd, o);
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
-    return controlApi.send(body);
+    const carried = await controlApi.send(body);
+    noteOwnSend(carried.id);
+    return carried;
   };
   try {
     return await attempt();

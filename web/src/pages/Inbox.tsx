@@ -2,18 +2,20 @@
 // The inbox: every open attention across all sessions and machines, newest first, in two
 // groups: the prompts a control answer can reach (Allow / Deny, the same signed send as
 // the session page, control/useSend.ts) and the ones waiting in a terminal. A row click
-// opens its session beside the page; rows leave as the stream clears them.
+// opens its session beside the page; rows leave as the stream clears them. The header
+// holds "Notify me" and a link to the notification sounds in Settings.
 import type { MachineControl } from "@shared/api";
 import { useMemo, useRef } from "react";
 import { Ago, HarnessGlyph, Redacted } from "../components/bits";
-import { preHello } from "../components/ControlStrip";
+import { LensChip, LensNote } from "../components/LensChip";
 import { NotifyToggle } from "../components/NotifyToggle";
-import { useSessionSend } from "../control/useSend";
-import { insecureHint } from "../control/webauthn";
+import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useOpenAttentions } from "../data/hooks";
 import { ATTENTION_LABEL, oneLine, sessionTitle } from "../lib/format";
 import { useListNav } from "../lib/keys";
-import { sessionPath } from "../lib/router";
+import { Link, sessionPath } from "../lib/router";
+import { type Lens, useLens } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 
 export function Inbox() {
@@ -25,6 +27,9 @@ export function Inbox() {
   const hrefs = useMemo(() => ordered.map((r) => sessionPath(r.session.harness, r.session.id)), [ordered]);
   const keys = useMemo(() => ordered.map((r) => r.session.key), [ordered]);
   const { cursor } = useListNav(hrefs, true, keys);
+  // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
+  const lens = useLens();
+  const hiddenByLens = lens === 0 ? rows.filter((r) => r.attention.message || r.attention.tool).length : 0;
 
   if (!snapshotAt)
     return (
@@ -49,6 +54,7 @@ export function Inbox() {
               row={r}
               control={r.session.machine ? machines.get(r.session.machine)?.control : undefined}
               cursor={offset + i === cursor ? cursor : undefined}
+              lens={lens}
             />
           ))}
         </ol>
@@ -68,8 +74,15 @@ export function Inbox() {
                 .filter(Boolean)
                 .join(" · ")}
         </p>
-        <NotifyToggle compact />
+        <div className="inbox-tools">
+          <LensChip />
+          <NotifyToggle compact />
+          <Link to="/settings?section=notifications" className="inbox-link" title="Notification sounds, in Settings">
+            Sounds
+          </Link>
+        </div>
       </div>
+      <LensNote lens={lens} hidden={hiddenByLens} />
       {rows.length === 0 ? (
         <p className="inbox-empty">nothing needs you</p>
       ) : (
@@ -82,8 +95,20 @@ export function Inbox() {
   );
 }
 
-function InboxRow({ row, control, cursor }: { row: OpenAttention; control?: MachineControl; cursor?: number }) {
-  const { session: s, attention: a } = row;
+function InboxRow({
+  row,
+  control,
+  cursor,
+  lens = null,
+}: {
+  row: OpenAttention;
+  control?: MachineControl;
+  cursor?: number;
+  lens?: Lens;
+}) {
+  const { session: s, attention: raw } = row;
+  // Below tier 1 the message and the tool stay on the sending machine.
+  const a = lens === 0 ? { ...raw, message: undefined, tool: undefined } : raw;
   const ref = useRef<HTMLLIElement>(null);
   const open = (background = false) => openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background });
   return (
@@ -98,6 +123,7 @@ function InboxRow({ row, control, cursor }: { row: OpenAttention; control?: Mach
       <button
         type="button"
         className="inbox-main"
+        data-nav-item=""
         onClick={(e) => open(e.metaKey || e.ctrlKey)}
         title="Open the session beside this page"
       >
@@ -122,7 +148,7 @@ function InboxRow({ row, control, cursor }: { row: OpenAttention; control?: Mach
         </span>
       </button>
       {row.answerable ? (
-        <Answer row={row} control={control} />
+        <Answer row={row} control={control} focused={cursor !== undefined} />
       ) : (
         <span className="inbox-note">waiting in the terminal</span>
       )}
@@ -131,46 +157,40 @@ function InboxRow({ row, control, cursor }: { row: OpenAttention; control?: Mach
 }
 
 /** Allow / Deny for one answerable prompt, through the same signed send as the session
- *  page. Disabled with the reason when nothing can go: the machine is not paired, this
- *  page cannot use passkeys, the prompt predates the pairing, or an answer is already out. */
-function Answer({ row, control }: { row: OpenAttention; control?: MachineControl }) {
+ *  page; disabled with the reason when nothing can go (control/useSend.ts answerState). */
+function Answer({
+  row,
+  control,
+  focused = false,
+}: {
+  row: OpenAttention;
+  control?: MachineControl;
+  /** The row under the list cursor: `a` / `d` answer it (lib/shortcuts.ts). */
+  focused?: boolean;
+}) {
   const { session: s, attention: a } = row;
-  const { rp, secure, tap, error, answers, onSend } = useSessionSend(s, control, s.openAttentions);
-  const status = answers[a.attentionId];
-  const early = preHello(a, control);
-  const reason = !control
-    ? `pair ${s.machine ?? "this machine"} to send messages`
-    : !secure
-      ? insecureHint()
-      : early
-        ? "raised before this machine was paired; answer it in its terminal"
-        : status === "closed"
-          ? "answered in the terminal, or expired"
-          : status === "sent"
-            ? `answer sent · waiting for ${s.machine ?? "the machine"}`
-            : tap
-              ? "confirm with your passkey"
-              : null;
-  const off = !control || !secure || !rp || early || !!status;
-  const send = (allow: boolean) =>
-    void onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {});
+  const send = useSessionSend(s, control, s.openAttentions);
+  const { reason, off, status, tag } = answerState(s, a, control, send);
+  const answer = (allow: boolean) =>
+    void send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {});
+  // The inbox row wins over a session open beside the page (priority 2 > the panel's 0).
+  const canKey = focused && !off && status !== "closed";
+  useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
+  useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
   return (
-    <span
-      className="inbox-answer"
-      data-answer={!control ? "unpaired" : !secure ? "blocked" : (status ?? (early ? "pre-hello" : "open"))}
-    >
+    <span className="inbox-answer" data-answer={tag}>
       {status !== "closed" && (
         <>
-          <button type="button" className="btn btn--sm btn--allow" disabled={off} onClick={() => send(true)}>
+          <button type="button" className="btn btn--sm btn--allow" disabled={off} onClick={() => answer(true)}>
             Allow
           </button>
-          <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => send(false)}>
+          <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny
           </button>
         </>
       )}
-      {error ? (
-        <span className="inbox-note inbox-note--err">{error}</span>
+      {send.error ? (
+        <span className="inbox-note inbox-note--err">{send.error}</span>
       ) : reason ? (
         <span className="inbox-note">{reason}</span>
       ) : null}

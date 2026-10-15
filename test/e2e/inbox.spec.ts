@@ -138,7 +138,7 @@ test.describe("inbox", () => {
     await row.locator(".inbox-main").click();
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
     await expect(page.locator("aside.panel .panel-title")).toHaveText(title);
-    await expect(page).toHaveURL(/\/inbox\?.*[?&]s=/);
+    await expect(page).toHaveURL(/\/inbox\?(.*&)?s=/);
   });
 
   test("the title prefix follows the open prompts on every page", async ({ page }) => {
@@ -163,15 +163,18 @@ test.describe("inbox", () => {
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(toggle).toHaveAttribute("aria-checked", "true");
-    // Granted already: turning it on again asks nothing; the quick settings show the same switch.
+    // Granted already: turning it on again asks nothing; the Settings dialog's Notifications
+    // section (where the header's "Sounds" link goes) shows the same switch.
     expect(await page.evaluate(() => window.__permissionRequests)).toBe(0);
-    await page.locator("nav.rail button[aria-label='Quick settings']").click();
-    const qs = page.getByRole("dialog", { name: "Quick settings" }).getByRole("switch", { name: "Notify me" });
-    await expect(qs).toHaveAttribute("aria-checked", "true");
-    await qs.click();
-    await expect(qs).toHaveAttribute("aria-checked", "false");
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await page.locator(".inbox-head").getByRole("link", { name: "Sounds" }).click();
+    await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+    const st = page.locator(".ntf").getByRole("switch", { name: "Notify me" });
+    await expect(st).toHaveAttribute("aria-checked", "true");
+    await st.click();
+    await expect(st).toHaveAttribute("aria-checked", "false");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.notify"))).toBeNull();
+    await openPage(page, "/inbox");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
   test("a blocked permission keeps the switch off and says why", async ({ page }) => {

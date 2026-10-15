@@ -5,14 +5,44 @@
 // attentions have an answer out or were closed by the machine, so no second answer goes.
 import type { Attention, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ControlAction } from "../components/ControlStrip";
+import { type ControlAction, preHello } from "../components/ControlStrip";
 import { ControlError } from "./api";
 import { type CommandFields, sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
-import { passkeysAvailable } from "./webauthn";
+import { insecureHint, passkeysAvailable } from "./webauthn";
 import { sendErrorWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
+
+/** Whether Allow / Deny can go for one prompt right now, and if not (or while an answer
+ *  is out) why, in words: the machine is not paired, this page cannot use passkeys, the
+ *  prompt predates the pairing, or an answer is already out. Shared by the inbox rows
+ *  and the toasts. `tag` is the short state for a data attribute. */
+export function answerState(
+  s: SessionSummary,
+  a: Attention,
+  control: MachineControl | undefined,
+  send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers">,
+): { reason: string | null; off: boolean; status: AnswerStatus | undefined; tag: string } {
+  const status = send.answers[a.attentionId];
+  const early = preHello(a, control);
+  const reason = !control
+    ? `pair ${s.machine ?? "this machine"} to send messages`
+    : !send.secure
+      ? insecureHint()
+      : early
+        ? "raised before this machine was paired; answer it in its terminal"
+        : status === "closed"
+          ? "answered in the terminal, or expired"
+          : status === "sent"
+            ? `answer sent · waiting for ${s.machine ?? "the machine"}`
+            : send.tap
+              ? "confirm with your passkey"
+              : null;
+  const off = !control || !send.secure || !send.rp || early || !!status;
+  const tag = !control ? "unpaired" : !send.secure ? "blocked" : (status ?? (early ? "pre-hello" : "open"));
+  return { reason, off, status, tag };
+}
 
 export interface SessionSend {
   /** The receiver's rp id; null until known. */
