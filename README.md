@@ -19,7 +19,8 @@
 ![The board, live: sessions grouped by state, the one that needs you first](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.gif)
 
 One Node process on your machine is a [sessionpipe receiver](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
-with a face. It reads the sessions Claude Code, Codex, Gemini CLI and the other harnesses
+with a face. It reads the sessions Claude Code, Codex, Gemini CLI, Antigravity, Cursor and
+the other harnesses of the [protocol registry](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/ADAPTERS.md)
 run here, takes events from your other machines over the LAN, and shows all of it as a
 board, an inbox, a chat per session and a few stranger views. Answer a permission prompt
 from the couch; send the next message from the train. Everything stays on the machine
@@ -27,8 +28,9 @@ that runs it.
 
 ## Install
 
-Node 20 or newer. Three ways, one package; Canvas, Office and the Spacesheep skin come
-with it:
+Node 20 or newer. Three ways, one package, and everything official inside it: the
+Canvas and Office views, the Spacesheep Vivid and Paper Serif skins (beside the six
+built-in skins) and the ping-a-human Telegram plugin:
 
 ```sh
 npx github:spacesheep-dev/sessionpipe-gui      # straight from GitHub: builds once on install, then runs
@@ -36,15 +38,17 @@ npm i -g github:spacesheep-dev/sessionpipe-gui # or on the PATH for good: `sessi
 git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd sessionpipe-gui && npm install && npm start
 ```
 
-Canvas and Office are checked in as built views (`bundled/`), so a clone has them without
-the themes repo; `npm run bundle:sync` refreshes that copy from a themes checkout beside
-this one. The npm package (`npx sessionpipe-gui`) follows once published.
+The bundled copies are checked in (`bundled/`), so a clone has them without the themes
+repo; `npm run bundle:sync` refreshes them from a
+[sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes)
+checkout beside this one. The npm package (`npx sessionpipe-gui`) follows once published.
 
-Extras (the other official skins and the ping-a-human Telegram plugin, from npm):
+Nothing to install afterwards: the skins are in the appearance popover, the views on the
+rail, and the plugin under Plugins on the Views page, off until you turn it on:
 
 ```sh
-sessionpipe-gui extras list         # Spacesheep Vivid, Paper Serif, ping-a-human; Canvas and Office marked bundled
-sessionpipe-gui extras add all      # or one: `extras add paper-serif`; the Views page has the same list with buttons
+sessionpipe-gui extras list                  # the catalogue, every entry marked bundled
+sessionpipe-gui plugin enable ping-a-human   # the Telegram plugin runs only once you say so
 ```
 
 `npx sessionpipe-gui` starts the receiver on port 7373 and prints where to open it:
@@ -259,14 +263,17 @@ and installed, linked for development or removed with the same verbs. A **view**
 ES module that draws the board its own way on a page of the GUI, with a `ThemeApi` for
 the live state, control, storage and the keymap. A **skin** is tokens, fonts, radius,
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
-receiver process that reacts to events: notifications, suggested answers. Canvas and
-Office are views bundled into the package (`view disable <id>` hides one, since a bundled
-view cannot be removed); Spacesheep Vivid, Paper Serif and ping-a-human are one
-`sessionpipe-gui extras add <id|all>` away, or a button on the Views page. Anything else:
+receiver process that reacts to events: notifications, suggested answers. The official
+ones ship inside the GUI: Canvas, Office, Spacesheep Vivid, Paper Serif and ping-a-human
+(`sessionpipe-gui extras list`). A bundled extension cannot be removed, only turned off
+(`view|skin|plugin disable <id>`, or the button on the Views page); an install of the same
+id overrides it. ping-a-human starts off and runs only after `plugin enable ping-a-human`
+(or Enable on the Views page), since a plugin may reach out of the machine; its Telegram
+token goes in its settings there. Anything else:
 
 ```sh
 sessionpipe-gui view add   <folder | .tgz | .zip | npm package | git url>
-sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>     # e.g. @sessionpipe-gui/skin-paper-serif
+sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>
 sessionpipe-gui plugin add <folder | .tgz | .zip | npm package | git url>
 ```
 
@@ -303,7 +310,7 @@ protocol's facts, as the spec intends; they are never sent anywhere.
 | | |
 |---|---|
 | `events/<harness>/<session>.jsonl` | One append-only file per session, the full events. An index of summaries and slim events is rebuilt at boot; big strings are read back from disk by byte offset on demand. |
-| `config.json` | The sink token, the UI key, whether TLS mode is on. |
+| `config.json` | The sink token, the UI key, whether TLS mode is on, which extensions are off (`disabled`) and which bundled plugins are on (`enabled`). |
 | `control/` | Paired machines (token hashes) and their queues. |
 | `tls/` | The local CA and the server certificate (`--tls`). |
 | `attachments/` | Images sent from the composer. |
@@ -366,5 +373,5 @@ sessionpipe protocol; it is not part of the sessionpipe project and is not endor
 The protocol is by Michael Makarov and contributors; "sessionpipe" and the sessionpipe
 logo are [marks of Michael Makarov](https://github.com/spacesheep-dev/sessionpipe/blob/main/TRADEMARKS.md).
 The mark in `web/public/brand/` is this project's own ([docs/brand.md](docs/brand.md)).
-Claude Code, Codex and Gemini are trademarks of their owners, named here only to identify
-the software a session runs in.
+Claude Code, Codex, Gemini, Antigravity, Cursor and the other harness names are trademarks
+of their owners, named here only to identify the software a session runs in.

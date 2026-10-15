@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// The curated extras on the Views page: the official views, skins and plugins, each with
-// an Install button that works from the receiver machine (POST /api/ui/extras/:id/install,
-// loopback only) and the one line that does the same from a terminal anywhere.
+// The curated extras on the Views page: the official views, skins and plugins. Every one
+// ships inside the GUI today, so each row says "bundled"; an entry that is not bundled
+// gets an Install button that works from the receiver machine (POST
+// /api/ui/extras/:id/install, loopback only) and the one line that does the same from a
+// terminal anywhere.
 import type { ExtraEntry, ExtrasResponse } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useCallback, useEffect, useState } from "react";
@@ -59,13 +61,14 @@ export function Extras({ loopback }: { loopback: boolean }) {
   };
 
   const todo = (rows ?? []).filter((r) => !r.bundled && !r.installed);
+  const installable = (rows ?? []).some((r) => !r.bundled);
   return (
     <section className="sect" data-extras>
       <header className="sect-head">
         <h2>Extras</h2>
         <p>
-          The official views, skins and plugins. Canvas and Office are already in the package; the rest install from npm
-          with one click here (on the receiver machine) or one line anywhere.
+          The official views, skins and plugins, all inside the GUI already: Canvas and Office on the rail, Spacesheep
+          Vivid and Paper Serif in the appearance popover, ping-a-human under Plugins (off until you enable it).
         </p>
       </header>
       {error && <p className="page-note is-err">{error}</p>}
@@ -95,7 +98,13 @@ export function Extras({ loopback }: { loopback: boolean }) {
                 )}
               </div>
               <div className="extras-row-meta">
-                {r.line} <code>{r.npm}</code>
+                {r.line}
+                {!r.bundled && (
+                  <>
+                    {" "}
+                    <code>{r.npm}</code>
+                  </>
+                )}
               </div>
               {log[r.id] && (
                 <pre className={`extras-log${log[r.id]?.endsWith("\nok") ? "" : " is-err"}`} data-extra-log={r.id}>
@@ -106,23 +115,27 @@ export function Extras({ loopback }: { loopback: boolean }) {
           ))}
         </ul>
       )}
-      <div className="extras-tools">
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={() => void installAll()}
-          disabled={!loopback || busy !== null || todo.length === 0}
-          title={loopback ? "Install every extra that is not there yet" : "Only from the machine running the receiver"}
-          data-extras-install-all
-        >
-          {todo.length === 0 ? "All installed" : `Install all (${todo.length})`}
-        </button>
-        <span className="sect-note">
-          {loopback ? "From a terminal:" : "Buttons work on the receiver machine only. From its terminal:"}
-        </span>
-        <code className="extras-line">{EXTRAS_ALL_LINE}</code>
-        <CopyButton text={EXTRAS_ALL_LINE} label="Copy command" />
-      </div>
+      {installable && (
+        <div className="extras-tools">
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => void installAll()}
+            disabled={!loopback || busy !== null || todo.length === 0}
+            title={
+              loopback ? "Install every extra that is not there yet" : "Only from the machine running the receiver"
+            }
+            data-extras-install-all
+          >
+            {todo.length === 0 ? "All installed" : `Install all (${todo.length})`}
+          </button>
+          <span className="sect-note">
+            {loopback ? "From a terminal:" : "Buttons work on the receiver machine only. From its terminal:"}
+          </span>
+          <code className="extras-line">{EXTRAS_ALL_LINE}</code>
+          <CopyButton text={EXTRAS_ALL_LINE} label="Copy command" />
+        </div>
+      )}
     </section>
   );
 }

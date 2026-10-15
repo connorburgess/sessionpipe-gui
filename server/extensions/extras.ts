@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: platform. Installing from the catalogue (server/extensions/catalog.ts): the
-// same per-kind installers `view|skin|plugin add` use, fed the npm name. Two doors:
-// `sessionpipe-gui extras add <id|all>` (cli.ts) and, for the Views page, GET /api/ui/extras
-// (the catalogue with what is installed) and POST /api/ui/extras/:id/install, loopback
-// only, which streams the installer's lines as plain text and ends with `ok` or `failed`.
+// Owned by: platform. The catalogue (server/extensions/catalog.ts) with what is present,
+// and the installer for an entry that is not bundled: the same per-kind installers
+// `view|skin|plugin add` use, fed the npm name. Two doors: `sessionpipe-gui extras add
+// <id|all>` (cli.ts) and, for the Views page, GET /api/ui/extras (the catalogue with what
+// is installed; a bundled view, skin or plugin counts as installed) and
+// POST /api/ui/extras/:id/install, loopback only, which streams the installer's lines as
+// plain text and ends with `ok` or `failed`, or answers 409 for a bundled entry. Every
+// official extension is bundled today, so the install door stays shut until the packages
+// are published.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { type ExtraEntry, type ExtrasResponse, ROUTES } from "../../shared/api.js";
@@ -13,14 +17,15 @@ import { addSkin } from "../skins/install.js";
 import { addTheme } from "../themes/install.js";
 import { EXTRAS, findExtra } from "./catalog.js";
 import { InstallError, type InstallResult } from "./install.js";
-import { bundledDir } from "./kind.js";
+import { bundledDirs } from "./kind.js";
 
 /** Where each kind is installed: <stateDir>/themes, /skins, /plugins (or the --*-dir overrides). */
 export interface ExtrasDirs {
   themes: string;
   skins: string;
   plugins: string;
-  /** Where the bundled views are; default dist/bundled/views. */
+  /** Where the bundled views are (default dist/bundled/views); the bundled skins and
+   *  plugins are its siblings (`../skins`, `../plugins`). */
   bundled?: string;
 }
 
@@ -38,12 +43,11 @@ export function installExtra(dirs: ExtrasDirs, entry: ExtraEntry): Promise<Insta
   }
 }
 
-/** Whether the entry's folder is there (bundled views count), without validating it. */
+/** Whether the entry's folder is there (a bundled one counts), without validating it. */
 export function extraInstalled(dirs: ExtrasDirs, entry: ExtraEntry): boolean {
   const base = entry.kind === "skin" ? dirs.skins : entry.kind === "plugin" ? dirs.plugins : dirs.themes;
   if (existsSync(path.join(base, entry.id, MANIFEST[entry.kind]))) return true;
-  if (entry.kind !== "view") return false;
-  return existsSync(path.join(dirs.bundled ?? bundledDir("view"), entry.id, MANIFEST.view));
+  return existsSync(path.join(bundledDirs(dirs.bundled)[entry.kind], entry.id, MANIFEST[entry.kind]));
 }
 
 export interface ExtrasRouteDeps {
@@ -53,17 +57,20 @@ export interface ExtrasRouteDeps {
   install?: (dirs: ExtrasDirs, entry: ExtraEntry) => Promise<InstallResult>;
   /** After a successful install: rescan that kind's registry so the page sees it. */
   after?: (kind: ExtraEntry["kind"]) => Promise<void> | void;
+  /** The catalogue; the real one unless a test hands in another. */
+  catalog?: readonly ExtraEntry[];
 }
 
-export function catalogResponse(dirs: ExtrasDirs): ExtrasResponse {
-  return { extras: EXTRAS.map((e) => ({ ...e, installed: extraInstalled(dirs, e) })) };
+export function catalogResponse(dirs: ExtrasDirs, catalog: readonly ExtraEntry[] = EXTRAS): ExtrasResponse {
+  return { extras: catalog.map((e) => ({ ...e, installed: extraInstalled(dirs, e) })) };
 }
 
 /** POST /api/ui/extras/:id/install. Exported so a test can call it with a made-up context. */
 export function installHandler(deps: ExtrasRouteDeps): Handler {
   return async (ctx) => {
     if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
-    const entry = findExtra(ctx.params.id ?? "");
+    const id = ctx.params.id ?? "";
+    const entry = deps.catalog ? deps.catalog.find((e) => e.id === id) : findExtra(id);
     if (!entry) return { status: 404, json: { reason: "not_found" } };
     if (entry.bundled) return { status: 409, json: { reason: "bundled" } };
     ctx.res.writeHead(200, {
@@ -91,7 +98,11 @@ export function registerExtras(router: Router, deps: ExtrasRouteDeps): void {
       deps.uiAuth(ctx) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
   router.get(
     ROUTES.ui.extras,
-    guard(() => ({ status: 200, headers: { "cache-control": "no-store" }, json: catalogResponse(deps.dirs) })),
+    guard(() => ({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: catalogResponse(deps.dirs, deps.catalog),
+    })),
   );
   router.post(`${ROUTES.ui.extras}/:id/install`, guard(installHandler(deps)));
 }

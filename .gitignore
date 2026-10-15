@@ -8,5 +8,5 @@ test-results/
 playwright-report/
 .env
 .env.*
-# the tracked built copy of the bundled views is not a build output
+# the tracked copy of the bundled extensions (views, skins, plugins) is not a build output
 !bundled/**/dist/

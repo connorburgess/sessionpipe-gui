@@ -58,17 +58,12 @@ shows a demo machine; nothing else about the page is changed.
    ```
 
 2. Start two throwaway servers on free ports (never a port someone is running the GUI on;
-   the e2e suite owns 7311 and 7312) against a scratch state dir, with the plugin and the
-   installable skins linked from the themes repo. **Put the Telegram plugin in dry run
-   first**: it reads `~/.config/ping-a-human/config.json`, and a live plugin would message
-   the real chat about demo prompts.
+   the e2e suite owns 7311 and 7312) against a scratch state dir. The skins and the
+   ping-a-human plugin are bundled, and a bundled plugin stays off until enabled, so the
+   demo never messages anyone; leave it off for the run.
 
    ```sh
    S=$(mktemp -d)
-   node dist/cli.js --state "$S" plugin link ../sessionpipe-gui-themes/packages/plugin-ping-a-human
-   node dist/cli.js --state "$S" skin link ../sessionpipe-gui-themes/packages/skin-spacesheep-vivid
-   node dist/cli.js --state "$S" skin link ../sessionpipe-gui-themes/packages/skin-paper-serif
-   mkdir -p "$S/plugins-settings" && echo '{"dryRun": true, "events": []}' > "$S/plugins-settings/ping-a-human.json"
    node dist/cli.js --port 7391 --state "$S" --no-outbox --demo --speed 10 --test-door --quiet &
    node dist/cli.js --port 7392 --state "$S-tls" --no-outbox --tls --rp-id localhost --quiet &
    ```

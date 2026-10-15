@@ -2,17 +2,20 @@
 // Bundles the server to dist/*.js with esbuild. `--watch` rebuilds on change.
 // The web app is built separately by Vite into dist/web (see package.json).
 //
-// Bundled extensions: the views that ship with the GUI (Canvas and Office) are copied
-// into dist/bundled/views/<id>/ from the themes repo's packages, built first with their
-// own `npm run build`. `--bundle-from <path>` names that checkout (default: the sibling
-// ../sessionpipe-gui-themes); when it is absent the step is skipped with a note, so a
-// bare clone still builds. `--no-bundle` (or SPGUI_NO_BUNDLE=1) skips it. A release must
-// not ship without them by accident: `--require-bundle` (what `npm publish` runs through
-// prepublishOnly) fails the build when the checkout is missing or a package's build fails,
-// unless SPGUI_NO_BUNDLE=1 says so on purpose. The themes repo stays the source of truth:
-// nothing is copied into this repo's git, dist/ is ignored.
+// Bundled extensions: every official extension ships with the GUI (the views Canvas and
+// Office, the skins Spacesheep Vivid and Paper Serif, the plugin ping-a-human). Each is
+// copied into dist/bundled/<kind>/<id>/ from the themes repo's packages: built first with
+// its own `npm run build` when it has one (skins have no build), then exactly what its npm
+// tarball would carry (package.json `files`, minus source maps). `--bundle-from <path>`
+// names that checkout (default: the sibling ../sessionpipe-gui-themes); when it is absent
+// the tracked copy in bundled/ is used instead, so a bare clone still ships everything.
+// `--no-bundle` (or SPGUI_NO_BUNDLE=1) skips it. A release must not ship without them by
+// accident: `--require-bundle` (what `npm publish` runs through prepublishOnly) fails the
+// build when neither source is there or a package's build fails, unless SPGUI_NO_BUNDLE=1
+// says so on purpose. The themes repo stays the source of truth: `--sync-bundle` refreshes
+// the tracked bundled/ copy from it; dist/ is ignored.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, context } from "esbuild";
@@ -30,7 +33,7 @@ function missing(msg) {
     return;
   }
   console.error(
-    `bundled extensions: ${msg}\n  a release ships Canvas and Office: clone spacesheep-dev/sessionpipe-gui-themes beside this repo (or --bundle-from <path>) and \`npm ci && npm run build\` there; SPGUI_NO_BUNDLE=1 publishes without them on purpose`,
+    `bundled extensions: ${msg}\n  a release ships Canvas, Office, Spacesheep Vivid, Paper Serif and ping-a-human: clone spacesheep-dev/sessionpipe-gui-themes beside this repo (or --bundle-from <path>) and \`npm ci && npm run build\` there; SPGUI_NO_BUNDLE=1 publishes without them on purpose`,
   );
   process.exit(1);
 }
@@ -57,13 +60,54 @@ const options = {
 const BUNDLED = [
   { kind: "views", pkg: "packages/canvas", manifest: "theme.json" },
   { kind: "views", pkg: "packages/office", manifest: "theme.json" },
+  { kind: "skins", pkg: "packages/skin-spacesheep-vivid", manifest: "skin.json" },
+  { kind: "skins", pkg: "packages/skin-paper-serif", manifest: "skin.json" },
+  { kind: "plugins", pkg: "packages/plugin-ping-a-human", manifest: "plugin.json" },
 ];
 
-/** The tracked copy of the bundled views (`bundled/` at the repo root): what a bare
+/** The tracked copy of the bundled extensions (`bundled/` at the repo root): what a bare
  *  clone ships when the themes repo isn't checked out beside it. `--sync-bundle`
  *  refreshes it from a fresh build of the sibling; commit the result. */
 const tracked = path.join(root, "bundled");
 const syncBundle = argv.includes("--sync-bundle");
+
+/** npm always packs these when present, whatever `files` says. */
+const ALWAYS_PACKED = ["README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "DESIGN.md"];
+
+/** The regular files `files` selects under `pkg`, as relative paths: a folder (every file
+ *  under it), a `dir/*.ext` glob (one level), a plain file. Source maps never make it
+ *  (the one `!dist/**\/*.map` negation the packages use), nor node_modules. */
+function packedFiles(pkg, files) {
+  const picked = new Set();
+  const walk = (rel) => {
+    const abs = path.join(pkg, rel);
+    if (!existsSync(abs)) return;
+    if (statSync(abs).isDirectory()) {
+      for (const name of readdirSync(abs)) if (name !== "node_modules") walk(path.join(rel, name));
+    } else if (!rel.endsWith(".map")) picked.add(rel);
+  };
+  const expand = (pattern) => {
+    const dir = path.dirname(pattern);
+    const base = path.basename(pattern);
+    if (!base.includes("*")) return [pattern];
+    const re = new RegExp(
+      `^${base
+        .split("*")
+        .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*")}$`,
+    );
+    const parent = path.join(pkg, dir);
+    if (!existsSync(parent)) return [];
+    return readdirSync(parent)
+      .filter((n) => re.test(n))
+      .map((n) => path.join(dir, n));
+  };
+  for (const f of [...files, ...ALWAYS_PACKED]) {
+    if (f.startsWith("!")) continue;
+    for (const rel of expand(f)) walk(rel);
+  }
+  return [...picked].sort();
+}
 
 function bundleExtensions() {
   const i = argv.indexOf("--bundle-from");
@@ -89,25 +133,25 @@ function bundleExtensions() {
       missing(`${b.pkg} (no ${b.manifest})`);
       continue;
     }
-    const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: pkg, encoding: "utf8" });
-    if (r.status !== 0) {
-      missing(`${b.pkg} (its build failed)\n${(r.stderr || r.stdout).trim()}`);
-      continue;
+    const pkgJson = JSON.parse(readFileSync(path.join(pkg, "package.json"), "utf8"));
+    // Views and the plugin build to dist/; a skin is files as they are.
+    if (pkgJson.scripts?.build) {
+      const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: pkg, encoding: "utf8" });
+      if (r.status !== 0) {
+        missing(`${b.pkg} (its build failed)\n${(r.stderr || r.stdout).trim()}`);
+        continue;
+      }
     }
     const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
     const dest = path.join(out, b.kind, manifest.id);
     mkdirSync(dest, { recursive: true });
-    cpSync(manifestFile, path.join(dest, b.manifest));
-    // The built files without their source maps: half the weight, and nobody debugs a
-    // bundled view from the npm package (the themes repo has the sources).
-    cpSync(path.join(pkg, "dist"), path.join(dest, "dist"), {
-      recursive: true,
-      dereference: true,
-      filter: (p) => !p.endsWith(".map"),
-    });
-    for (const extra of ["README.md", "LICENSE", "DESIGN.md"]) {
-      if (existsSync(path.join(pkg, extra))) cpSync(path.join(pkg, extra), path.join(dest, extra));
+    // What the npm tarball would carry (package.json `files`, plus the files npm always
+    // packs), without source maps: half the weight, and nobody debugs a bundled copy
+    // from here (the themes repo has the sources).
+    for (const rel of packedFiles(pkg, pkgJson.files ?? ["dist", b.manifest])) {
+      cpSync(path.join(pkg, rel), path.join(dest, rel), { recursive: true, dereference: true });
     }
+    if (!existsSync(path.join(dest, b.manifest))) cpSync(manifestFile, path.join(dest, b.manifest));
     console.log(`bundled extensions: ${b.kind}/${manifest.id} ${manifest.version} ← ${b.pkg}`);
   }
   if (syncBundle) {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: platform. What the three kinds of extension have in common: a folder per id
 // under a base dir, a manifest file beside the entry (theme.json, skin.json, plugin.json),
-// a validator, and the scan that lists what is installed. Views (server/themes) and
-// plugins (server/plugins) each describe themselves as an ExtensionKind and share the
-// installer in ./install.ts; skins will do the same without a change here.
+// a validator, and the scan that lists what is installed. Views (server/themes), skins
+// (server/skins) and plugins (server/plugins) each describe themselves as an ExtensionKind
+// and share the installer in ./install.ts and the bundled folders below.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,15 @@ export function bundledDir(kind: ExtensionKindName): string {
   const sub = path.join("bundled", `${kind}s`);
   for (const c of [path.join(here, sub), path.join(here, "..", "..", "dist", sub)]) if (existsSync(c)) return c;
   return path.join(here, sub);
+}
+
+/** The three bundled folders at once. `--bundled-dir DIR` names the views folder; the
+ *  skins and plugins that ship with the GUI live beside it (`<DIR>/../skins`,
+ *  `<DIR>/../plugins`), which is how dist/bundled/ is laid out. Without it, the defaults. */
+export function bundledDirs(viewsDir?: string): Record<ExtensionKindName, string> {
+  if (!viewsDir) return { view: bundledDir("view"), skin: bundledDir("skin"), plugin: bundledDir("plugin") };
+  const parent = path.dirname(path.resolve(viewsDir));
+  return { view: viewsDir, skin: path.join(parent, "skins"), plugin: path.join(parent, "plugins") };
 }
 
 /** Read and validate the kind's manifest in `dir`; throws with a message for the person. */

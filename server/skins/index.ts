@@ -10,6 +10,7 @@ export {
   readSkinManifest,
   type SkinEntry,
   SkinRegistry,
+  type SkinRegistryOptions,
   skinFromManifest,
   skinKind,
   validateSkinManifest,

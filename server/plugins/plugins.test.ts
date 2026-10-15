@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Plugins: manifest validation, the host (activate / deactivate / reload, settings with
-// masked secrets, the suggestion stream, error isolation, log masking), the routes, and
-// the installer bound to the plugin kind. A fixture plugin is written into a temp dir.
+// masked secrets, the suggestion stream, error isolation, log masking), the routes, the
+// bundled plugins that ship with the GUI (listed, off until enabled, overridable, not
+// removable) and the installer bound to the plugin kind. A fixture plugin is written into
+// a temp dir.
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +14,9 @@ import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { addPlugin, linkPlugin, listPlugins, removePlugin } from "./install.js";
 import { validatePluginManifest } from "./registry.js";
+
+/** The install tests look at their own folder alone, not the skins/plugins that ship in dist/bundled. */
+const NO_BUNDLED = { bundledDir: "/nonexistent/spgui-bundled" };
 
 declare global {
   var __fixturePlugin:
@@ -169,6 +174,8 @@ describe("plugin host and routes", () => {
         outbox: false,
         quiet: true,
         webDir: tmp.dir,
+        // No bundled plugins beside this views dir: the list is the fixtures alone.
+        bundledDir: path.join(local.dir, "bundled", "views"),
       });
     } finally {
       process.stderr.write = realWrite;
@@ -401,6 +408,145 @@ describe("plugin host and routes", () => {
   });
 });
 
+describe("bundled plugins", () => {
+  let app: App;
+  let tmp: { dir: string; cleanup: () => void };
+  let local: { dir: string; cleanup: () => void };
+  let plugins: string;
+  let bundled: string;
+  const JS = `
+const g = globalThis;
+g.__bundledPlugin ??= { activations: 0, deactivations: 0 };
+export default { activate() { g.__bundledPlugin.activations++; return { deactivate() { g.__bundledPlugin.deactivations++; } }; } };
+`;
+  const counts = () =>
+    (globalThis as { __bundledPlugin?: { activations: number; deactivations: number } }).__bundledPlugin;
+
+  beforeAll(async () => {
+    tmp = tempDir();
+    local = inRepoTempDir();
+    plugins = path.join(local.dir, "plugins");
+    bundled = path.join(local.dir, "bundled", "plugins");
+    makePlugin(
+      path.join(bundled, "shipped"),
+      { name: "Shipped", settings: [{ key: "token", label: "Token", type: "secret" }] },
+      JS,
+    );
+    makePlugin(path.join(bundled, "other"), { name: "Other", settings: [] }, JS);
+    app = await createApp({
+      port: 0,
+      stateDir: tmp.dir,
+      pluginsDir: plugins,
+      outbox: false,
+      quiet: true,
+      webDir: tmp.dir,
+      bundledDir: path.join(local.dir, "bundled", "views"),
+    });
+  });
+  afterAll(async () => {
+    await app.close();
+    tmp.cleanup();
+    local.cleanup();
+  });
+
+  const url = (p: string) => `${app.url}${p}`;
+  const byId = async (): Promise<Record<string, InstalledPlugin>> =>
+    Object.fromEntries(
+      ((await (await fetch(url(PLUGIN_ROUTES.list))).json()) as { plugins: InstalledPlugin[] }).plugins.map((p) => [
+        p.id,
+        p,
+      ]),
+    );
+  const config = () =>
+    JSON.parse(readFileSync(path.join(tmp.dir, "config.json"), "utf8")) as { enabled?: string[]; disabled?: string[] };
+
+  it("are listed as bundled and disabled, and never start on their own", async () => {
+    const p = await byId();
+    expect(Object.keys(p)).toEqual(["other", "shipped"]);
+    expect(p.shipped).toMatchObject({
+      bundled: true,
+      disabled: true,
+      status: "inactive",
+      source: "bundled",
+      dir: path.join(bundled, "shipped"),
+    });
+    expect(p.shipped!.error).toBeUndefined();
+    expect(counts()).toBeUndefined();
+    expect(config().enabled).toBeUndefined();
+  });
+
+  it("saving settings on a disabled plugin keeps it off", async () => {
+    const res = await fetch(url(`${PLUGIN_ROUTES.settings}/shipped/settings`), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "tok-abcd1234" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await byId()).shipped).toMatchObject({ status: "inactive", disabled: true, values: { token: "••••1234" } });
+    expect(counts()).toBeUndefined();
+  });
+
+  it("enable on POST (loopback) starts it and is remembered; disable stops it", async () => {
+    const on = await fetch(url(`${PLUGIN_ROUTES.toggle}/shipped/enable`), { method: "POST" });
+    expect(on.status).toBe(200);
+    const listed = ((await on.json()) as { plugins: InstalledPlugin[] }).plugins.find((p) => p.id === "shipped")!;
+    expect(listed).toMatchObject({ status: "active", bundled: true });
+    expect(listed.disabled).toBeUndefined();
+    expect(counts()).toEqual({ activations: 1, deactivations: 0 });
+    expect(config().enabled).toEqual(["plugin:shipped"]);
+    // A reload keeps the choice: the enabled one comes back, the other stays off.
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect((await byId()).shipped!.status).toBe("active");
+    expect((await byId()).other).toMatchObject({ status: "inactive", disabled: true });
+    expect(counts()).toEqual({ activations: 2, deactivations: 1 });
+
+    const off = await fetch(url(`${PLUGIN_ROUTES.toggle}/shipped/disable`), { method: "POST" });
+    expect(off.status).toBe(200);
+    expect((await byId()).shipped).toMatchObject({ status: "inactive", disabled: true });
+    expect(counts()).toEqual({ activations: 2, deactivations: 2 });
+    expect(config().enabled).toBeUndefined();
+    expect(config().disabled).toEqual(["plugin:shipped"]);
+    // Enabling again clears the disabled entry.
+    await fetch(url(`${PLUGIN_ROUTES.toggle}/shipped/enable`), { method: "POST" });
+    expect(config()).toMatchObject({ enabled: ["plugin:shipped"] });
+    expect(config().disabled).toBeUndefined();
+    expect((await byId()).shipped!.status).toBe("active");
+  });
+
+  it("answers 404 for an unknown id, 400 for a bad one, 403 away from loopback", async () => {
+    expect((await fetch(url(`${PLUGIN_ROUTES.toggle}/nope/enable`), { method: "POST" })).status).toBe(404);
+    expect((await fetch(url(`${PLUGIN_ROUTES.toggle}/Bad_Id/enable`), { method: "POST" })).status).toBe(400);
+    const ctx = {
+      remote: { ip: "10.0.0.2", loopback: false },
+      url: new URL("http://x/"),
+      cookies: () => ({ spgui: app.config().uiKey }),
+      params: { id: "shipped" },
+    };
+    expect(
+      await app.router.match("POST", `${PLUGIN_ROUTES.toggle}/shipped/disable`)!.handler(ctx as never),
+    ).toMatchObject({ status: 403 });
+  });
+
+  it("an install of the same id overrides the bundled copy; removing a bundled one says to disable it", async () => {
+    makePlugin(path.join(plugins, "shipped"), { name: "Shipped (mine)", settings: [] }, JS);
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    const mine = (await byId()).shipped!;
+    expect(mine).toMatchObject({ name: "Shipped (mine)", status: "active", dir: path.join(plugins, "shipped") });
+    expect(mine.bundled).toBeUndefined();
+    expect(mine.source).toBeUndefined();
+    const opts = { bundledDir: bundled };
+    expect(() => removePlugin(plugins, "other", opts)).toThrow(/bundled with sessionpipe-gui.*plugin disable other/);
+    expect(removePlugin(plugins, "shipped", opts).message).toBe("removed shipped");
+    const back = listPlugins(plugins, opts).find((p) => p.id === "shipped")!;
+    expect(back).toMatchObject({ bundled: true, disabled: true });
+    expect(back.manifest).toMatchObject({ name: "Shipped", source: "bundled" });
+    expect(
+      listPlugins(plugins, { ...opts, enabled: () => ["plugin:shipped"] }).find((p) => p.id === "shipped")!.disabled,
+    ).toBeUndefined();
+    expect(() => removePlugin(plugins, "nope", opts)).toThrow(/no plugin "nope"/);
+  });
+});
+
 describe("plugin install (the shared installer, bound to plugin.json)", () => {
   let tmp: { dir: string; cleanup: () => void };
   let plugins: string;
@@ -416,14 +562,14 @@ describe("plugin install (the shared installer, bound to plugin.json)", () => {
     expect(r.message).toMatch(/^installed copied \(Copied 1\.2\.3\) from /);
     const installed = JSON.parse(readFileSync(path.join(plugins, "copied", "plugin.json"), "utf8"));
     expect(installed).toMatchObject({ id: "copied", kind: "plugin", source: src, entry: "index.js" });
-    expect(listPlugins(plugins).map((p) => p.id)).toEqual(["copied"]);
+    expect(listPlugins(plugins, NO_BUNDLED).map((p) => p.id)).toEqual(["copied"]);
   });
 
   it("links, lists with the flag, removes the link only", () => {
     const src = makePlugin(path.join(tmp.dir, "dev"), { id: "dev" });
     expect(linkPlugin(plugins, src).message).toMatch(/^linked dev \(Fixture 1\.2\.3\) → /);
     expect(lstatSync(path.join(plugins, "dev")).isSymbolicLink()).toBe(true);
-    expect(listPlugins(plugins).find((p) => p.id === "dev")).toMatchObject({ linked: true });
+    expect(listPlugins(plugins, NO_BUNDLED).find((p) => p.id === "dev")).toMatchObject({ linked: true });
     expect(removePlugin(plugins, "dev").message).toMatch(/^removed dev \(the link/);
     expect(existsSync(path.join(src, "index.js"))).toBe(true);
     expect(() => removePlugin(plugins, "dev")).toThrow(/no plugin "dev"/);

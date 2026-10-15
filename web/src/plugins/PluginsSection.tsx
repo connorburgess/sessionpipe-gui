@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plugins section of the Views page: what server plugins are installed, their
-// status or error, a settings form made from each manifest (secrets as password fields
-// showing the mask; saving works from the receiver machine only), Reload, and the line
-// that installs more. A plugin is code running in the receiver process: the section says so.
+// status or error, an Enable / Disable switch (a bundled plugin is off until enabled), a
+// settings form made from each manifest (secrets as password fields showing the mask;
+// saving works from the receiver machine only), Reload, and the line that installs more.
+// A plugin is code running in the receiver process: the section says so.
 import type { InstalledPlugin, SettingField } from "@shared/plugin-api";
 import { isMasked } from "@shared/plugin-api";
 import { useEffect, useState } from "react";
 import { CopyButton } from "../components/bits";
 import { Select } from "../components/Select";
-import { fetchPlugins, reloadPlugins, savePluginSettings, usePlugins } from "./registry";
+import { fetchPlugins, reloadPlugins, savePluginSettings, setPluginEnabled, usePlugins } from "./registry";
 import "./plugins.css";
 
 export const PLUGIN_ADD_LINE = "sessionpipe-gui plugin add <folder | plugin.tgz | npm-package | git-url>";
@@ -61,7 +62,7 @@ export function PluginsSection() {
       {plugins.length > 0 && (
         <ul className="themes-list">
           {plugins.map((p) => (
-            <PluginRow key={p.id} plugin={p} loopback={loopback} />
+            <PluginRow key={p.id} plugin={p} loopback={loopback} busy={busy} onNote={setNote} />
           ))}
         </ul>
       )}
@@ -87,26 +88,73 @@ export function PluginsSection() {
       </div>
       <p className="sect-note">
         Also <code>plugin link &lt;folder&gt;</code>, <code>plugin remove &lt;id&gt;</code>, <code>plugin list</code>.
-        Then Reload. How to write one: <code>docs/plugin-authoring.md</code> in the repository. Only install plugins you
-        trust, from people you trust.
+        Then Reload. ping-a-human comes bundled and stays off until you enable it (the button above, or{" "}
+        <code>plugin enable ping-a-human</code>); a bundled plugin cannot be removed, only turned off. How to write one:{" "}
+        <code>docs/plugin-authoring.md</code> in the repository. Only install plugins you trust, from people you trust.
       </p>
     </section>
   );
 }
 
-function PluginRow({ plugin: p, loopback }: { plugin: InstalledPlugin; loopback: boolean }) {
+function PluginRow({
+  plugin: p,
+  loopback,
+  busy,
+  onNote,
+}: {
+  plugin: InstalledPlugin;
+  loopback: boolean;
+  busy: boolean;
+  onNote: (note: string | null) => void;
+}) {
+  const [toggling, setToggling] = useState(false);
+  const toggle = async (on: boolean) => {
+    setToggling(true);
+    onNote(null);
+    try {
+      await setPluginEnabled(p.id, on);
+      onNote(on ? `${p.id} is on.` : `${p.id} is off: it will not run.`);
+    } catch (e) {
+      onNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToggling(false);
+    }
+  };
   return (
     <li className="themes-row plug-row" data-plugin-row={p.id} data-plugin-status={p.status}>
       <div className="themes-row-head">
         <span className="themes-row-name">{p.name || p.id}</span>
         {p.version && <span className="themes-row-ver">{p.version}</span>}
         <span className="themes-row-id">{p.id}</span>
-        <span className={`themes-flag plug-status plug-status--${p.status}`}>{p.status}</span>
+        {p.disabled ? (
+          <span className="themes-flag">disabled</span>
+        ) : (
+          <span className={`themes-flag plug-status plug-status--${p.status}`}>{p.status}</span>
+        )}
         {p.linked && <span className="themes-flag">linked</span>}
+        {p.bundled && <span className="themes-flag">bundled</span>}
+        {!p.error && (
+          <button
+            type="button"
+            className={`btn btn--sm ${p.disabled && loopback ? "btn--primary" : "btn--ghost"}`}
+            onClick={() => void toggle(!!p.disabled)}
+            disabled={!loopback || busy || toggling}
+            title={
+              loopback
+                ? p.bundled
+                  ? "Bundled with the GUI: it cannot be removed, only turned off"
+                  : "Turn it off without removing its files"
+                : "Only from the machine running the receiver"
+            }
+            data-plugin-toggle={p.id}
+          >
+            {toggling ? "…" : p.disabled ? "Enable" : "Disable"}
+          </button>
+        )}
       </div>
       <div className="themes-row-meta">
         {p.description && <span>{p.description} · </span>}
-        source <code>{p.source ?? "unknown"}</code>
+        source <code>{p.bundled ? "bundled with the GUI" : (p.source ?? "unknown")}</code>
         {p.dir && (
           <>
             {" "}

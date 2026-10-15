@@ -6,14 +6,16 @@ import type { PluginManifest } from "../../shared/plugin-api.js";
 import {
   addExtension,
   formatEntries,
+  InstallError,
   type InstallResult,
   linkExtension,
   removeExtension,
 } from "../extensions/install.js";
-import { type PluginEntry, PluginRegistry, pluginKind } from "./registry.js";
+import { type PluginEntry, PluginRegistry, type PluginRegistryOptions, pluginKind } from "./registry.js";
 
-export function listPlugins(pluginsDir: string): PluginEntry[] {
-  return new PluginRegistry(pluginsDir).list();
+/** Installed and bundled, as the server lists them. */
+export function listPlugins(pluginsDir: string, opts?: PluginRegistryOptions): PluginEntry[] {
+  return new PluginRegistry(pluginsDir, opts).list();
 }
 
 /** One line per plugin, for `plugin list`. */
@@ -27,7 +29,7 @@ export function formatPluginList(pluginsDir: string, plugins: PluginEntry[]): st
       dir: p.dir,
       source: p.manifest?.source,
       error: p.error,
-      flags: [p.linked ? "linked" : ""],
+      flags: [p.linked ? "linked" : "", p.bundled ? "bundled" : "", p.disabled ? "disabled" : ""],
     })),
   );
 }
@@ -42,6 +44,21 @@ export function linkPlugin(pluginsDir: string, folder: string): InstallResult<Pl
   return linkExtension(pluginKind(pluginsDir), folder);
 }
 
-export function removePlugin(pluginsDir: string, id: string): { dir: string; message: string } {
-  return removeExtension(pluginKind(pluginsDir), id);
+/** Remove an installed plugin. A bundled one has no folder to remove: the message says to
+ *  disable it instead (`plugin disable <id>`). */
+export function removePlugin(
+  pluginsDir: string,
+  id: string,
+  opts?: PluginRegistryOptions,
+): { dir: string; message: string } {
+  try {
+    return removeExtension(pluginKind(pluginsDir), id);
+  } catch (e) {
+    if (e instanceof InstallError && new PluginRegistry(pluginsDir, opts).isBundled(id)) {
+      throw new InstallError(
+        `${id} is bundled with sessionpipe-gui and cannot be removed; \`sessionpipe-gui plugin disable ${id}\` turns it off (\`plugin enable ${id}\` turns it on)`,
+      );
+    }
+    throw e;
+  }
 }

@@ -2,7 +2,8 @@
 // Owned by: platform. The plugin host: imports every installed plugin's entry module into
 // this process, hands it a PluginApi (shared/plugin-api.ts) and keeps what comes back.
 // A plugin that fails to import or activate is listed with its error and never takes
-// the host down; a listener that throws is logged and the stream goes on. Suggestions
+// the host down; a listener that throws is logged and the stream goes on. A disabled
+// plugin (turned off, or bundled and not yet enabled) is never imported. Suggestions
 // (a plugin's advice on an open permission) are kept here, streamed to every page and
 // dropped when the attention closes. Nothing here can answer a permission: the
 // receiver holds no key.
@@ -48,6 +49,8 @@ export interface PluginHostDeps {
   /** One line to the host's log; stderr by default. */
   log?: (line: string) => void;
   activateTimeoutMs?: number;
+  /** Remember a plugin as on or off in config.json; the registry is rescanned after. */
+  setEnabled?: (id: string, on: boolean) => void;
 }
 
 interface Running {
@@ -69,7 +72,8 @@ export class PluginHost {
 
   constructor(private readonly deps: PluginHostDeps) {}
 
-  /** Activate every loadable plugin. Called once the server listens (the api names its URLs). */
+  /** Activate every loadable plugin that is not disabled. Called once the server listens
+   *  (the api names its URLs). */
   async start(): Promise<void> {
     this.started = true;
     this.offStore ??= this.deps.store.subscribe((m) => this.prune(m));
@@ -110,6 +114,8 @@ export class PluginHost {
       };
       if (error) out.error = error;
       if (e.linked) out.linked = true;
+      if (e.bundled) out.bundled = true;
+      if (e.disabled) out.disabled = true;
       if (loopback) out.dir = e.dir;
       if (e.manifest) out.values = maskSettings(e.manifest, this.deps.settings.get(e.manifest));
       return out;
@@ -131,10 +137,25 @@ export class PluginHost {
           this.log(id, "error", `settings listener threw: ${(e as Error).message}`);
         }
       }
-    } else if (this.started) {
+    } else if (this.started && !entry.disabled) {
       await this.activate(entry);
     }
     return maskSettings(entry.manifest, values);
+  }
+
+  /** Turn a plugin on or off: remembered in config.json, the folder rescanned, then the
+   *  plugin started (if the host is running) or stopped. Throws on an unknown id. */
+  async setEnabled(id: string, on: boolean): Promise<void> {
+    if (!this.deps.registry.has(id)) throw new Error(`no plugin "${id}"`);
+    this.deps.setEnabled?.(id, on);
+    this.deps.registry.scan();
+    const entry = this.deps.registry.get(id);
+    if (!on || !entry || entry.disabled) {
+      await this.deactivate(id);
+      this.errors.delete(id);
+      return;
+    }
+    if (this.started) await this.activate(entry);
   }
 
   /** Open suggestions, for the snapshot. */
@@ -157,7 +178,7 @@ export class PluginHost {
   // ---------- lifecycle ----------
 
   private async activate(entry: PluginEntry): Promise<void> {
-    if (!entry.manifest || this.running.has(entry.id)) return;
+    if (!entry.manifest || entry.disabled || this.running.has(entry.id)) return;
     const manifest = entry.manifest;
     this.errors.delete(entry.id);
     const timeoutMs = this.deps.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS;

@@ -8,10 +8,11 @@ import path from "node:path";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setTlsPreference } from "./config.js";
+import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setEnabled, setTlsPreference } from "./config.js";
 import { findExtra, formatCatalog, installableExtras } from "./extensions/catalog.js";
 import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
+import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
 import { sameMachine } from "./setup/index.js";
@@ -50,7 +51,8 @@ usage: sessionpipe-gui [options]
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
   --skins-dir DIR   where skins are installed (default <state>/skins)
-  --bundled-dir DIR where the views that ship with the GUI are (default dist/bundled/views)
+  --bundled-dir DIR where the views that ship with the GUI are (default dist/bundled/views);
+                    the bundled skins and plugins are in skins/ and plugins/ beside it
   --open            open the board in the browser
   --quiet           no banner
   --version         print the version
@@ -71,19 +73,26 @@ plugins (server-side code that reacts to events: notifications, suggested answer
 
   sessionpipe-gui plugin list|add|link|remove  the same verbs; folders under <state>/plugins,
                                              settings on the Views page; --plugins-dir DIR
+  sessionpipe-gui plugin enable|disable <id> turn one on or off. ping-a-human ships bundled
+                                             and is off until you enable it (then set its
+                                             Telegram token on the Views page)
 
 skins (tokens, fonts, radius, density and an optional stylesheet; no code):
 
   sessionpipe-gui skin list|add|link|remove    the same verbs; folders under <state>/skins,
                                              picked in the page's quick settings; --skins-dir DIR
+  sessionpipe-gui skin disable|enable <id>   hide a skin from the popover (Spacesheep Vivid
+                                             and Paper Serif ship bundled and cannot be
+                                             removed) or show it again
   Plain color-theme JSON files in <state>/color-themes/*.json still work and are listed
   with the skins; see docs/skin-authoring.md and docs/color-theme.example.json.
 
-extras (the official views, skins and plugins, from npm; Canvas and Office are bundled):
+extras (the official views, skins and plugins; every one ships inside the GUI):
 
-  sessionpipe-gui extras list                catalogue: id, kind, one line, npm name, size
-  sessionpipe-gui extras add <id|all>        install one from npm, or every one not bundled
-  The same list, with one-click install, is on the Views page (on this machine only).
+  sessionpipe-gui extras list                catalogue: id, kind, one line, size, state
+  sessionpipe-gui extras add <id|all>        nothing to do today: all of them are bundled
+  The same list is on the Views page. \`npm run bundle:sync\` in a checkout refreshes the
+  bundled copies from the themes repo beside it.
 
 A view is code running in the board page with access to everything it shows. A plugin
 is code running in the receiver process with everything this machine has. Only install
@@ -302,50 +311,65 @@ async function extensionCommand(parsed: Args): Promise<void> {
   const { kind, verb, arg } = parsed.ext!;
   const stateDir = parsed.state ?? defaultStateDir();
   const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
+  const bundled = bundledDirs(parsed.bundledDir);
+  const disabled = () => readGuiConfig(stateDir).disabled ?? [];
+  const pluginOpts = () => ({
+    bundledDir: bundled.plugin,
+    disabled,
+    enabled: () => readGuiConfig(stateDir).enabled ?? [],
+  });
+  const skinOpts = () => ({ bundledDir: bundled.skin, disabled });
+  const viewOpts = () => ({ bundledDir: bundled.view, disabled });
   const ops =
     kind === "plugin"
       ? {
           noun: "plugin",
           dir: parsed.pluginsDir ?? path.join(stateDir, "plugins"),
-          list: (dir: string) => formatPluginList(dir, listPlugins(dir)),
+          list: (dir: string) => formatPluginList(dir, listPlugins(dir, pluginOpts())),
+          ids: (dir: string) => listPlugins(dir, pluginOpts()).map((p) => p.id),
           add: addPlugin,
           link: linkPlugin,
-          remove: removePlugin,
+          remove: (dir: string, id: string) => removePlugin(dir, id, pluginOpts()),
+          off: (id: string) => `${id} is off: it will not run; \`plugin enable ${id}\` turns it on`,
+          on: (id: string) => `${id} is on: it starts with the receiver (a running one picks it up on Reload plugins)`,
         }
       : kind === "skin"
         ? {
             noun: "skin",
             dir: parsed.skinsDir ?? path.join(stateDir, "skins"),
-            list: (dir: string) => formatSkinList(dir, listSkins(dir)),
+            list: (dir: string) => formatSkinList(dir, listSkins(dir, skinOpts())),
+            ids: (dir: string) => listSkins(dir, skinOpts()).map((s) => s.id),
             add: addSkin,
             link: linkSkin,
-            remove: removeSkin,
+            remove: (dir: string, id: string) => removeSkin(dir, id, skinOpts()),
+            off: (id: string) =>
+              `${id} is off: hidden from the appearance popover; \`skin enable ${id}\` brings it back`,
+            on: (id: string) => `${id} is on`,
           }
         : {
             noun: "view",
             dir: parsed.themesDir ?? path.join(stateDir, "themes"),
             list: (dir: string) => formatList(dir, listThemes(dir, viewOpts())),
+            ids: (dir: string) => listThemes(dir, viewOpts()).map((t) => t.id),
             add: addTheme,
             link: linkTheme,
             remove: (dir: string, id: string) => removeTheme(dir, id, viewOpts()),
+            off: (id: string) => `${id} is off: hidden from the rail; \`view enable ${id}\` brings it back`,
+            on: (id: string) => `${id} is on`,
           };
-  function viewOpts() {
-    return { bundledDir: parsed.bundledDir, disabled: () => readGuiConfig(stateDir).disabled ?? [] };
-  }
   try {
     switch (verb) {
       case "disable":
       case "enable": {
-        if (kind !== "view") fail(`${ops.noun}s are removed, not disabled (\`${ops.noun} remove <id>\`)`);
-        if (!arg) fail(`view ${verb} needs an id (see \`view list\`)`);
-        const reg = listThemes(ops.dir, viewOpts());
-        if (!reg.some((t) => t.id === arg)) fail(`no view "${arg}" (see \`view list\`)`);
-        setDisabled(stateDir, readGuiConfig(stateDir), `view:${arg}`, verb === "disable");
-        out(
-          verb === "disable"
-            ? `${arg} is off: hidden from the rail; \`view enable ${arg}\` brings it back`
-            : `${arg} is on`,
-        );
+        if (!arg) fail(`${ops.noun} ${verb} needs an id (see \`${ops.noun} list\`)`);
+        if (!ops.ids(ops.dir).includes(arg)) fail(`no ${ops.noun} "${arg}" (see \`${ops.noun} list\`)`);
+        const cfg = readGuiConfig(stateDir);
+        const key = `${ops.noun}:${arg}`;
+        // A view keeps its `disabled` entry alone; a plugin or skin goes through both lists,
+        // since a bundled plugin is off until `enabled` names it.
+        if (kind === "view") setDisabled(stateDir, cfg, key, verb === "disable");
+        else setEnabled(stateDir, cfg, key, verb === "enable");
+        out(verb === "disable" ? ops.off(arg) : ops.on(arg));
         return;
       }
       case "list":
@@ -367,9 +391,7 @@ async function extensionCommand(parsed: Args): Promise<void> {
         out(ops.remove(ops.dir, arg).message);
         return;
       default:
-        fail(
-          `unknown ${ops.noun} command "${verb}" (list, add, link, remove${kind === "view" ? ", disable, enable" : ""})`,
-        );
+        fail(`unknown ${ops.noun} command "${verb}" (list, add, link, remove, disable, enable)`);
     }
   } catch (e) {
     if (e instanceof InstallError) {
@@ -380,7 +402,8 @@ async function extensionCommand(parsed: Args): Promise<void> {
   }
 }
 
-/** `sessionpipe-gui extras list|add <id|all>`: the catalogue, and installs from npm. */
+/** `sessionpipe-gui extras list|add <id|all>`: the catalogue; `add` installs an entry that
+ *  is not bundled, of which there are none today. */
 async function extrasCommand(parsed: Args): Promise<void> {
   const { verb, arg } = parsed.extras!;
   const stateDir = parsed.state ?? defaultStateDir();
@@ -395,17 +418,30 @@ async function extrasCommand(parsed: Args): Promise<void> {
     case "list":
     case "ls":
       out(formatCatalog((e) => extraInstalled(dirs, e)));
-      out("`extras add <id>` installs one from npm; `extras add all` every one that is not bundled.");
+      out(
+        installableExtras().length
+          ? "`extras add <id>` installs one from npm; `extras add all` every one that is not bundled."
+          : "Every one ships inside the GUI: nothing to install. ping-a-human is off until `plugin enable ping-a-human`.",
+      );
       return;
     case "add":
     case "install": {
       if (!arg) fail("extras add needs an id from `extras list`, or `all`");
+      if (arg === "all" && installableExtras().length === 0) {
+        out("Every extra ships inside the GUI already: nothing to install.");
+        out("Skins are in the appearance popover; `plugin enable ping-a-human` turns the Telegram plugin on.");
+        return;
+      }
       const wanted = arg === "all" ? installableExtras() : [findExtra(arg)];
       if (wanted[0] === undefined) fail(`no extra "${arg}" (see \`extras list\`)`);
       let failed = 0;
       for (const entry of wanted as ExtraEntry[]) {
         if (entry.bundled) {
-          out(`${entry.id}: bundled with the GUI, nothing to install`);
+          out(
+            entry.kind === "plugin"
+              ? `${entry.id}: bundled with the GUI, nothing to install; \`plugin enable ${entry.id}\` turns it on`
+              : `${entry.id}: bundled with the GUI, nothing to install`,
+          );
           continue;
         }
         out(`${entry.id}: installing ${entry.npm}…`);

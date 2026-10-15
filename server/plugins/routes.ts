@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: platform. The plugin routes: the listing (uiAuth, secrets masked), the
-// reload and the settings save (both loopback only: settings hold tokens, and reloading
-// runs code). Registered from app.ts beside the theme routes.
+// reload, the settings save and the enable / disable switch (all loopback only: settings
+// hold tokens, and reloading or enabling runs code). Registered from app.ts beside the
+// theme routes.
 import { PLUGIN_ID_RE, PLUGIN_ROUTES } from "../../shared/plugin-api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import type { PluginHost } from "./host.js";
@@ -41,6 +42,24 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
       return { status: 200, json: { plugins: deps.host.list(true), demo: deps.demo === true } };
     }),
   );
+
+  for (const verb of ["disable", "enable"] as const) {
+    router.post(
+      `${PLUGIN_ROUTES.toggle}/:id/${verb}`,
+      guard(async (ctx): Promise<Reply> => {
+        if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+        const id = ctx.params.id ?? "";
+        if (!PLUGIN_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
+        try {
+          await deps.host.setEnabled(id, verb === "enable");
+        } catch (e) {
+          if (/^no plugin/.test((e as Error).message)) return { status: 404, json: { reason: "not_found" } };
+          throw e;
+        }
+        return { status: 200, json: { plugins: deps.host.list(true), demo: deps.demo === true } };
+      }),
+    );
+  }
 
   router.add(
     "PUT",

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Skins: manifest validation, the registry (built-ins, packages, the color-theme files
-// listed as token-only skins, errors kept), the listing / reload routes, the static file
-// route (types, caching, traversal) and the installer bound to the skin kind.
+// Skins: manifest validation, the registry (built-ins, packages, the bundled ones that
+// ship with the GUI, the color-theme files listed as token-only skins, errors kept), the
+// listing / reload routes, the static file route (types, caching, traversal) and the
+// installer bound to the skin kind.
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -19,6 +20,9 @@ import {
   skinFromManifest,
   validateSkinManifest,
 } from "./registry.js";
+
+/** The install tests look at their own folder alone, not the skins/plugins that ship in dist/bundled. */
+const NO_BUNDLED = { bundledDir: "/nonexistent/spgui-bundled" };
 
 const DARK = { "--bg": "oklch(0.2 0.01 250)", "--fg": "oklch(0.95 0.01 90)", "--needs": "oklch(0.78 0.14 60)" };
 const LIGHT = { "--bg": "oklch(0.98 0.01 90)", "--fg": "oklch(0.2 0.01 250)" };
@@ -179,7 +183,7 @@ describe("SkinRegistry", () => {
         JSON.stringify({ id: "alpha", name: "Alpha file", scheme: "dark", tokens: DARK }),
       );
 
-      const reg = new SkinRegistry(skins, ct);
+      const reg = new SkinRegistry(skins, ct, { bundledDir: path.join(tmp.dir, "no-bundled") });
       const list = reg.list();
       const ids = list.map((s) => s.id);
       expect(ids.slice(0, BUILTIN_SKINS.length)).toEqual(BUILTIN_SKINS.map((b) => b.id));
@@ -237,8 +241,50 @@ describe("SkinRegistry", () => {
     }
   });
 
+  it("lists bundled skins after the person's own, an install of the same id winning; disabled ones stay listed", () => {
+    const tmp = tempDir();
+    try {
+      const skins = path.join(tmp.dir, "skins");
+      const bundled = path.join(tmp.dir, "bundled", "skins");
+      makeSkin(path.join(bundled, "paper-serif"), { name: "Paper Serif (bundled)", scheme: "light", tokens: LIGHT });
+      makeSkin(path.join(bundled, "vivid"), { name: "Vivid" });
+      makeSkin(path.join(skins, "paper-serif"), { name: "Paper Serif (mine)", scheme: "light", tokens: LIGHT });
+      let off: string[] = [];
+      const reg = new SkinRegistry(skins, undefined, { bundledDir: bundled, disabled: () => off });
+      const packages = () => reg.list().filter((s) => s.source === "skin");
+      expect(packages().map((s) => [s.id, s.name, s.bundled ?? false])).toEqual([
+        ["paper-serif", "Paper Serif (mine)", false],
+        ["vivid", "Vivid", true],
+      ]);
+      expect(reg.get("vivid")).toMatchObject({ bundled: true, origin: "bundled", dir: path.join(bundled, "vivid") });
+      expect(reg.get("paper-serif")!.bundled).toBeUndefined();
+      expect(reg.isBundled("paper-serif")).toBe(true);
+      expect(reg.isBundled("nope")).toBe(false);
+      // Disabled: still listed with the flag, but it serves no files.
+      off = ["skin:vivid", "view:canvas"];
+      reg.scan();
+      expect(packages().find((s) => s.id === "vivid")).toMatchObject({ disabled: true, bundled: true });
+      expect(reg.get("vivid")).toBeUndefined();
+      // Removing a bundled skin says to disable it instead; removing the install of the same id works.
+      expect(() => removeSkin(skins, "vivid", { bundledDir: bundled })).toThrow(
+        /bundled with sessionpipe-gui.*skin disable vivid/,
+      );
+      expect(removeSkin(skins, "paper-serif", { bundledDir: bundled }).message).toBe("removed paper-serif");
+      expect(listSkins(skins, { bundledDir: bundled }).find((s) => s.id === "paper-serif")!.name).toBe(
+        "Paper Serif (bundled)",
+      );
+      const out = formatSkinList(skins, listSkins(skins, { bundledDir: bundled, disabled: () => ["skin:vivid"] }));
+      expect(out).toMatch(/^paper-serif\s+Paper Serif \(bundled\) 1\.0\.0\s+\[bundled, light\]\s+← bundled/m);
+      expect(out).toMatch(/^vivid\s+Vivid 1\.0\.0\s+\[bundled, disabled, dark\]/m);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it("is the built-ins alone for missing folders", () => {
-    const list = new SkinRegistry("/nonexistent/spgui-skins", "/nonexistent/spgui-ct").list();
+    const list = new SkinRegistry("/nonexistent/spgui-skins", "/nonexistent/spgui-ct", {
+      bundledDir: "/nonexistent/bundled",
+    }).list();
     expect(list.map((s) => s.id)).toEqual(BUILTIN_SKINS.map((b) => b.id));
     expect(list[0]!.id).toBe("spacesheep");
   });
@@ -272,7 +318,15 @@ describe("skin routes", () => {
       path.join(ct, "mint.json"),
       JSON.stringify({ id: "mint", name: "Mint", scheme: "light", tokens: LIGHT }),
     );
-    app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true, webDir: tmp.dir });
+    // The bundled skins live beside the bundled views dir; none here, so the list is exact.
+    app = await createApp({
+      port: 0,
+      stateDir: tmp.dir,
+      outbox: false,
+      quiet: true,
+      webDir: tmp.dir,
+      bundledDir: path.join(tmp.dir, "bundled", "views"),
+    });
   });
   afterAll(async () => {
     await app.close();
@@ -383,7 +437,7 @@ describe("skin install", () => {
     expect(existsSync(path.join(skins, "folder", "skin.css"))).toBe(true);
     const installed = JSON.parse(readFileSync(path.join(skins, "folder", "skin.json"), "utf8"));
     expect(installed).toMatchObject({ id: "folder", kind: "skin", source: src });
-    expect(listSkins(skins).find((s) => s.id === "folder")).toMatchObject({ source: "skin", origin: src });
+    expect(listSkins(skins, NO_BUNDLED).find((s) => s.id === "folder")).toMatchObject({ source: "skin", origin: src });
     const again = await addSkin(skins, src);
     expect(again.replaced).toBe(true);
   });
@@ -402,12 +456,12 @@ describe("skin install", () => {
     const r = linkSkin(skins, src);
     expect(r.message).toMatch(/^linked dev \(Dev 1\.0\.0\) → /);
     expect(lstatSync(path.join(skins, "dev")).isSymbolicLink()).toBe(true);
-    expect(listSkins(skins).find((s) => s.id === "dev")).toMatchObject({ linked: true });
+    expect(listSkins(skins, NO_BUNDLED).find((s) => s.id === "dev")).toMatchObject({ linked: true });
     writeFileSync(
       path.join(src, "skin.json"),
       JSON.stringify({ ...BASE, id: "dev", name: "Dev 2", scheme: "dark", tokens: DARK }),
     );
-    expect(listSkins(skins).find((s) => s.id === "dev")).toMatchObject({ name: "Dev 2" });
+    expect(listSkins(skins, NO_BUNDLED).find((s) => s.id === "dev")).toMatchObject({ name: "Dev 2" });
     const rm = removeSkin(skins, "dev");
     expect(rm.message).toMatch(/^removed dev \(the link/);
     expect(existsSync(path.join(skins, "dev"))).toBe(false);
@@ -430,7 +484,7 @@ describe("skin install", () => {
 
   it("formats the list for the terminal: packages only, with the scheme as a flag", () => {
     makeSkin(path.join(skins, "broken"), { api: 7 });
-    const out = formatSkinList(skins, listSkins(skins));
+    const out = formatSkinList(skins, listSkins(skins, NO_BUNDLED));
     expect(out).toMatch(/^broken\s+\(broken: skin.json: api 7 is newer/m);
     expect(out).toMatch(/^folder\s+From folder 1\.0\.0\s+\[dark\]\s+← /m);
     expect(out).not.toContain("spacesheep");
@@ -464,7 +518,7 @@ describe("contrast", () => {
     try {
       const skins = path.join(tmp.dir, "skins");
       makeSkin(path.join(skins, "faint"), { tokens: { ...DARK, "--fg-3": "oklch(0.4 0.01 250)" } });
-      const reg = new SkinRegistry(skins);
+      const reg = new SkinRegistry(skins, undefined, { bundledDir: path.join(tmp.dir, "no-bundled") });
       const faint = reg.list().find((s) => s.id === "faint")!;
       expect(faint.error).toBeUndefined();
       expect(faint.warning).toMatch(/^low contrast: --fg-3 on --bg/);

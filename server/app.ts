@@ -14,11 +14,13 @@ import {
   readGuiConfig,
   rotateSinkToken,
   setDisabled,
+  setEnabled,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { registerExtras } from "./extensions/extras.js";
+import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
@@ -75,7 +77,8 @@ export interface AppOptions {
   pluginsDir?: string;
   /** Where installed skins live; default <stateDir>/skins. */
   skinsDir?: string;
-  /** Where the views that ship with the GUI are; default dist/bundled/views beside the bundle. */
+  /** Where the views that ship with the GUI are; default dist/bundled/views beside the bundle.
+   *  The bundled skins and plugins are its siblings (`../skins`, `../plugins`). */
   bundledDir?: string;
 }
 
@@ -214,13 +217,22 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   };
 
   const viewers = new ViewerRegistry();
+  const bundled = bundledDirs(opts.bundledDir);
+  const disabled = (): readonly string[] => config.disabled ?? [];
   const plugins = new PluginHost({
-    registry: new PluginRegistry(opts.pluginsDir ?? path.join(stateDir, "plugins")),
+    registry: new PluginRegistry(opts.pluginsDir ?? path.join(stateDir, "plugins"), {
+      bundledDir: bundled.plugin,
+      disabled,
+      enabled: () => config.enabled ?? [],
+    }),
     settings: new PluginSettings(path.join(stateDir, "plugins-settings")),
     storageDir: path.join(stateDir, "plugins-storage"),
     store,
     control,
     info,
+    setEnabled: (id, on) => {
+      config = setEnabled(stateDir, config, `plugin:${id}`, on);
+    },
   });
   registerUi(router, {
     colorThemesDir: path.join(stateDir, "color-themes"),
@@ -237,8 +249,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     demo: { on: () => demo !== null, set: setDemo },
   });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
-    bundledDir: opts.bundledDir,
-    disabled: () => config.disabled ?? [],
+    bundledDir: bundled.view,
+    disabled,
   });
   registerThemes(router, {
     registry: themes,
@@ -249,7 +261,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     },
   });
   registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
-  const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"));
+  const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"), {
+    bundledDir: bundled.skin,
+    disabled,
+  });
   registerSkins(router, { registry: skins, uiAuth });
   registerExtras(router, {
     uiAuth,
@@ -257,7 +272,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       themes: opts.themesDir ?? path.join(stateDir, "themes"),
       skins: opts.skinsDir ?? path.join(stateDir, "skins"),
       plugins: opts.pluginsDir ?? path.join(stateDir, "plugins"),
-      bundled: opts.bundledDir,
+      bundled: bundled.view,
     },
     after: async (kind) => {
       if (kind === "view") themes.scan();

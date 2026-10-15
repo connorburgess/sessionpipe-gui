@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// The installed server plugins as the page knows them: GET /api/ui/plugins, the reload
-// and the settings save (both answer only from the receiver machine). A small external
-// store, like the one for views, so the Views page and anything else read one list.
+// The installed server plugins as the page knows them: GET /api/ui/plugins, the reload,
+// the settings save and the enable / disable switch (all answer only from the receiver
+// machine). A small external store, like the one for views, so the Views page and
+// anything else read one list.
 import type { InstalledPlugin } from "@shared/plugin-api";
 import { PLUGIN_ROUTES } from "@shared/plugin-api";
 import { useSyncExternalStore } from "react";
@@ -68,6 +69,15 @@ export function fetchPlugins(): Promise<void> {
 /** Deactivate, re-read the plugins dir, import afresh and activate (loopback only). */
 export async function reloadPlugins(): Promise<void> {
   const body = await request<{ plugins?: InstalledPlugin[] }>(PLUGIN_ROUTES.reload, "POST");
+  set({ plugins: listOf(body), loaded: true, error: null });
+}
+
+/** Turn a plugin on or off (loopback only); remembered by the server in config.json. */
+export async function setPluginEnabled(id: string, on: boolean): Promise<void> {
+  const body = await request<{ plugins?: InstalledPlugin[] }>(
+    `${PLUGIN_ROUTES.toggle}/${encodeURIComponent(id)}/${on ? "enable" : "disable"}`,
+    "POST",
+  );
   set({ plugins: listOf(body), loaded: true, error: null });
 }
 

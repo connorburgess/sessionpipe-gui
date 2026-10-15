@@ -6,16 +6,17 @@ import type { SkinManifest } from "../../shared/skin-api.js";
 import {
   addExtension,
   formatEntries,
+  InstallError,
   type InstallResult,
   linkExtension,
   removeExtension,
 } from "../extensions/install.js";
-import { type SkinEntry, SkinRegistry, skinKind } from "./registry.js";
+import { type SkinEntry, SkinRegistry, type SkinRegistryOptions, skinKind } from "./registry.js";
 
-/** The installed packages only (what `skin list` manages); built-ins and color-theme
- *  files are not folders under the skins dir. */
-export function listSkins(skinsDir: string): SkinEntry[] {
-  return new SkinRegistry(skinsDir).list().filter((s) => s.source === "skin");
+/** The installed and bundled packages (what `skin list` manages); built-ins and
+ *  color-theme files are not folders under the skins dir. */
+export function listSkins(skinsDir: string, opts?: SkinRegistryOptions): SkinEntry[] {
+  return new SkinRegistry(skinsDir, undefined, opts).list().filter((s) => s.source === "skin");
 }
 
 /** One line per skin, for `skin list`. */
@@ -29,7 +30,12 @@ export function formatSkinList(skinsDir: string, skins: SkinEntry[]): string {
       dir: s.dir ?? "",
       source: s.origin,
       error: s.error,
-      flags: [s.linked ? "linked" : "", s.error ? "" : s.scheme],
+      flags: [
+        s.linked ? "linked" : "",
+        s.bundled ? "bundled" : "",
+        s.disabled ? "disabled" : "",
+        s.error ? "" : s.scheme,
+      ],
     })),
   );
 }
@@ -44,6 +50,17 @@ export function linkSkin(skinsDir: string, folder: string): InstallResult<SkinMa
   return linkExtension(skinKind(skinsDir), folder);
 }
 
-export function removeSkin(skinsDir: string, id: string): { dir: string; message: string } {
-  return removeExtension(skinKind(skinsDir), id);
+/** Remove an installed skin. A bundled one has no folder to remove: the message says to
+ *  disable it instead (`skin disable <id>`). */
+export function removeSkin(skinsDir: string, id: string, opts?: SkinRegistryOptions): { dir: string; message: string } {
+  try {
+    return removeExtension(skinKind(skinsDir), id);
+  } catch (e) {
+    if (e instanceof InstallError && new SkinRegistry(skinsDir, undefined, opts).isBundled(id)) {
+      throw new InstallError(
+        `${id} is bundled with sessionpipe-gui and cannot be removed; \`sessionpipe-gui skin disable ${id}\` hides it (\`skin enable ${id}\` brings it back)`,
+      );
+    }
+    throw e;
+  }
 }

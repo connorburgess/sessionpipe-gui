@@ -195,7 +195,19 @@ machine only), which calls every `deactivate`, re-reads the folder and imports a
 so a linked plugin shows its edits without a restart.
 
 Routes: `GET /api/ui/plugins` → `{ plugins: InstalledPlugin[] }` (status, error, masked
-values); `PUT /api/ui/plugins/:id/settings` `{ key: value }` → `{ settings }` (loopback).
+values); `PUT /api/ui/plugins/:id/settings` `{ key: value }` → `{ settings }` (loopback);
+`POST /api/ui/plugins/:id/enable|disable` → `{ plugins }` (loopback).
+
+## Bundled plugins start off
+
+ping-a-human ships with the GUI (`dist/bundled/plugins/ping-a-human/`, copied from the
+themes repo at build time) and is listed with `bundled: true`, `source: "bundled"` and
+`disabled: true`. A bundled plugin is never activated until the person enables it (the
+Enable button on the Views page, or `sessionpipe-gui plugin enable ping-a-human`, which
+puts `plugin:ping-a-human` in `config.json` `enabled`): it runs code in the receiver and
+reaches out to Telegram, so nothing happens unasked. `plugin disable <id>` turns any
+plugin off (`disabled` in `config.json`; the host calls its `deactivate`); a bundled one
+cannot be removed, and `plugin add` of a package with the same id overrides it.
 
 ## Demo mode never runs plugins
 

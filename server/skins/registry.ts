@@ -2,10 +2,13 @@
 // Owned by: platform. The skins the page can pick from, as one list: the built-ins
 // (shared/skins-builtin.ts), the color-theme JSON files under <stateDir>/color-themes/
 // (token-only skins, kept working as they were) and the installed packages under
-// <stateDir>/skins/<id>/ with a skin.json (SkinManifest). Scanned at boot and on
-// POST /api/ui/skins/reload. A package whose manifest is wrong is still listed, with
-// `error`, so the problem shows instead of the skin vanishing. The folder layout, the
-// scan and the installer are shared with views and plugins (server/extensions); this
+// <stateDir>/skins/<id>/ with a skin.json (SkinManifest), then the skins that ship with
+// the GUI (dist/bundled/skins, scripts/build.mjs): listed after the person's own, so an
+// install of the same id overrides the bundled copy; `bundled: true`, `origin: "bundled"`,
+// removable only by disabling (config.json `disabled`, as `skin:<id>`). Scanned at boot
+// and on POST /api/ui/skins/reload. A package whose manifest is wrong is still listed,
+// with `error`, so the problem shows instead of the skin vanishing. The folder layout,
+// the scan and the installer are shared with views and plugins (server/extensions); this
 // file is what makes a skin a skin.
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -31,7 +34,14 @@ import {
   type SkinTypography,
 } from "../../shared/skin-api.js";
 import { BUILTIN_SKINS } from "../../shared/skins-builtin.js";
-import { type ExtensionKind, isRelativeFile, readManifestOf, scanKind } from "../extensions/kind.js";
+import {
+  bundledDir,
+  type ExtensionKind,
+  isRelativeFile,
+  readManifestOf,
+  type ScannedFolder,
+  scanKind,
+} from "../extensions/kind.js";
 import { readColorThemes } from "../ui/colorThemes.js";
 
 /** Everything the server knows about one listed skin. */
@@ -233,23 +243,38 @@ export function skinFromManifest(m: SkinManifest, dir: string): SkinEntry {
   return out;
 }
 
+export interface SkinRegistryOptions {
+  /** dist/bundled/skins: the skins that ship with the GUI; default `bundledDir("skin")`. */
+  bundledDir?: string;
+  /** The ids turned off (config.json `disabled`, as `skin:<id>`); read on every scan. */
+  disabled?: () => readonly string[];
+}
+
 export class SkinRegistry {
   private entries: SkinEntry[] = [];
+  readonly bundledDir: string;
+  private readonly disabled: () => readonly string[];
 
   constructor(
     readonly skinsDir: string,
     /** <stateDir>/color-themes: the plain JSON files, listed as token-only skins. */
     readonly colorThemesDir?: string,
+    opts: SkinRegistryOptions = {},
   ) {
+    this.bundledDir = opts.bundledDir ?? bundledDir("skin");
+    this.disabled = opts.disabled ?? (() => []);
     this.scan();
   }
 
-  /** Re-read both folders. Never throws: a missing dir is empty. Built-ins first, then the
-   *  installed packages, then the color-theme files; an id taken by a package wins. */
+  /** Re-read every folder. Never throws: a missing dir is empty. Built-ins first, then the
+   *  installed packages, then the bundled ones the person has not overridden, then the
+   *  color-theme files; an id taken by a package wins. */
   scan(): SkinEntry[] {
     const next: SkinEntry[] = BUILTIN_SKINS.map((b) => ({ ...b }));
     const taken = new Set(next.map((s) => s.id));
-    for (const f of scanKind(skinKind(this.skinsDir))) {
+    const off = new Set(this.disabled().map((k) => k.replace(/^skin:/, "")));
+    const add = (f: ScannedFolder<SkinManifest>, bundled: boolean) => {
+      if (bundled && taken.has(f.id)) return;
       const entry: SkinEntry = f.manifest
         ? skinFromManifest(f.manifest, f.dir)
         : {
@@ -264,9 +289,16 @@ export class SkinRegistry {
             error: f.error ?? "unreadable",
           };
       if (f.linked) entry.linked = true;
+      if (bundled) {
+        entry.bundled = true;
+        entry.origin = "bundled";
+      }
+      if (off.has(f.id)) entry.disabled = true;
       next.push(entry);
       taken.add(f.id);
-    }
+    };
+    for (const f of scanKind(skinKind(this.skinsDir))) add(f, false);
+    for (const f of scanKind(skinKind(this.bundledDir))) add(f, true);
     if (this.colorThemesDir) {
       const read = readColorThemes(this.colorThemesDir);
       for (const t of read.themes) {
@@ -308,10 +340,15 @@ export class SkinRegistry {
     return [...this.entries];
   }
 
-  /** An installed package that can serve files (no error) by id. */
+  /** An installed package that can serve files (no error, not disabled) by id. */
   get(id: string): SkinEntry | undefined {
     const s = this.entries.find((e) => e.id === id && e.source === "skin");
-    return s && !s.error && s.dir ? s : undefined;
+    return s && !s.error && !s.disabled && s.dir ? s : undefined;
+  }
+
+  /** A bundled skin by id, whether or not an install overrides it. */
+  isBundled(id: string): boolean {
+    return existsSync(path.join(this.bundledDir, id, "skin.json"));
   }
 
   has(id: string): boolean {

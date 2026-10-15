@@ -17,6 +17,10 @@ export interface GuiConfig {
   /** Extensions turned off, as `<kind>:<id>` (`view:canvas`): the way a bundled one, which
    *  cannot be removed, is hidden. Honoured by the registries and the rail. */
   disabled?: string[];
+  /** Bundled plugins turned on, as `plugin:<id>`. A plugin that ships with the GUI runs
+   *  code and may reach out of the machine (ping-a-human messages a phone), so it stays
+   *  off until the person enables it here; an installed plugin needs no entry. */
+  enabled?: string[];
 }
 
 export function defaultStateDir(): string {
@@ -49,6 +53,7 @@ export function readGuiConfig(dir: string): GuiConfig {
   };
   if (typeof cfg.tls === "boolean") full.tls = cfg.tls;
   if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
+  if (Array.isArray(cfg.enabled)) full.enabled = cfg.enabled.filter((d): d is string => typeof d === "string");
   if (!complete) writeGuiConfig(dir, full);
   return full;
 }
@@ -82,6 +87,23 @@ export function setDisabled(dir: string, cfg: GuiConfig, key: string, off: boole
   if (disabled.length) next.disabled = disabled;
   else delete next.disabled;
   writeGuiConfig(dir, next);
+  return next;
+}
+
+/** Turn an extension on or off, keeping both lists straight: on takes `key` out of
+ *  `disabled` and (for a bundled plugin, which is off until said otherwise) puts it in
+ *  `enabled`; off does the reverse. `key` is `<kind>:<id>`, e.g. `plugin:ping-a-human`. */
+export function setEnabled(dir: string, cfg: GuiConfig, key: string, on: boolean): GuiConfig {
+  const disabled = (cfg.disabled ?? []).filter((k) => k !== key);
+  const enabled = (cfg.enabled ?? []).filter((k) => k !== key);
+  if (on) enabled.push(key);
+  else disabled.push(key);
+  const next: GuiConfig = { ...cfg };
+  if (disabled.length) next.disabled = disabled;
+  else delete next.disabled;
+  if (enabled.length) next.enabled = enabled;
+  else delete next.enabled;
+  if (JSON.stringify(next) !== JSON.stringify(cfg)) writeGuiConfig(dir, next);
   return next;
 }
 

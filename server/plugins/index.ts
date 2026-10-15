@@ -9,6 +9,7 @@ export {
   checkValue,
   type PluginEntry,
   PluginRegistry,
+  type PluginRegistryOptions,
   pluginKind,
   readPluginManifest,
   validatePluginManifest,

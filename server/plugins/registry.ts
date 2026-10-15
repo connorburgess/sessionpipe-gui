@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: platform. The installed plugins: one folder per plugin under
 // <stateDir>/plugins/<id>/ with a plugin.json (PluginManifest) and the entry module the
-// host imports. Scanned at boot and on POST /api/ui/plugins/reload. A folder whose
-// manifest is wrong is still listed, with `error`, so the problem shows. The folder
-// layout, the scan and the installer are shared with views (server/extensions).
+// host imports, then the plugins that ship with the GUI (dist/bundled/plugins,
+// scripts/build.mjs): listed after the person's own, so an install of the same id
+// overrides the bundled copy; `bundled: true`, `source: "bundled"`, removable only by
+// disabling. A bundled plugin is `disabled` until config.json `enabled` names it
+// (`plugin:<id>`): it runs code and may reach out of the machine, so it never starts
+// unasked; any plugin is off while `disabled` names it. Scanned at boot and on
+// POST /api/ui/plugins/reload. A folder whose manifest is wrong is still listed, with
+// `error`, so the problem shows. The folder layout, the scan and the installer are
+// shared with views and skins (server/extensions).
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
@@ -13,13 +19,24 @@ import {
   type SettingField,
   type SettingType,
 } from "../../shared/plugin-api.js";
-import { type ExtensionKind, isRelativeFile, readManifestOf, scanKind } from "../extensions/kind.js";
+import {
+  bundledDir,
+  type ExtensionKind,
+  isRelativeFile,
+  readManifestOf,
+  type ScannedFolder,
+  scanKind,
+} from "../extensions/kind.js";
 
 /** Everything the registry knows about one folder; the host adds the running status. */
 export interface PluginEntry {
   id: string;
   dir: string;
   linked?: boolean;
+  /** Ships with the GUI; cannot be removed, off until enabled. */
+  bundled?: boolean;
+  /** Not to be activated: turned off in config.json, or bundled and not yet turned on. */
+  disabled?: boolean;
   manifest?: PluginManifest;
   error?: string;
 }
@@ -130,25 +147,57 @@ export function checkValue(field: SettingField, value: unknown): string | null {
   }
 }
 
+export interface PluginRegistryOptions {
+  /** dist/bundled/plugins: the plugins that ship with the GUI; default `bundledDir("plugin")`. */
+  bundledDir?: string;
+  /** The ids turned off (config.json `disabled`, as `plugin:<id>`); read on every scan. */
+  disabled?: () => readonly string[];
+  /** The bundled ids turned on (config.json `enabled`, as `plugin:<id>`); read on every scan. */
+  enabled?: () => readonly string[];
+}
+
 export class PluginRegistry {
   private entries = new Map<string, PluginEntry>();
+  readonly bundledDir: string;
+  private readonly disabled: () => readonly string[];
+  private readonly enabled: () => readonly string[];
 
-  constructor(readonly pluginsDir: string) {
+  constructor(
+    readonly pluginsDir: string,
+    opts: PluginRegistryOptions = {},
+  ) {
+    this.bundledDir = opts.bundledDir ?? bundledDir("plugin");
+    this.disabled = opts.disabled ?? (() => []);
+    this.enabled = opts.enabled ?? (() => []);
     this.scan();
   }
 
-  /** Re-read every folder under the plugins dir. Never throws: a missing dir is empty. */
+  /** Re-read every folder under the plugins dir, then the bundled ones the person has not
+   *  overridden. Never throws: a missing dir is empty. */
   scan(): PluginEntry[] {
     const next = new Map<string, PluginEntry>();
-    for (const f of scanKind(pluginKind(this.pluginsDir))) {
+    const strip = (k: string) => k.replace(/^plugin:/, "");
+    const off = new Set(this.disabled().map(strip));
+    const on = new Set(this.enabled().map(strip));
+    const add = (f: ScannedFolder<PluginManifest>, bundled: boolean) => {
+      if (bundled && next.has(f.id)) return;
       const entry: PluginEntry = { id: f.id, dir: f.dir };
       if (f.linked) entry.linked = true;
-      if (f.manifest) entry.manifest = f.manifest;
+      if (bundled) entry.bundled = true;
+      if (f.manifest) entry.manifest = bundled ? { ...f.manifest, source: "bundled" } : f.manifest;
       else entry.error = f.error ?? "unreadable";
+      if (off.has(f.id) || (bundled && !on.has(f.id))) entry.disabled = true;
       next.set(f.id, entry);
-    }
+    };
+    for (const f of scanKind(pluginKind(this.pluginsDir))) add(f, false);
+    for (const f of scanKind(pluginKind(this.bundledDir))) add(f, true);
     this.entries = next;
     return this.list();
+  }
+
+  /** A bundled plugin by id, whether or not an install overrides it. */
+  isBundled(id: string): boolean {
+    return existsSync(path.join(this.bundledDir, id, "plugin.json"));
   }
 
   list(): PluginEntry[] {

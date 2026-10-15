@@ -345,7 +345,11 @@ says so and points at `view disable canvas`, which hides it from the rail (and `
 says it is disabled) by adding `view:canvas` to `disabled` in `config.json`; `view enable
 canvas`, or the Disable / Enable button on the Views page (receiver machine only,
 `POST /api/ui/themes/:id/disable|enable`), brings it back. Any view can be disabled the
-same way.
+same way. The official skins (Spacesheep Vivid, Paper Serif) and plugin (ping-a-human)
+ship the same way, in `dist/bundled/skins/` and `dist/bundled/plugins/` beside the views
+(`--bundled-dir DIR` names the views folder; the other two are its siblings); a clone
+without the themes repo builds from the tracked copy in `bundled/`, which `npm run
+bundle:sync` refreshes.
 
 A **linked** theme is imported afresh on every visit to its page (a cache-busting
 query string, and the server sends `no-cache` for `.js`, `.css` and `.json`), so an

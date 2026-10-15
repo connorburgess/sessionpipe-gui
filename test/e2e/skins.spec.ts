@@ -5,7 +5,7 @@
 // popover sets its tokens, fonts, shape and density on <html>, a view inherits the tokens
 // by name, the choice survives a reload, and a device's old color-theme choice is
 // migrated to the skin key once.
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { openBoard, openPage } from "./helpers.js";
 
 interface Listed {
@@ -19,7 +19,10 @@ interface Listed {
   tokens: { dark?: Record<string, string>; light?: Record<string, string> };
 }
 
-const rootVar = (name: string) => `() => document.documentElement.style.getPropertyValue("${name}")`;
+/** A style variable set on <html> by applySkin (a function, not an expression string:
+ *  Playwright no longer calls a function an expression string evaluates to). */
+const rootVar = (page: Page, name: string) =>
+  page.evaluate((n) => document.documentElement.style.getPropertyValue(n), name);
 
 test.describe("skins", () => {
   test("the server lists built-ins, the fixture package and a broken one; files have the right caching", async ({
@@ -60,7 +63,7 @@ test.describe("skins", () => {
     // A fresh device is on Spacesheep, which follows the appearance (System → light here).
     await expect(root).toHaveAttribute("data-skin", "spacesheep");
     await expect(root).not.toHaveAttribute("data-theme", /./);
-    expect(await page.evaluate(rootVar("--bg"))).toBe("oklch(0.975 0.007 85)");
+    expect(await rootVar(page, "--bg")).toBe("oklch(0.975 0.007 85)");
 
     const trigger = page.locator("nav.rail button[aria-label='Quick settings']");
     await trigger.click();
@@ -78,11 +81,11 @@ test.describe("skins", () => {
     await expect(root).toHaveAttribute("data-skin", "e2e-skin");
     await expect(root).toHaveAttribute("data-density", "comfortable");
     // Light tokens under the System appearance (the test browser is light).
-    expect(await page.evaluate(rootVar("--bg"))).toBe("rgb(250, 240, 230)");
-    expect(await page.evaluate(rootVar("--font-ui"))).toBe('"E2E Sans", serif');
-    expect(await page.evaluate(rootVar("--font-mono"))).toBe('"E2E Mono", monospace');
-    expect(await page.evaluate(rootVar("--radius"))).toBe("2px");
-    expect(await page.evaluate(rootVar("--hairline"))).toBe("1.5px");
+    expect(await rootVar(page, "--bg")).toBe("rgb(250, 240, 230)");
+    expect(await rootVar(page, "--font-ui")).toBe('"E2E Sans", serif');
+    expect(await rootVar(page, "--font-mono")).toBe('"E2E Mono", monospace');
+    expect(await rootVar(page, "--radius")).toBe("2px");
+    expect(await rootVar(page, "--hairline")).toBe("1.5px");
     // The page really uses them: the body's font and a settings row's height.
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toBe('"E2E Sans", serif');
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--row-lg"))).toBe(
@@ -103,7 +106,7 @@ test.describe("skins", () => {
     await expect(pop.locator("fieldset.seg").first()).not.toHaveAttribute("disabled", /.*/);
     await pop.locator("label.seg-opt", { hasText: /^Dark$/ }).click();
     await expect(root).toHaveAttribute("data-theme", "dark");
-    expect(await page.evaluate(rootVar("--bg"))).toBe("rgb(10, 20, 30)");
+    expect(await rootVar(page, "--bg")).toBe("rgb(10, 20, 30)");
     await page.keyboard.press("Escape");
 
     // A view inherits by name: the token on the theme host is the skin's.
@@ -117,7 +120,7 @@ test.describe("skins", () => {
     await page.reload();
     await expect(root).toHaveAttribute("data-skin", "e2e-skin");
     await expect(root).toHaveAttribute("data-density", "comfortable");
-    expect(await page.evaluate(rootVar("--bg"))).toBe("rgb(10, 20, 30)");
+    expect(await rootVar(page, "--bg")).toBe("rgb(10, 20, 30)");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"e2e-skin"');
 
     // Back to Plain: nothing set, the scheme's own tokens; the extras are gone.
@@ -126,8 +129,8 @@ test.describe("skins", () => {
     await pop.locator("[data-skin='plain']").click();
     await expect(root).toHaveAttribute("data-skin", "plain");
     await expect(root).not.toHaveAttribute("data-density", /./);
-    expect(await page.evaluate(rootVar("--bg"))).toBe("");
-    expect(await page.evaluate(rootVar("--font-ui"))).toBe("");
+    expect(await rootVar(page, "--bg")).toBe("");
+    expect(await rootVar(page, "--font-ui")).toBe("");
     await expect(page.locator("style#skin-fonts")).toHaveCount(0);
     await expect(page.locator("link#skin-css")).toHaveCount(0);
     await pop.locator("label.seg-opt", { hasText: /^System$/ }).click();
@@ -155,7 +158,7 @@ test.describe("skins", () => {
     await expect(root).toHaveAttribute("data-skin", "paper");
     await expect(root).toHaveAttribute("data-theme", "light");
     // The built-in of that id, whole, not the stored fragment.
-    expect(await page.evaluate(rootVar("--fg"))).toBe("oklch(0.24 0.02 60)");
+    expect(await rootVar(page, "--fg")).toBe("oklch(0.24 0.02 60)");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.colorTheme"))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"paper"');
   });

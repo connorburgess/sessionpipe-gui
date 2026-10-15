@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The last look before `npm publish`: what the tarball would carry. Fails when a source
-// map slipped in, when the bundled views are missing (unless SPGUI_NO_BUNDLE=1), or when
-// the bin, the web app or the README is not there. Run by the release workflow after the
-// build; by hand: `npm run pack:check`.
+// map slipped in, when a bundled extension (the two views, the two skins, the plugin) is
+// missing (unless SPGUI_NO_BUNDLE=1), or when the bin, the web app or the README is not
+// there. Run by the release workflow after the build; by hand: `npm run pack:check`.
 import { spawnSync } from "node:child_process";
 
 const r = spawnSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" });
@@ -18,9 +18,20 @@ if (maps.length) problems.push(`source maps in the tarball: ${maps.join(", ")}`)
 for (const must of ["dist/cli.js", "dist/index.js", "dist/web/index.html", "README.md", "LICENSE", "NOTICE"]) {
   if (!files.includes(must)) problems.push(`missing ${must}`);
 }
-for (const view of ["canvas", "office"]) {
-  if (!files.includes(`dist/bundled/views/${view}/theme.json`) && process.env.SPGUI_NO_BUNDLE !== "1")
-    problems.push(`bundled view ${view} is missing (build with ../sessionpipe-gui-themes beside this repo)`);
+const BUNDLED = [
+  "views/canvas/theme.json",
+  "views/office/theme.json",
+  "skins/spacesheep-vivid/skin.json",
+  "skins/paper-serif/skin.json",
+  "skins/paper-serif/fonts/SourceSerif4Variable-Roman.woff2",
+  "plugins/ping-a-human/plugin.json",
+  "plugins/ping-a-human/dist/index.js",
+];
+for (const rel of BUNDLED) {
+  if (!files.includes(`dist/bundled/${rel}`) && process.env.SPGUI_NO_BUNDLE !== "1")
+    problems.push(
+      `bundled ${rel} is missing (build with ../sessionpipe-gui-themes beside this repo, or the tracked bundled/)`,
+    );
 }
 const stray = files.filter((f) => /(^|\/)(test|e2e|__snapshots__)\//.test(f) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(f));
 if (stray.length) problems.push(`tests in the tarball: ${stray.join(", ")}`);
@@ -32,4 +43,4 @@ if (problems.length) {
   for (const p of problems) console.error(`  ✘ ${p}`);
   process.exit(1);
 }
-console.log("  ✔ no source maps, bin + web app + bundled views + README/LICENSE/NOTICE present");
+console.log("  ✔ no source maps, bin + web app + bundled views, skins and plugin + README/LICENSE/NOTICE present");

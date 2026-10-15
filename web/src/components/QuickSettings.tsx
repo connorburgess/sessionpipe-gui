@@ -98,7 +98,8 @@ export function QuickSettings({
   const forced = settings.skin.scheme !== "both";
   const scheme = resolvedScheme(settings);
   const builtins = skins.filter((s) => s.source === "builtin");
-  const installed = skins.filter((s) => s.source !== "builtin");
+  // A disabled skin (`sessionpipe-gui skin disable <id>`) stays out of the popover.
+  const installed = skins.filter((s) => s.source !== "builtin" && !s.disabled);
   const row = (s: InstalledSkin) => (
     <SkinRow key={s.id} skin={s} scheme={scheme} on={current === s.id} onPick={() => setSkin(s)} />
   );
@@ -253,6 +254,7 @@ function SkinRow({
     skin.fonts?.length ? "fonts" : "",
     skin.css ? "css" : "",
     skin.linked ? "linked" : "",
+    skin.bundled ? "bundled" : "",
   ].filter(Boolean);
   return (
     <li>

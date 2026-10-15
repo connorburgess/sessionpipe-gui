@@ -8,11 +8,12 @@
 // command's config in the environment (global=true, the global prefix), so the dev
 // dependencies land in the wrong place and the build tools are missing here. When that
 // happens, they are installed into the clone with that config cleared.
+
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (process.env.SPGUI_SKIP_PREPARE === "1") process.exit(0);
@@ -29,7 +30,8 @@ const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-do
   }
 });
 const env = { ...process.env };
-for (const k of Object.keys(env)) if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
+for (const k of Object.keys(env))
+  if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
 env.npm_config_global = "false";
 if (!haveTools) {
   console.log("sessionpipe-gui: installing the build tools into the checkout (one time)…");
