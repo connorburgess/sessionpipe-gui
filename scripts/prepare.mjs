@@ -3,8 +3,11 @@
 // runs this: build once so the CLI exists, with Canvas and Office from the tracked
 // bundled/ copy when the themes repo isn't beside us. A checkout that already has a
 // build (a contributor's `npm ci`) is left alone; `npm run build` is the explicit way.
-// npm's git preparation does not always have the dev dependencies in place when this
-// runs, so the build tools are installed here if they are missing.
+//
+// `npm install -g git+…` is the awkward case: npm prepares the clone with the outer
+// command's config in the environment (global=true, the global prefix), so the dev
+// dependencies land in the wrong place and the build tools are missing here. When that
+// happens, they are installed into the clone with that config cleared.
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -17,7 +20,7 @@ if (existsSync(path.join(root, "dist", "cli.js")) && existsSync(path.join(root, 
   process.exit(0);
 }
 const require = createRequire(path.join(root, "package.json"));
-const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-dom"].every((m) => {
+const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-dom", "typescript"].every((m) => {
   try {
     require.resolve(`${m}/package.json`);
     return true;
@@ -25,14 +28,17 @@ const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-do
     return false;
   }
 });
+const env = { ...process.env };
+for (const k of Object.keys(env)) if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
+env.npm_config_global = "false";
 if (!haveTools) {
-  console.log("sessionpipe-gui: installing build tools (one time)…");
+  console.log("sessionpipe-gui: installing the build tools into the checkout (one time)…");
   const i = spawnSync(
     "npm",
-    ["install", "--include=dev", "--no-save", "--no-audit", "--no-fund", "--ignore-scripts", "--silent"],
-    { cwd: root, stdio: "inherit" },
+    ["install", "--include=dev", "--no-save", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", root],
+    { cwd: root, stdio: "inherit", env },
   );
   if (i.status !== 0) process.exit(i.status ?? 1);
 }
-const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: root, stdio: "inherit" });
+const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: root, stdio: "inherit", env });
 process.exit(r.status ?? 1);

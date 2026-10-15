@@ -1,5 +1,5 @@
 node_modules/
-dist/
+/dist/
 coverage/
 *.log
 .DS_Store
@@ -8,3 +8,5 @@ test-results/
 playwright-report/
 .env
 .env.*
+# the tracked built copy of the bundled views is not a build output
+!bundled/**/dist/
