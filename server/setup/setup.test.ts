@@ -145,9 +145,9 @@ describe("this machine", () => {
     expect(isThisMachine("192.168.1.9", ["10.0.0.2"])).toBe(false);
   });
   it("matches a machine name with or without .local, any case", () => {
-    expect(sameMachine("Misha-Petrov-laptop", "Misha-Petrov-laptop.local")).toBe(true);
-    expect(sameMachine("misha-petrov-laptop.local", "Misha-Petrov-laptop")).toBe(true);
-    expect(sameMachine("studio-mac", "Misha-Petrov-laptop.local")).toBe(false);
+    expect(sameMachine("Build-Box", "Build-Box.local")).toBe(true);
+    expect(sameMachine("build-box.local", "Build-Box")).toBe(true);
+    expect(sameMachine("studio-mac", "Build-Box.local")).toBe(false);
     expect(sameMachine(undefined, "x")).toBe(false);
   });
   it("finds the CLI at ~/.local/bin or on the PATH and reads its version without running it", () => {

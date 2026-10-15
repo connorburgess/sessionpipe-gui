@@ -1,0 +1,25 @@
+name: Feature request
+description: Something the GUI should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do and where the GUI got in the way. A concrete moment beats a general wish.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would change
+      description: Optional. A sketch, a screenshot with marks on it, or a sentence.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Would this be
+      options:
+        - A change to the GUI itself
+        - A view, skin or plugin (could live in sessionpipe-gui-themes)
+        - A change the sessionpipe protocol or CLI would need first
+        - Not sure

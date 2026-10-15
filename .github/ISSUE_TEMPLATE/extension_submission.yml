@@ -1,0 +1,42 @@
+name: View, skin or plugin submission
+description: Propose an extension for the official collection, or list one you publish yourself.
+labels: [extension]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The official views, skins and plugins live in [sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes); a PR there is the normal route for one you want maintained with the GUI. Use this form to propose it first, or to list one you publish on npm or git under your own name.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - View (an ES module with theme.json, drawn with the ThemeApi)
+        - Skin (skin.json: tokens, fonts, shape, an optional stylesheet; no code)
+        - Plugin (server-side, plugin.json, the PluginApi)
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where it is
+      description: A repo, an npm package or a branch.
+      placeholder: github.com/you/sessionpipe-gui-view-timeline
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does
+      description: A paragraph and a screenshot (from `--demo` data).
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: House rules
+      options:
+        - label: Apache-2.0 (or a compatible license), SPDX headers, DCO sign-off on the commits.
+        - label: Loads nothing from the network at runtime; a plugin's secrets go through `type: "secret"` settings, never into the code or the manifest.
+        - label: Uses the host's tokens by name; amber only for *needs you*; `prefers-reduced-motion` honoured.
+        - label: Has a dev harness or tests, and `dist/index.js` well under 150 KB for a view.

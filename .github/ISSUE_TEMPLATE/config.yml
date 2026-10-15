@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/spacesheep-dev/sessionpipe-gui/security/advisories/new
+    about: Anything that could let someone read sessions, forge a command or reach a machine. Private.
+  - name: The sessionpipe protocol and CLI
+    url: https://github.com/spacesheep-dev/sessionpipe/issues
+    about: Hooks, adapters, the daemon, the spec. This repo is only the GUI.

@@ -7,7 +7,7 @@ import { PREVIEW_CHARS, slimEvent } from "./slim.js";
 import { Store } from "./store.js";
 
 const CWD = "~/Desktop/Projects/sessionpipe";
-const HOME = "/Users/mishapetrov";
+const HOME = "/Users/alex";
 
 describe("pathsInInput", () => {
   it("reads the file a Claude Code Edit / Write / NotebookEdit names, and nothing from Read or Bash", () => {

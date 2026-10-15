@@ -39,8 +39,8 @@ client against a receiver you can see into.
 
 | Path | Owner | Exports (contract) |
 |---|---|---|
-| `shared/api.ts` | lead (change by agreement) | Every wire type and route |
-| `server/http/router.ts`, `net.ts` | lead | `Router`, `Ctx`, `Reply`, `HttpError`, `isLoopback`, `lanAddresses` |
+| `shared/api.ts` | core (change by agreement) | Every wire type and route |
+| `server/http/router.ts`, `net.ts` | core | `Router`, `Ctx`, `Reply`, `HttpError`, `isLoopback`, `lanAddresses` |
 | `server/app.ts` | server-core | `createApp(opts): App` — the only composition root |
 | `server/config.ts` | server-core | state dir, sink token, UI key |
 | `server/store/*` | server-core | `Store`: `ingest(events, source) → IngestResult`, `snapshot()`, `session(key)`, `sessionDetail(key, after, limit)`, `feed(query)`, `forget(key)`, `subscribe(listener)`, `stats()`, `close()` |
@@ -62,7 +62,7 @@ client against a receiver you can see into.
 | `web/*` | web | the app; `web/src/mock/` a mock stream so it runs with no server |
 
 A module touches only its own paths; a change it needs elsewhere is a request to the
-owner (in a PR comment, or to the lead). `server/app.ts` wires modules by the exact
+owner (in a PR comment or an issue). `server/app.ts` wires modules by the exact
 function names above.
 
 ## The store's readings

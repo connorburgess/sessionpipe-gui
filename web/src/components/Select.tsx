@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The one custom select (the owner's rule: no native <select> anywhere in the GUI). A
+// The one custom select (house rule: no native <select> anywhere in the GUI). A
 // hairline trigger (36 px, or 28 px `sm`) and a listbox in a portal under document.body,
 // anchored below the trigger and flipped above when the room runs out; on a phone the
 // same list is a bottom sheet. The APG select-only combobox pattern: focus stays on the

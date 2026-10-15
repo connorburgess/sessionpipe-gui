@@ -1,0 +1,54 @@
+name: Bug report
+description: Something the GUI does wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. If this could let someone read sessions, forge a command or reach a machine, do **not** file it here: see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected. Redact tokens, keys and addresses before pasting.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: sessionpipe-gui version
+      description: The first line of the banner, or `npx sessionpipe-gui --version`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node and OS
+      placeholder: Node 22.12 · macOS 15.1
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Board / Session / Inbox / Review
+        - Feed / Machines
+        - Connect, setup or the QR code
+        - Control (sending, Allow / Deny, pairing, passkeys)
+        - TLS mode (--tls, the trust page)
+        - Receiver (events not arriving, sinks)
+        - Outbox tailing
+        - A view, skin or plugin
+        - CLI
+  - type: input
+    id: harness
+    attributes:
+      label: Harness and sessionpipe CLI version, if events are involved
+      placeholder: Claude Code 2.1.x · sessionpipe 0.7.x
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or console output
+      description: The receiver's stderr and the browser console, with secrets removed.
+      render: text

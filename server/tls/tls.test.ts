@@ -37,7 +37,7 @@ const get = (
 
 describe("hostname and SAN set", () => {
   it("lowercases the hostname, strips a .local suffix and appends one", () => {
-    expect(localHostname("Misha-Petrov-laptop.local")).toBe("misha-petrov-laptop.local");
+    expect(localHostname("Build-Box.local")).toBe("build-box.local");
     expect(localHostname("box")).toBe("box.local");
     expect(localHostname("my box.local.")).toBe("my-box.local");
     expect(localHostname("")).toBe("sessionpipe-gui.local");
