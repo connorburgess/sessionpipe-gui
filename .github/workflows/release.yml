@@ -66,6 +66,7 @@ jobs:
       - run: npm run pack:check
 
       - name: Publish
+        if: vars.PUBLISH_NPM == 'true'
         run: npm publish --provenance --access public
 
       - name: GitHub Release
