@@ -318,7 +318,11 @@ async function extensionCommand(parsed: Args): Promise<void> {
         const reg = listThemes(ops.dir, viewOpts());
         if (!reg.some((t) => t.id === arg)) fail(`no view "${arg}" (see \`view list\`)`);
         setDisabled(stateDir, readGuiConfig(stateDir), `view:${arg}`, verb === "disable");
-        out(verb === "disable" ? `${arg} is off: hidden from the rail; \`view enable ${arg}\` brings it back` : `${arg} is on`);
+        out(
+          verb === "disable"
+            ? `${arg} is off: hidden from the rail; \`view enable ${arg}\` brings it back`
+            : `${arg} is on`,
+        );
         return;
       }
       case "list":
@@ -340,7 +344,9 @@ async function extensionCommand(parsed: Args): Promise<void> {
         out(ops.remove(ops.dir, arg).message);
         return;
       default:
-        fail(`unknown ${ops.noun} command "${verb}" (list, add, link, remove${kind === "view" ? ", disable, enable" : ""})`);
+        fail(
+          `unknown ${ops.noun} command "${verb}" (list, add, link, remove${kind === "view" ? ", disable, enable" : ""})`,
+        );
     }
   } catch (e) {
     if (e instanceof InstallError) {

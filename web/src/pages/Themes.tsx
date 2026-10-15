@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CopyButton } from "../components/bits";
 import { Link } from "../lib/router";
 import { PluginsSection } from "../plugins/PluginsSection";
-import { fetchThemes, reloadThemes, useThemes } from "../themes/host/registry";
+import { fetchThemes, reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
 import "../themes/host/host.css";
 
 export const ADD_LINE = "sessionpipe-gui view add <folder | view.tgz | view.zip | npm-package | git-url>";
@@ -26,6 +26,18 @@ export function Themes() {
     try {
       await reloadThemes();
       setNote("Re-read the themes folder.");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async (id: string, off: boolean) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await setThemeDisabled(id, off);
+      setNote(off ? `${id} is off: hidden from the rail.` : `${id} is on.`);
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
     } finally {
@@ -53,19 +65,39 @@ export function Themes() {
                   {t.version && <span className="themes-row-ver">{t.version}</span>}
                   <span className="themes-row-id">/t/{t.id}</span>
                   {t.linked && <span className="themes-flag">linked</span>}
+                  {t.bundled && <span className="themes-flag">bundled</span>}
+                  {t.disabled && <span className="themes-flag">disabled</span>}
                   {t.experimental && <span className="themes-flag">experimental</span>}
                   {t.error && <span className="themes-flag themes-flag--err">broken</span>}
                 </div>
                 <div className="themes-row-open">
-                  {!t.error && (
+                  {!t.error && !t.disabled && (
                     <Link to={`/t/${encodeURIComponent(t.id)}`} className="btn btn--sm btn--ghost">
                       Open
                     </Link>
                   )}
+                  {!t.error && (
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      onClick={() => void toggle(t.id, !t.disabled)}
+                      disabled={!loopback || busy}
+                      title={
+                        loopback
+                          ? t.bundled
+                            ? "Bundled with the GUI: it cannot be removed, only hidden"
+                            : "Hide it from the rail without removing its files"
+                          : "Only from the machine running the receiver"
+                      }
+                      data-toggle={t.id}
+                    >
+                      {t.disabled ? "Enable" : "Disable"}
+                    </button>
+                  )}
                 </div>
                 <div className="themes-row-meta">
                   {t.description && <span>{t.description} · </span>}
-                  source <code>{t.source ?? "unknown"}</code>
+                  source <code>{t.bundled ? "bundled with the GUI" : (t.source ?? "unknown")}</code>
                   {t.dir && (
                     <>
                       {" "}
@@ -106,7 +138,9 @@ export function Themes() {
         </div>
         <p className="sect-note">
           Also <code>view link &lt;folder&gt;</code>, <code>view remove &lt;id&gt;</code>, <code>view list</code> (
-          <code>theme</code> is an alias). How to write one: <code>docs/theme-authoring.md</code> in the repository.
+          <code>theme</code> is an alias). Canvas and Office come bundled: they cannot be removed, only disabled (
+          <code>view disable &lt;id&gt;</code>, or the button above). How to write one:{" "}
+          <code>docs/theme-authoring.md</code> in the repository.
         </p>
       </section>
 

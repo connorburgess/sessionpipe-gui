@@ -28,11 +28,12 @@ export function ThemePage({ id }: { id: string }) {
   const [status, setStatus] = useState<"loading" | "mounted">("loading");
 
   // Primitive deps: the list is refetched on every reconnect and would otherwise remount.
-  const manifestKey = theme && !theme.error ? JSON.stringify([theme.url, theme.entry, theme.style, theme.linked]) : "";
+  const manifestKey =
+    theme && !theme.error && !theme.disabled ? JSON.stringify([theme.url, theme.entry, theme.style, theme.linked]) : "";
 
   useEffect(() => {
     const el = ref.current;
-    if (!theme || theme.error || !el) return;
+    if (!theme || theme.error || theme.disabled || !el) return;
     let cancelled = false;
     let unmount: (() => void) | null = null;
     let link: HTMLLinkElement | null = null;
@@ -116,8 +117,23 @@ export function ThemePage({ id }: { id: string }) {
   const notFound = loaded && !theme;
   return (
     <div className="theme-page" data-theme-page={id} data-status={failure ? "error" : status}>
-      <div className="theme-host" ref={ref} data-theme-id={id} hidden={!!failure || !theme || !!theme.error} />
+      <div
+        className="theme-host"
+        ref={ref}
+        data-theme-id={id}
+        hidden={!!failure || !theme || !!theme.error || !!theme.disabled}
+      />
       {theme?.error && <ErrorPanel title={`${theme.name || id} cannot load`} message={theme.error} url={theme.url} />}
+      {theme && !theme.error && theme.disabled && (
+        <ErrorPanel
+          title={`${theme.name || id} is disabled`}
+          message={
+            theme.bundled
+              ? "This view ships with the GUI and was turned off. Enable it on the Views page, or with `sessionpipe-gui view enable` on the receiver machine."
+              : "This view was turned off. Enable it on the Views page, or with `sessionpipe-gui view enable` on the receiver machine."
+          }
+        />
+      )}
       {failure && (
         <ErrorPanel
           title={`${theme?.name ?? id} failed to ${failure.stage === "import" ? "load" : "mount"}`}

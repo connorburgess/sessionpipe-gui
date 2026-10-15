@@ -5,8 +5,9 @@
 // outbox gets its first event, the CA is trusted, the daemon polls, a phone connects, a
 // message comes back delivered. Everything an action does is explained next to it.
 import type { SessionSummary, SetupStatus } from "@shared/api";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Ago, CopyButton, Spinner, Toggle } from "../components/bits";
+import { Select } from "../components/Select";
 import { ActivityRow } from "../control/Activity";
 import { controlApi, httpsPath, resetInfoCache } from "../control/api";
 import { sendCommand } from "../control/command";
@@ -726,6 +727,7 @@ function TryStep({
     [sessions, s],
   );
   const [key, setKey] = useState("");
+  const sessionId = useId();
   const chosen: SessionSummary | undefined = live.find((x) => x.key === key) ?? live[0];
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -819,15 +821,15 @@ function TryStep({
       )}
       {ready && live.length > 0 && (
         <form className="try-form" onSubmit={(e) => void send(e)} aria-label="Try a message">
-          <label>
+          <label htmlFor={sessionId}>
             session
-            <select value={chosen?.key ?? ""} onChange={(e) => setKey(e.target.value)} disabled={busy}>
-              {live.map((x) => (
-                <option key={x.key} value={x.key}>
-                  {sessionTitle(x)} · {x.state}
-                </option>
-              ))}
-            </select>
+            <Select<string>
+              id={sessionId}
+              value={chosen?.key ?? ""}
+              onChange={setKey}
+              disabled={busy}
+              options={live.map((x) => ({ value: x.key, label: sessionTitle(x), hint: x.state }))}
+            />
           </label>
           <label>
             message

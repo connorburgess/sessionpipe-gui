@@ -68,6 +68,15 @@ export async function reloadThemes(): Promise<void> {
   }
 }
 
+/** Hide a view (a bundled one cannot be removed) or show it again; loopback only. */
+export async function setThemeDisabled(id: string, off: boolean): Promise<void> {
+  const themes = await request(
+    `${THEME_ROUTES.toggle}/${encodeURIComponent(id)}/${off ? "disable" : "enable"}`,
+    "POST",
+  );
+  set({ themes, loaded: true, error: null });
+}
+
 export function useThemes(): ThemesState {
   return useSyncExternalStore(
     subscribe,

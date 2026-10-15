@@ -90,7 +90,16 @@ session runs in. This project is not affiliated with, sponsored by or endorsed b
 of them. Antigravity has no icon there, so it gets a plain glyph of ours, a ring with an
 arrow, not a guess at Google's logo. Harnesses without a mark keep their two-letter
 monogram. The marks stay monochrome and never take a brand colour; the amber is still
-the only accent.
+the only accent of the stock scheme.
+
+The default skin, **Spacesheep**, carries the colours of [spacesheep](https://spacesheep.dev)
+(the sheep's flame for *needs you*, its indigo for *working*, teal for *stale*, a ground
+tinted toward the brand's violet), read from the spacesheep clone's `theme.ts` and brand
+SVGs into oklch (`shared/skins-builtin.ts`; the palette notes are in the themes repo,
+`packages/color-themes/README.md`). It uses no logo or wordmark of spacesheep's: it is a
+colour palette, not a rebrand, and in it the flame orange takes the one accent slot amber
+has in Plain. The server-rendered pages (`/trust`, the 401 page) and the OG image keep the
+neutral stock palette for now.
 
 ## Trademark
 

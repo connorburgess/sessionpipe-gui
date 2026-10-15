@@ -22,8 +22,9 @@ const tabBarIsOn = async (page: Page) => {
   // Never more than five tabs: the first four pages, then More for everything else.
   const tabs = bar.locator(":scope > a.nav-link, :scope > .more > .more-tab");
   expect(await tabs.count()).toBeLessThanOrEqual(5);
-  for (const label of ["Board", "Feed", "Machines", "Connect"])
-    await expect(bar.getByRole("link", { name: label })).toBeVisible();
+  // The first pages of the shell's list are the tabs; Board leads and the inbox (with its
+  // badge) is beside it, whatever else the list carries.
+  for (const label of ["Board", "Inbox"]) await expect(bar.getByRole("link", { name: label })).toBeVisible();
   // No tab's label is cut short.
   const clipped = await bar
     .locator(".nav-label")
@@ -43,17 +44,35 @@ test.describe("phone", () => {
     await tabBarIsOn(page);
     await noSidewaysScroll(page);
     await expect(page.locator("nav.tabbar a[aria-current='page']")).toHaveText(/Board/);
-    for (const [path, label, marker] of [
-      ["/feed", "Feed", "ol.rows"],
-      ["/machines", "Machines", "section.machine"],
-      ["/connect", "Connect", ".sect--phone"],
-    ] as const) {
-      await page.locator("nav.tabbar").getByRole("link", { name: label }).click();
-      await expect(page).toHaveURL(new RegExp(`${path}$`));
-      await expect(page.locator(marker).first()).toBeVisible();
+    // What each page shows once open; a page without an entry is checked by its URL alone.
+    const MARKER: Record<string, string> = {
+      inbox: ".inbox",
+      feed: "ol.rows",
+      machines: "section.machine",
+      connect: ".sect--phone",
+    };
+    const bar = page.locator("nav.tabbar");
+    const onBar = (
+      await bar.locator(":scope > a.nav-link").evaluateAll((els) => els.map((el) => el.getAttribute("data-nav")))
+    ).filter((k): k is string => !!k && k !== "board");
+    for (const key of onBar) {
+      await bar.locator(`a[data-nav='${key}']`).click();
+      await expect(page).toHaveURL(new RegExp(`/${key}$`));
+      if (MARKER[key]) await expect(page.locator(MARKER[key]).first()).toBeVisible();
       await tabBarIsOn(page);
       await noSidewaysScroll(page);
-      await expect(page.locator("nav.tabbar a[aria-current='page']")).toHaveText(new RegExp(label));
+      await expect(bar.locator("a[aria-current='page']")).toHaveAttribute("data-nav", key);
+    }
+    // The pages past the fourth sit behind More, which then carries the current mark.
+    const behindMore = ["inbox", "feed", "review", "machines", "connect"].filter((k) => !onBar.includes(k));
+    for (const key of behindMore) {
+      await bar.getByRole("button", { name: "More" }).click();
+      await page.getByRole("dialog", { name: "More" }).locator(`a[data-nav='${key}']`).click();
+      await expect(page).toHaveURL(new RegExp(`/${key}$`));
+      if (MARKER[key]) await expect(page.locator(MARKER[key]).first()).toBeVisible();
+      await tabBarIsOn(page);
+      await noSidewaysScroll(page);
+      await expect(bar.locator("[aria-current='page']")).toHaveText(/More/);
     }
   });
 
@@ -86,7 +105,7 @@ test.describe("phone", () => {
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     await expect(pop).toBeVisible();
     await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
-    await expect(pop.locator(".qs-theme").first()).toHaveText(/Default/);
+    await expect(pop.locator(".qs-theme").first()).toHaveText(/Spacesheep/);
     await page.keyboard.press("Escape");
     await expect(pop).toHaveCount(0);
     // Esc closes the sheet too.

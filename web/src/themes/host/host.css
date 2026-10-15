@@ -94,7 +94,7 @@
   height: 0;
   margin: 12px 12px;
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: var(--hairline) solid var(--line);
 }
 
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */
@@ -114,14 +114,14 @@
 .themes-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
+  border-top: var(--hairline) solid var(--line);
 }
 .themes-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 4px 16px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--hairline) solid var(--line);
 }
 .themes-row-head {
   display: flex;
@@ -141,7 +141,7 @@
 }
 .themes-flag {
   padding: 1px 8px;
-  border: 1px solid var(--line-2);
+  border: var(--hairline) solid var(--line-2);
   border-radius: var(--radius-pill);
   color: var(--fg-3);
   font-size: var(--text-sm);
@@ -171,6 +171,8 @@
   grid-row: 1;
   grid-column: 2;
   align-self: start;
+  display: flex;
+  gap: 4px;
 }
 .themes-empty {
   color: var(--fg-3);

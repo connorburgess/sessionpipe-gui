@@ -35,6 +35,8 @@ export interface ThemeRouteDeps {
   uiAuth: (ctx: Ctx) => boolean;
   /** <stateDir>/themes-state */
   stateDir: string;
+  /** Remember a view as off (or on again) in config.json; the registry is rescanned after. */
+  setDisabled?: (id: string, off: boolean) => void;
 }
 
 export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
@@ -62,6 +64,21 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
       return { status: 200, json: { themes } };
     }),
   );
+
+  for (const verb of ["disable", "enable"] as const) {
+    router.post(
+      `${THEME_ROUTES.toggle}/:id/${verb}`,
+      guard((ctx): Reply => {
+        if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+        const id = ctx.params.id ?? "";
+        if (!THEME_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
+        if (!deps.registry.has(id)) return { status: 404, json: { reason: "not_found" } };
+        deps.setDisabled?.(id, verb === "disable");
+        const themes = deps.registry.scan().map((t) => publicTheme(t, true));
+        return { status: 200, json: { themes } };
+      }),
+    );
+  }
 
   const stateFile = (id: string): string => path.join(deps.stateDir, `${id}.json`);
   const knownId = (ctx: Ctx): string | Reply => {

@@ -14,6 +14,9 @@ export interface GuiConfig {
   createdAt: string;
   /** TLS mode on by default (`--tls` persists true, `--no-tls` false); absent = off. */
   tls?: boolean;
+  /** Extensions turned off, as `<kind>:<id>` (`view:canvas`): the way a bundled one, which
+   *  cannot be removed, is hidden. Honoured by the registries and the rail. */
+  disabled?: string[];
 }
 
 export function defaultStateDir(): string {
@@ -45,6 +48,7 @@ export function readGuiConfig(dir: string): GuiConfig {
     createdAt: typeof cfg.createdAt === "string" ? cfg.createdAt : new Date().toISOString(),
   };
   if (typeof cfg.tls === "boolean") full.tls = cfg.tls;
+  if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
   if (!complete) writeGuiConfig(dir, full);
   return full;
 }
@@ -65,6 +69,19 @@ export function rotateSinkToken(dir: string, cfg: GuiConfig): GuiConfig {
 export function setTlsPreference(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   const next = { ...cfg, tls: on };
   if (cfg.tls !== on) writeGuiConfig(dir, next);
+  return next;
+}
+
+/** Turn an extension off or on again: `key` is `<kind>:<id>`, e.g. `view:canvas`. */
+export function setDisabled(dir: string, cfg: GuiConfig, key: string, off: boolean): GuiConfig {
+  const cur = cfg.disabled ?? [];
+  const has = cur.includes(key);
+  if (has === off) return cfg;
+  const disabled = off ? [...cur, key] : cur.filter((k) => k !== key);
+  const next: GuiConfig = { ...cfg };
+  if (disabled.length) next.disabled = disabled;
+  else delete next.disabled;
+  writeGuiConfig(dir, next);
   return next;
 }
 

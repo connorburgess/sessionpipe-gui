@@ -87,7 +87,7 @@ describe("ThemeRegistry", () => {
       symlinkSync(outside, path.join(themes, "linked"), "dir");
       symlinkSync(path.join(tmp.dir, "gone"), path.join(themes, "dangling"), "dir");
 
-      const reg = new ThemeRegistry(themes);
+      const reg = new ThemeRegistry(themes, { bundledDir: path.join(tmp.dir, "no-bundled") });
       const byId = Object.fromEntries(reg.list().map((t) => [t.id, t]));
       expect(Object.keys(byId).sort()).toEqual(["alpha", "beta", "dangling", "delta", "empty", "gamma", "linked"]);
       expect(byId.alpha).toMatchObject({
@@ -122,7 +122,55 @@ describe("ThemeRegistry", () => {
   });
 
   it("is empty for a missing folder", () => {
-    expect(new ThemeRegistry("/nonexistent/spgui-themes").list()).toEqual([]);
+    expect(new ThemeRegistry("/nonexistent/spgui-themes", { bundledDir: "/nonexistent/bundled" }).list()).toEqual([]);
+  });
+
+  it("lists bundled views after the person's own, an install of the same id winning; disabled ones stay listed", () => {
+    const tmp = tempDir();
+    try {
+      const themes = path.join(tmp.dir, "themes");
+      const bundled = path.join(tmp.dir, "bundled", "views");
+      makeTheme(path.join(bundled, "canvas"), { name: "Canvas (bundled)", version: "1.0.0", experimental: true });
+      makeTheme(path.join(bundled, "office"), { name: "Office", version: "1.0.0" });
+      makeTheme(path.join(themes, "canvas"), { name: "Canvas (mine)", version: "2.0.0" });
+      makeTheme(path.join(themes, "zeta"));
+      let off: string[] = [];
+      const reg = new ThemeRegistry(themes, { bundledDir: bundled, disabled: () => off });
+      expect(reg.list().map((t) => [t.id, t.name, t.bundled ?? false])).toEqual([
+        ["canvas", "Canvas (mine)", false],
+        ["zeta", "Theme zeta", false],
+        ["office", "Office", true],
+      ]);
+      expect(reg.get("office")).toMatchObject({ source: "bundled", bundled: true, dir: path.join(bundled, "office") });
+      expect(reg.get("canvas")!.version).toBe("2.0.0");
+      expect(reg.isBundled("canvas")).toBe(true);
+      expect(reg.isBundled("zeta")).toBe(false);
+      // Disabled: listed, flagged, but not loadable.
+      off = ["view:office", "view:zeta"];
+      reg.scan();
+      expect(
+        reg
+          .list()
+          .filter((t) => t.disabled)
+          .map((t) => t.id),
+      ).toEqual(["zeta", "office"]);
+      expect(reg.get("office")).toBeUndefined();
+      expect(reg.has("office")).toBe(true);
+      off = [];
+      reg.scan();
+      expect(reg.get("office")).toBeDefined();
+      // Removing a bundled view says to disable it instead; removing an install of the same id works.
+      expect(() => removeTheme(themes, "office", { bundledDir: bundled })).toThrow(
+        /bundled with sessionpipe-gui.*view disable office/,
+      );
+      expect(removeTheme(themes, "canvas", { bundledDir: bundled }).message).toBe("removed canvas");
+      expect(new ThemeRegistry(themes, { bundledDir: bundled }).get("canvas")!.name).toBe("Canvas (bundled)");
+      const out = formatList(themes, listThemes(themes, { bundledDir: bundled, disabled: () => ["view:office"] }));
+      expect(out).toMatch(/^canvas\s+Canvas \(bundled\) 1\.0\.0\s+\[bundled, experimental\]/m);
+      expect(out).toMatch(/^office\s+Office 1\.0\.0\s+\[bundled, disabled\]/m);
+    } finally {
+      tmp.cleanup();
+    }
   });
 
   it("publicTheme keeps dir for loopback only", () => {
@@ -175,7 +223,15 @@ describe("theme routes", () => {
     makeTheme(path.join(themes, "broken"), { api: 42 });
     writeFileSync(path.join(tmp.dir, "secret.txt"), "secret");
     symlinkSync(path.join(tmp.dir, "secret.txt"), path.join(themes, "one", "leak.txt"));
-    app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true, webDir: tmp.dir });
+    makeTheme(path.join(tmp.dir, "bundled", "views", "shipped"), { name: "Shipped" });
+    app = await createApp({
+      port: 0,
+      stateDir: tmp.dir,
+      outbox: false,
+      quiet: true,
+      webDir: tmp.dir,
+      bundledDir: path.join(tmp.dir, "bundled", "views"),
+    });
   });
   afterAll(async () => {
     await app.close();
@@ -184,12 +240,34 @@ describe("theme routes", () => {
 
   const url = (p: string) => `${app.url}${p}`;
 
+  it("disables and enables a view on POST (loopback), remembered in config.json", async () => {
+    const list = async () =>
+      ((await (await fetch(url(THEME_ROUTES.list))).json()) as { themes: InstalledTheme[] }).themes;
+    expect((await list()).find((t) => t.id === "shipped")).toMatchObject({ bundled: true, source: "bundled" });
+    expect((await fetch(url("/themes/shipped/index.js"))).status).toBe(200);
+    const res = await fetch(url(`${THEME_ROUTES.toggle}/shipped/disable`), { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { themes: InstalledTheme[] }).themes.find((t) => t.id === "shipped")!.disabled).toBe(
+      true,
+    );
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, "config.json"), "utf8")).disabled).toEqual(["view:shipped"]);
+    expect((await fetch(url("/themes/shipped/index.js"))).status).toBe(404);
+    expect(app.config().disabled).toEqual(["view:shipped"]);
+    const on = await fetch(url(`${THEME_ROUTES.toggle}/shipped/enable`), { method: "POST" });
+    expect(
+      ((await on.json()) as { themes: InstalledTheme[] }).themes.find((t) => t.id === "shipped")!.disabled,
+    ).toBeUndefined();
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, "config.json"), "utf8")).disabled).toBeUndefined();
+    expect((await fetch(url(`${THEME_ROUTES.toggle}/nope/disable`), { method: "POST" })).status).toBe(404);
+    expect((await fetch(url(`${THEME_ROUTES.toggle}/Nope!/disable`), { method: "POST" })).status).toBe(400);
+  });
+
   it("lists installed themes, with dir on loopback and errors kept", async () => {
     const res = await fetch(url(THEME_ROUTES.list));
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const { themes: list } = (await res.json()) as { themes: InstalledTheme[] };
-    expect(list.map((t) => t.id)).toEqual(["broken", "one"]);
+    expect(list.map((t) => t.id)).toEqual(["broken", "one", "shipped"]);
     expect(list[1]).toMatchObject({ name: "Theme one", url: "/themes/one/", dir: path.join(themes, "one") });
     expect(list[0]!.error).toMatch(/api 42/);
   });
@@ -197,11 +275,11 @@ describe("theme routes", () => {
   it("reloads on POST (loopback) and sees a new theme", async () => {
     makeTheme(path.join(themes, "two"));
     let list = ((await (await fetch(url(THEME_ROUTES.list))).json()) as { themes: InstalledTheme[] }).themes;
-    expect(list.map((t) => t.id)).toEqual(["broken", "one"]);
+    expect(list.map((t) => t.id)).toEqual(["broken", "one", "shipped"]);
     const res = await fetch(url(THEME_ROUTES.reload), { method: "POST" });
     expect(res.status).toBe(200);
     list = ((await res.json()) as { themes: InstalledTheme[] }).themes;
-    expect(list.map((t) => t.id)).toEqual(["broken", "one", "two"]);
+    expect(list.map((t) => t.id)).toEqual(["broken", "one", "two", "shipped"]);
     expect((await fetch(url(THEME_ROUTES.reload))).status).toBe(405);
   });
 

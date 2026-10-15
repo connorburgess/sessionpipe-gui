@@ -1,14 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: platform. The installed views (themes): one folder per theme under
 // <stateDir>/themes/<id>/ with a theme.json (ThemeManifest) and the entry module.
-// Scanned at boot and on POST /api/ui/themes/reload. A folder whose manifest is wrong
-// is still listed, with `error`, so the problem shows instead of the theme vanishing.
+// Scanned at boot and on POST /api/ui/themes/reload, then the views that ship with the
+// GUI (dist/bundled/views, scripts/build.mjs): listed after the person's own, so an install
+// of the same id overrides the bundled copy; `source: "bundled"`, removable only by
+// disabling (config.json `disabled`, honoured here and by the rail). A folder whose
+// manifest is wrong is still listed, with `error`, so the problem shows instead of the theme vanishing.
 // The folder layout, the scan and the installer are shared with the other kinds of
 // extension (server/extensions); this file is what makes a view a view.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { type InstalledTheme, THEME_API_VERSION, THEME_ID_RE, type ThemeManifest } from "../../shared/theme-api.js";
-import { type ExtensionKind, isRelativeFile, readManifestOf, scanKind } from "../extensions/kind.js";
+import {
+  bundledDir,
+  type ExtensionKind,
+  isRelativeFile,
+  readManifestOf,
+  type ScannedFolder,
+  scanKind,
+} from "../extensions/kind.js";
 
 /** Everything the server knows about one installed theme. */
 export interface ThemeEntry extends InstalledTheme {
@@ -75,24 +85,48 @@ export function validateManifest(raw: unknown, dir?: string): ThemeManifest {
 
 export { isRelativeFile };
 
+export interface ThemeRegistryOptions {
+  /** dist/bundled/views: the views that ship with the GUI; default `bundledDir("view")`. */
+  bundledDir?: string;
+  /** The ids turned off (config.json `disabled`, as `view:<id>`); read on every scan. */
+  disabled?: () => readonly string[];
+}
+
 export class ThemeRegistry {
   private entries = new Map<string, ThemeEntry>();
+  readonly bundledDir: string;
+  private readonly disabled: () => readonly string[];
 
-  constructor(readonly themesDir: string) {
+  constructor(
+    readonly themesDir: string,
+    opts: ThemeRegistryOptions = {},
+  ) {
+    this.bundledDir = opts.bundledDir ?? bundledDir("view");
+    this.disabled = opts.disabled ?? (() => []);
     this.scan();
   }
 
-  /** Re-read every folder under the themes dir. Never throws: a missing dir is empty. */
+  /** Re-read every folder under the themes dir, then the bundled ones the person has not
+   *  overridden. Never throws: a missing dir is empty. */
   scan(): ThemeEntry[] {
     const next = new Map<string, ThemeEntry>();
-    for (const f of scanKind(viewKind(this.themesDir))) {
+    const off = new Set(this.disabled().map((k) => k.replace(/^view:/, "")));
+    const add = (f: ScannedFolder<ThemeManifest>, bundled: boolean) => {
+      if (bundled && next.has(f.id)) return;
       const url = `${FILES_PREFIX}/${f.id}/`;
       const entry: ThemeEntry = f.manifest
         ? { ...f.manifest, url, dir: f.dir }
         : { id: f.id, name: f.id, version: "", api: 0, url, dir: f.dir, error: f.error ?? "unreadable" };
       if (f.linked) entry.linked = true;
+      if (bundled) {
+        entry.bundled = true;
+        entry.source = "bundled";
+      }
+      if (off.has(f.id)) entry.disabled = true;
       next.set(f.id, entry);
-    }
+    };
+    for (const f of scanKind(viewKind(this.themesDir))) add(f, false);
+    for (const f of scanKind(viewKind(this.bundledDir))) add(f, true);
     this.entries = next;
     return this.list();
   }
@@ -101,10 +135,15 @@ export class ThemeRegistry {
     return [...this.entries.values()];
   }
 
-  /** A loadable theme (no error) by id. */
+  /** A loadable theme (no error, not disabled) by id. */
   get(id: string): ThemeEntry | undefined {
     const t = this.entries.get(id);
-    return t && !t.error ? t : undefined;
+    return t && !t.error && !t.disabled ? t : undefined;
+  }
+
+  /** A bundled entry by id, whether or not an install overrides it. */
+  isBundled(id: string): boolean {
+    return existsSync(path.join(this.bundledDir, id, "theme.json"));
   }
 
   has(id: string): boolean {

@@ -243,10 +243,17 @@ function SkinRow({
   onPick: () => void;
 }) {
   const tokens = skinTokensFor(skin, scheme);
-  const hint = skin.error ? "broken" : isPlain(skin) ? "the stock tokens" : schemeLabel(skin.scheme);
-  const extras = [skin.fonts?.length ? "fonts" : "", skin.css ? "css" : "", skin.linked ? "linked" : ""].filter(
-    Boolean,
-  );
+  const hint = skin.error
+    ? "broken"
+    : isPlain(skin)
+      ? "the stock tokens"
+      : `${schemeLabel(skin.scheme)}${skin.warning ? " · low contrast" : ""}`;
+  const extras = [
+    skin.warning ?? "",
+    skin.fonts?.length ? "fonts" : "",
+    skin.css ? "css" : "",
+    skin.linked ? "linked" : "",
+  ].filter(Boolean);
   return (
     <li>
       <button

@@ -6,6 +6,7 @@
 // installer in ./install.ts; skins will do the same without a change here.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type ExtensionKindName = "view" | "skin" | "plugin";
 
@@ -32,6 +33,16 @@ export interface ExtensionKind<M extends BaseManifest = BaseManifest> {
 }
 
 export const EXTENSION_ID_RE = /^[a-z][a-z0-9-]{1,40}$/;
+
+/** Where the extensions that ship with the GUI live: `dist/bundled/<kind>s/<id>/`, copied
+ *  from the themes repo at build time (scripts/build.mjs --bundle-from). Beside the bundled
+ *  `dist/cli.js`, or, from source, the repo's `dist/`. The folder may be absent. */
+export function bundledDir(kind: ExtensionKindName): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const sub = path.join("bundled", `${kind}s`);
+  for (const c of [path.join(here, sub), path.join(here, "..", "..", "dist", sub)]) if (existsSync(c)) return c;
+  return path.join(here, sub);
+}
 
 /** Read and validate the kind's manifest in `dir`; throws with a message for the person. */
 export function readManifestOf<M extends BaseManifest>(kind: ExtensionKind<M>, dir: string): M {

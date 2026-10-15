@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Per-device display settings, persisted in localStorage: the appearance (follow the OS,
-// dark, light), a color theme (a token set; forces its scheme while applied) and the
-// text size (a scale on the root font-size, so every rem-based size follows).
+// dark, light), the skin (a token / font / shape package; a single-scheme skin forces its
+// scheme while applied, a "both" skin follows the appearance) and the text size (a scale
+// on the root font-size, so every rem-based size follows). The skin itself is stored,
+// not only its id, so it applies at boot before any fetch. A device with no stored skin
+// gets Spacesheep; a device that chose a color theme before skins existed keeps it (the
+// old key is read once and rewritten under the new one).
+import type { ColorTheme } from "@shared/color-theme";
+import { skinSchemeFor } from "@shared/skin-api";
 import { useSyncExternalStore } from "react";
-import { applyColorTheme, type ColorTheme } from "./colorTheme";
+import { applySkin, BUILTIN_SKINS, DEFAULT_SKIN, findSkin, type InstalledSkin, subscribeSkins } from "./skins";
 
 export type Theme = "auto" | "light" | "dark";
 export type TextSize = 0.9 | 1 | 1.1 | 1.25;
@@ -11,34 +17,67 @@ export const TEXT_SIZES: readonly TextSize[] = [0.9, 1, 1.1, 1.25];
 
 export interface Settings {
   appearance: Theme;
-  /** The applied color theme itself (not just its id), so it applies at boot before any fetch. */
-  colorTheme: ColorTheme | null;
+  /** The applied skin itself (not just its id), so it applies at boot before any fetch. */
+  skin: InstalledSkin;
   textSize: TextSize;
 }
 
 const KEY = "sessionpipe-gui.theme";
-const KEY_COLOR = "sessionpipe-gui.colorTheme";
+const KEY_SKIN = "sessionpipe-gui.skin";
+/** Before skins: the color theme, stored whole. Read once, then moved to KEY_SKIN. */
+const KEY_COLOR_OLD = "sessionpipe-gui.colorTheme";
 const KEY_TEXT = "sessionpipe-gui.textSize";
 const listeners = new Set<() => void>();
 
+const isSkin = (v: unknown): v is InstalledSkin =>
+  !!v &&
+  typeof v === "object" &&
+  typeof (v as InstalledSkin).id === "string" &&
+  typeof (v as InstalledSkin).scheme === "string" &&
+  !!(v as InstalledSkin).tokens &&
+  typeof (v as InstalledSkin).tokens === "object";
+
+/** A stored color theme as a skin: the built-in of that id, else a token-only skin. */
+export function skinFromColorTheme(ct: ColorTheme): InstalledSkin {
+  const builtin = BUILTIN_SKINS.find((s) => s.id === ct.id);
+  if (builtin) return builtin;
+  return {
+    id: ct.id,
+    name: ct.name,
+    version: "",
+    scheme: ct.scheme,
+    source: "color-theme",
+    tokens: { [ct.scheme]: ct.tokens },
+    origin: `${ct.id}.json`,
+  };
+}
+
 const read = (): Settings => {
   let appearance: Theme = "auto";
-  let colorTheme: ColorTheme | null = null;
+  let skin: InstalledSkin = DEFAULT_SKIN;
   let textSize: TextSize = 1;
   try {
     const v = localStorage.getItem(KEY);
     if (v === "light" || v === "dark") appearance = v;
-    const c = localStorage.getItem(KEY_COLOR);
-    if (c) {
-      const parsed = JSON.parse(c) as ColorTheme;
-      if (parsed && typeof parsed.id === "string" && parsed.tokens) colorTheme = parsed;
+    const s = localStorage.getItem(KEY_SKIN);
+    if (s) {
+      const parsed: unknown = JSON.parse(s);
+      if (isSkin(parsed)) skin = parsed;
+    } else {
+      const old = localStorage.getItem(KEY_COLOR_OLD);
+      if (old) {
+        const parsed = JSON.parse(old) as ColorTheme;
+        if (parsed && typeof parsed.id === "string" && parsed.tokens) skin = skinFromColorTheme(parsed);
+        localStorage.setItem(KEY_SKIN, JSON.stringify(skin));
+        localStorage.removeItem(KEY_COLOR_OLD);
+      }
     }
     const t = Number(localStorage.getItem(KEY_TEXT));
     if ((TEXT_SIZES as readonly number[]).includes(t)) textSize = t as TextSize;
   } catch {
     // private mode or blocked storage: defaults
   }
-  return { appearance, colorTheme, textSize };
+  return { appearance, skin, textSize };
 };
 let settings: Settings = read();
 
@@ -51,14 +90,24 @@ const write = (key: string, value: string | null) => {
   }
 };
 
+/** The scheme the OS asks for right now. */
+const osScheme = (): "dark" | "light" =>
+  typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+/** The scheme the page renders in for these settings: the skin's own, else the appearance. */
+export function resolvedScheme(s: Settings = settings): "dark" | "light" {
+  return skinSchemeFor(s.skin, s.appearance === "auto" ? osScheme() : s.appearance);
+}
+
 /** Puts every setting on the document. Called at boot and after each change. */
 export function applySettings(s: Settings = settings): void {
   const root = document.documentElement;
-  const scheme = s.colorTheme?.scheme ?? s.appearance;
-  if (scheme === "auto") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", scheme);
-  applyColorTheme(s.colorTheme);
-  root.style.fontSize = s.textSize === 1 ? "" : `${s.textSize * 100}%`;
+  const forced = s.skin.scheme === "both" ? s.appearance : s.skin.scheme;
+  if (forced === "auto") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", forced);
+  applySkin(s.skin, resolvedScheme(s));
+  const scale = s.textSize * (s.skin.typography?.scale ?? 1);
+  root.style.fontSize = scale === 1 ? "" : `${Math.round(scale * 1000) / 10}%`;
 }
 
 /** Kept for callers of the first version; applies everything. */
@@ -75,15 +124,29 @@ export function setTheme(t: Theme): void {
   commit({ ...settings, appearance: t });
 }
 
-export function setColorTheme(theme: ColorTheme | null): void {
-  write(KEY_COLOR, theme ? JSON.stringify(theme) : null);
-  commit({ ...settings, colorTheme: theme });
+export function setSkin(skin: InstalledSkin): void {
+  write(KEY_SKIN, JSON.stringify(skin));
+  commit({ ...settings, skin });
 }
 
 export function setTextSize(size: TextSize): void {
   write(KEY_TEXT, size === 1 ? null : String(size));
   commit({ ...settings, textSize: size });
 }
+
+// A "both" skin under the "System" appearance follows the OS as it changes.
+if (typeof matchMedia === "function") {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    if (settings.appearance === "auto") applySettings();
+  });
+}
+
+// When the list arrives with a newer copy of the applied skin (a linked skin edited, a
+// built-in changed by an update), apply that copy and store it.
+subscribeSkins(() => {
+  const fresh = findSkin(settings.skin.id);
+  if (fresh && !fresh.error && JSON.stringify(fresh) !== JSON.stringify(settings.skin)) setSkin(fresh);
+});
 
 const subscribe = (l: () => void) => {
   listeners.add(l);

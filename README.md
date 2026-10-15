@@ -239,6 +239,9 @@ the live state, control, storage and the keymap. A **skin** is tokens, fonts, ra
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
 receiver process that reacts to events: notifications, suggested answers.
 
+Canvas and Office come bundled with the GUI (built from the themes repo at build time);
+`view disable canvas` hides one, since a bundled view cannot be removed.
+
 ```sh
 sessionpipe-gui view add   <folder | .tgz | .zip | npm package | git url>
 sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>
