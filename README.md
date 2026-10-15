@@ -181,7 +181,9 @@ The daemon and the sinks keep using plain http.
 
 Appearance (system, dark, light), skin and text size are one tap from the rail and are
 kept per device. **Spacesheep** is the default skin, the colours of
-[spacesheep.dev](https://spacesheep.dev) in both schemes; **Plain** is the stock tokens,
+[spacesheep.dev](https://spacesheep.dev) in both schemes: it follows the appearance
+setting, which is why the pictures on this page come in a light and a dark version of the
+same palette. **Plain** is the stock tokens,
 tinted neutrals with amber as the only accent; Paper, Graphite, Ink and Sepia are single
 schemes. Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
 the tier lens, notifications and sounds, the keymap, the installed views, skins and

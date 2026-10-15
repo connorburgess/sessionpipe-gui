@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // The README screenshots, from a GUI running in demo mode (see README.md in this folder):
-//   node docs/screenshots/shoot.mjs --base http://127.0.0.1:7391 --tls https://localhost:7392 \
-//     --themes ../sessionpipe-gui-themes/docs/screenshots [--out docs/screenshots] [--no-gif]
-// Desktop shots are 1440 × 900 at 2×, phone shots an iPhone 13 viewport at 3×, all dark,
-// all on the default (Spacesheep) skin unless a shot says otherwise. Only demo data ever
-// reaches the images: one extra session is posted through the receiver so a permission
-// prompt is open for the board, the inbox and the toast, and the demo machine it names is
-// enrolled through the test door so its Allow / Deny are live.
+//   node docs/screenshots/shoot.mjs --base http://localhost:7391 --tls https://localhost:7392 \
+//     --themes ../sessionpipe-gui-themes/docs/screenshots [--out docs/screenshots] [--no-gif] \
+//     [--scheme dark|light] [--light a.png,b.png]
+// Desktop shots are 1440 × 900 at 2×, phone shots an iPhone 13 viewport at 3×, all on the
+// default (Spacesheep) skin, which follows the appearance: `--scheme` is the appearance
+// every shot gets (dark), `--light` names the shots taken in light instead (by default the
+// six the README shows light). Only demo data ever reaches the images: one extra session is
+// posted through the receiver so a permission prompt is open for the board, the inbox and
+// the sessions, and the demo machine it names is enrolled through the test door so its
+// Allow / Deny are live.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { chromium, devices } from "@playwright/test";
 
@@ -23,6 +26,22 @@ const TLS = args.tls ?? "https://localhost:7392";
 const OUT = path.resolve(args.out ?? "docs/screenshots");
 const THEMES = args.themes ? path.resolve(args.themes) : null;
 const GIF = !args["no-gif"];
+const DEFAULT_SCHEME = args.scheme === "light" ? "light" : "dark";
+const DEFAULT_LIGHT = [
+  "board.png",
+  "board.gif",
+  "session-simple.png",
+  "inbox.png",
+  "review.png",
+  "appearance.png",
+  "connect.png",
+  "phone-session.png",
+];
+const LIGHT = new Set(
+  typeof args.light === "string" ? args.light.split(",").map((s) => s.trim()).filter(Boolean) : args.light === true ? [] : DEFAULT_LIGHT,
+);
+/** The appearance a shot is taken in. */
+const schemeOf = (file) => (LIGHT.has(file) ? "light" : DEFAULT_SCHEME);
 mkdirSync(OUT, { recursive: true });
 if (THEMES) mkdirSync(THEMES, { recursive: true });
 
@@ -141,28 +160,29 @@ async function postNeedsYou() {
 
 const browser = await chromium.launch();
 
-async function context(kind, mode, extra = {}) {
+/** A context of one kind (desktop / phone), one mode (advanced / simple) and one appearance. */
+async function context(kind, mode, scheme = "dark", extra = {}) {
   const base =
     kind === "phone"
       ? { ...devices["iPhone 13"], browserName: undefined, defaultBrowserType: undefined }
       : { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 };
   const ctx = await browser.newContext({
     ...base,
-    colorScheme: "dark",
+    colorScheme: scheme,
     locale: "en-US",
     timezoneId: "UTC",
     ignoreHTTPSErrors: true,
     ...extra,
   });
   await ctx.addInitScript(
-    ({ SETUP_SEEN, SETTINGS, THEME, mode }) => {
+    ({ SETUP_SEEN, SETTINGS, THEME, mode, scheme }) => {
       try {
         localStorage.setItem(SETUP_SEEN, "1");
         localStorage.setItem(SETTINGS, JSON.stringify({ mode }));
-        localStorage.setItem(THEME, "dark");
+        localStorage.setItem(THEME, scheme);
       } catch {}
     },
-    { SETUP_SEEN, SETTINGS, THEME, mode },
+    { SETUP_SEEN, SETTINGS, THEME, mode, scheme },
   );
   return ctx;
 }
@@ -189,152 +209,161 @@ async function shot(page, file, opts = {}) {
   const target = opts.themes ? path.join(THEMES ?? OUT, file) : path.join(OUT, file);
   await (opts.locator ?? page).screenshot({ path: target, animations: "disabled", ...(opts.locator ? {} : { fullPage: false }) });
   const kb = Math.round(statSync(target).size / 1024);
-  log(`${path.relative(process.cwd(), target)}  ${kb} KB`);
+  log(`${path.relative(process.cwd(), target)}  ${kb} KB  ${opts.themes ? "" : schemeOf(file)}`);
 }
 
-// ---------- the shots ----------
+const sessionPath = (key) => {
+  const i = key.indexOf(":");
+  return `/s/${encodeURIComponent(key.slice(0, i))}/${encodeURIComponent(key.slice(i + 1))}`;
+};
+
+// ---------- the shots, one function each, so a shot can run in either appearance ----------
 
 const machineId = await enrollMachine("studio-mac");
 log(machineId ? `test door: studio-mac enrolled as ${machineId}` : "test door: not available (start with --test-door); Allow / Deny will read unpaired");
 const needsKey = await postNeedsYou();
 await sleep(1500);
 
-// Advanced, desktop.
-{
-  const ctx = await context("desktop", "advanced");
-  const page = await ctx.newPage();
-  await open(page, "/");
-  await page.locator("article.card").first().waitFor();
-  await page.locator("article.card--needs_you").first().waitFor({ timeout: 30_000 }).catch(() => log("board: no needs-you card in time"));
-  await page.locator("article.card--working").first().waitFor({ timeout: 60_000 }).catch(() => log("board: no working card in time"));
-  await shot(page, "board.png");
-
-  // The appearance popover and the keyboard help, both over the board.
-  await page.getByRole("button", { name: "Quick settings" }).click();
-  await page.locator(".qs-pop").waitFor();
-  await shot(page, "appearance.png");
-  await page.keyboard.press("Escape");
-  await page.locator(".qs-pop").waitFor({ state: "hidden" });
-  await page.keyboard.press("?");
-  await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor();
-  await shot(page, "keyboard.png");
-  await page.keyboard.press("Escape");
-
-  await open(page, "/inbox");
-  await page.locator(".inbox-row").first().waitFor({ timeout: 30_000 });
-  await shot(page, "inbox.png");
-
-  // The timeline of the session with the open prompt (it has tools, a transcript and the prompt).
-  const [harness, id] = [needsKey.slice(0, needsKey.indexOf(":")), needsKey.slice(needsKey.indexOf(":") + 1)];
-  await open(page, `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`);
-  await page.locator("h1.sess-title").waitFor();
-  await page.locator("li.tool").first().waitFor({ timeout: 20_000 });
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await shot(page, "session-advanced.png");
-
-  await open(page, "/review");
-  await page.getByPlaceholder(/Search transcripts/).fill("webhook");
-  await page.locator(".rv-hit, .hit, [class*=hit]").first().waitFor({ timeout: 20_000 }).catch(() => log("review: no hits rendered"));
-  await sleep(800);
-  await shot(page, "review.png");
-
-  await open(page, "/connect");
-  await page.locator(".cmd-text").filter({ hasText: "sessionpipe sink add" }).first().waitFor();
-  const qr = page.getByRole("img", { name: /^QR code/ });
-  await qr.waitFor();
-  await page.waitForFunction((el) => el.naturalWidth > 0, await qr.elementHandle());
-  await shot(page, "connect.png");
-
-  await open(page, "/setup");
-  await sleep(2500); // two polls of the status
-  await shot(page, "setup.png");
-
-  // Canvas with the Map on, tidied and fitted.
-  await open(page, "/t/canvas");
-  const mapBtn = page.getByRole("button", { name: "Map", exact: true });
-  await mapBtn.waitFor({ timeout: 20_000 });
-  await sleep(1500);
-  // The map's on/off lives in the view's server-side storage, so it survives between runs:
-  // read the button's state instead of assuming it is off.
-  const mapOn = async () => ((await mapBtn.getAttribute("class")) ?? "").includes("is-on");
-  if (!(await mapOn())) await mapBtn.click();
-  await sleep(400);
-  if (!(await mapOn())) log("canvas: the Map toggle did not take");
-  await sleep(600);
-  await page.getByRole("button", { name: "Tidy", exact: true }).click();
-  await sleep(400);
-  await page.getByRole("button", { name: "Fit", exact: true }).click();
-  await sleep(1200);
-  await shot(page, "canvas.png");
-  if (THEMES) await shot(page, "canvas.png", { themes: true });
-
-  // Office: iso, then figures for the themes repo.
-  await open(page, "/t/office");
-  await page.locator("section.room").first().waitFor({ timeout: 20_000 });
-  await sleep(1500);
-  await shot(page, "office.png");
-  if (THEMES) {
-    await shot(page, "office-iso.png", { themes: true });
-    await page.getByRole("button", { name: "figures", exact: true }).click().catch(async () => {
-      await page.getByText("figures", { exact: true }).click();
-    });
-    await sleep(1500);
-    await shot(page, "office-figures.png", { themes: true });
-  }
-
-  // The plugin's settings on the Views page, and the board in Spacesheep Vivid.
-  if (THEMES) {
-    await open(page, "/themes");
-    // The settings form alone: the row above it prints the plugin's source path on this machine.
-    const form = page.locator("section.plugins form").first();
-    await form.waitFor({ timeout: 20_000 });
-    await form.scrollIntoViewIfNeeded();
-    await sleep(500);
-    await shot(page, "ping-a-human.png", { themes: true, locator: form });
-
+const desktopAdvanced = {
+  "board.png": async (page) => {
+    await open(page, "/");
+    await page.locator("article.card").first().waitFor();
+    await page.locator("article.card--needs_you").first().waitFor({ timeout: 30_000 }).catch(() => log("board: no needs-you card in time"));
+    await page.locator("article.card--working").first().waitFor({ timeout: 60_000 }).catch(() => log("board: no working card in time"));
+    await shot(page, "board.png");
+  },
+  "appearance.png": async (page) => {
     await open(page, "/");
     await page.locator("article.card").first().waitFor();
     await page.getByRole("button", { name: "Quick settings" }).click();
     await page.locator(".qs-pop").waitFor();
-    await page.locator(".qs-themes").getByText("Spacesheep Vivid", { exact: true }).click();
+    await shot(page, "appearance.png");
     await page.keyboard.press("Escape");
     await page.locator(".qs-pop").waitFor({ state: "hidden" });
-    await sleep(600);
-    await shot(page, "spacesheep-vivid-dark.png", { themes: true });
-  }
-  await ctx.close();
-}
+  },
+  "keyboard.png": async (page) => {
+    await open(page, "/");
+    await page.locator("article.card").first().waitFor();
+    await page.keyboard.press("?");
+    await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor();
+    await shot(page, "keyboard.png");
+    await page.keyboard.press("Escape");
+  },
+  "inbox.png": async (page) => {
+    await open(page, "/inbox");
+    await page.locator(".inbox-row").first().waitFor({ timeout: 30_000 });
+    await shot(page, "inbox.png");
+  },
+  "session-advanced.png": async (page) => {
+    // The timeline of the session with the open prompt (it has tools, a transcript and the prompt).
+    await open(page, sessionPath(needsKey));
+    await page.locator("h1.sess-title").waitFor();
+    await page.locator("li.tool").first().waitFor({ timeout: 20_000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shot(page, "session-advanced.png");
+  },
+  "review.png": async (page) => {
+    await open(page, "/review");
+    await page.getByPlaceholder(/Search transcripts/).fill("webhook");
+    await page.locator(".rv-hit, .hit, [class*=hit]").first().waitFor({ timeout: 20_000 }).catch(() => log("review: no hits rendered"));
+    await sleep(800);
+    await shot(page, "review.png");
+  },
+  "connect.png": async (page) => {
+    await open(page, "/connect");
+    await page.locator(".cmd-text").filter({ hasText: "sessionpipe sink add" }).first().waitFor();
+    const qr = page.getByRole("img", { name: /^QR code/ });
+    await qr.waitFor();
+    await page.waitForFunction((el) => el.naturalWidth > 0, await qr.elementHandle());
+    await shot(page, "connect.png");
+  },
+  "setup.png": async (page) => {
+    await open(page, "/setup");
+    await sleep(2500); // two polls of the status
+    await shot(page, "setup.png");
+  },
+  "canvas.png": async (page) => {
+    await open(page, "/t/canvas");
+    const mapBtn = page.getByRole("button", { name: "Map", exact: true });
+    await mapBtn.waitFor({ timeout: 20_000 });
+    await sleep(1500);
+    // The map's on/off lives in the view's server-side storage, so it survives between runs:
+    // read the button's state instead of assuming it is off.
+    const mapOn = async () => ((await mapBtn.getAttribute("class")) ?? "").includes("is-on");
+    if (!(await mapOn())) await mapBtn.click();
+    await sleep(400);
+    if (!(await mapOn())) log("canvas: the Map toggle did not take");
+    await page.getByRole("button", { name: "Tidy", exact: true }).click();
+    await sleep(400);
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await sleep(1200);
+    await shot(page, "canvas.png");
+    if (THEMES) await shot(page, "canvas.png", { themes: true });
+  },
+  "office.png": async (page) => {
+    await open(page, "/t/office");
+    await page.locator("section.room").first().waitFor({ timeout: 20_000 });
+    await sleep(1500);
+    await shot(page, "office.png");
+    if (THEMES) {
+      await shot(page, "office-iso.png", { themes: true });
+      await page.getByRole("button", { name: "figures", exact: true }).click().catch(async () => {
+        await page.getByText("figures", { exact: true }).click();
+      });
+      await sleep(1500);
+      await shot(page, "office-figures.png", { themes: true });
+    }
+  },
+};
 
-// Simple, desktop: the chat.
-{
-  const ctx = await context("desktop", "simple");
-  const page = await ctx.newPage();
-  const [harness, id] = [needsKey.slice(0, needsKey.indexOf(":")), needsKey.slice(needsKey.indexOf(":") + 1)];
-  await open(page, `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`);
-  await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
-  await page.locator(".chat-card, .chat-bubble").first().waitFor({ timeout: 20_000 });
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await shot(page, "session-simple.png");
-  await ctx.close();
-}
+/** The themes repo's own shots: the plugin's settings form and the board in Spacesheep Vivid. */
+async function themesExtras(page) {
+  await open(page, "/themes");
+  // The settings form alone: the row above it prints the plugin's source path on this machine.
+  const form = page.locator("section.plugins form").first();
+  await form.waitFor({ timeout: 20_000 });
+  await form.scrollIntoViewIfNeeded();
+  await sleep(500);
+  await shot(page, "ping-a-human.png", { themes: true, locator: form });
 
-// Phone, Simple.
-{
-  const ctx = await context("phone", "simple");
-  const page = await ctx.newPage();
   await open(page, "/");
   await page.locator("article.card").first().waitFor();
-  await shot(page, "phone-board.png");
-  const [harness, id] = [needsKey.slice(0, needsKey.indexOf(":")), needsKey.slice(needsKey.indexOf(":") + 1)];
-  await open(page, `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`);
-  await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await shot(page, "phone-session.png");
+  await page.getByRole("button", { name: "Quick settings" }).click();
+  await page.locator(".qs-pop").waitFor();
+  await page.locator(".qs-themes").getByText("Spacesheep Vivid", { exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.locator(".qs-pop").waitFor({ state: "hidden" });
+  await sleep(600);
+  await shot(page, "spacesheep-vivid-dark.png", { themes: true });
+}
 
-  // The trust page of the TLS instance, over plain http (how the QR opens it).
-  const tlsHttp = TLS.replace(/^https:\/\/[^/]+/, (m) => `http://127.0.0.1:${new URL(m).port}`);
-  const tlsInfo = await (await fetch(`${tlsHttp}/api/ui/info`)).json().catch(() => null);
-  if (tlsInfo) {
+const desktopSimple = {
+  "session-simple.png": async (page) => {
+    await open(page, sessionPath(needsKey));
+    await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
+    await page.locator(".chat-card, .chat-bubble").first().waitFor({ timeout: 20_000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shot(page, "session-simple.png");
+  },
+};
+
+const phoneSimple = {
+  "phone-board.png": async (page) => {
+    await open(page, "/");
+    await page.locator("article.card").first().waitFor();
+    await shot(page, "phone-board.png");
+  },
+  "phone-session.png": async (page) => {
+    await open(page, sessionPath(needsKey));
+    await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shot(page, "phone-session.png");
+  },
+  "phone-trust.png": async (page) => {
+    // The trust page of the TLS instance, over plain http (how the QR opens it).
+    const tlsHttp = TLS.replace(/^https:\/\/[^/]+/, (m) => `http://127.0.0.1:${new URL(m).port}`);
+    const tlsInfo = await (await fetch(`${tlsHttp}/api/ui/info`)).json().catch(() => null);
+    if (!tlsInfo) return log("tls instance: not reachable; phone-trust.png skipped");
     await page.goto(`${tlsHttp}/trust?k=${tlsInfo.uiKey}`);
     await page.locator("h1").first().waitFor();
     // The page names the machine the GUI runs on (its mDNS name); the shot shows a demo
@@ -348,35 +377,57 @@ await sleep(1500);
       }, realHost);
     }
     await shot(page, "phone-trust.png");
-  } else log("tls instance: not reachable; phone-trust.png skipped");
-  await ctx.close();
+  },
+};
+
+/** Runs each group's shots, one context per appearance that any of them wants. */
+async function runGroup(kind, mode, shots, after) {
+  for (const scheme of ["dark", "light"]) {
+    const names = Object.keys(shots).filter((f) => schemeOf(f) === scheme);
+    const extras = after && scheme === DEFAULT_SCHEME;
+    if (names.length === 0 && !extras) continue;
+    const ctx = await context(kind, mode, scheme);
+    const page = await ctx.newPage();
+    for (const f of names) await shots[f](page);
+    if (extras) await after(page);
+    await ctx.close();
+  }
 }
 
-// The GIF: six seconds of the board, recorded at 1×.
+await runGroup("desktop", "advanced", desktopAdvanced, THEMES ? themesExtras : null);
+await runGroup("desktop", "simple", desktopSimple);
+await runGroup("phone", "simple", phoneSimple);
+
+// The GIF: six seconds of the board, recorded at 1×, cut from the moment a needs-you card
+// is on the board, so the accent reads on the surface it is shot on.
 if (GIF) {
   const has = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
   if (!has) log("ffmpeg not found; board.gif skipped");
   else {
     const vdir = path.join(OUT, ".video");
     rmSync(vdir, { recursive: true, force: true });
-    const ctx = await context("desktop", "advanced", {
+    const ctx = await context("desktop", "advanced", schemeOf("board.gif"), {
       deviceScaleFactor: 1,
       recordVideo: { dir: vdir, size: { width: 1440, height: 900 } },
     });
     const page = await ctx.newPage();
+    const t0 = Date.now();
     await open(page, "/");
     await page.locator("article.card").first().waitFor();
-    await sleep(9000);
+    await page.locator("article.card--needs_you").first().waitFor({ timeout: 30_000 }).catch(() => log("gif: no needs-you card in time"));
+    await clearToasts(page);
+    const from = ((Date.now() - t0) / 1000 + 0.5).toFixed(1);
+    await sleep(8000);
     await ctx.close();
     const video = readdirSync(vdir).find((f) => f.endsWith(".webm"));
     const src = path.join(vdir, video);
     const palette = path.join(vdir, "palette.png");
     const gif = path.join(OUT, "board.gif");
     const filters = "fps=10,scale=960:-1:flags=lanczos";
-    spawnSync("ffmpeg", ["-y", "-ss", "2", "-t", "6", "-i", src, "-vf", `${filters},palettegen=stats_mode=diff`, palette], { stdio: "ignore" });
+    spawnSync("ffmpeg", ["-y", "-ss", from, "-t", "6", "-i", src, "-vf", `${filters},palettegen=stats_mode=diff`, palette], { stdio: "ignore" });
     spawnSync(
       "ffmpeg",
-      ["-y", "-ss", "2", "-t", "6", "-i", src, "-i", palette, "-lavfi", `${filters} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, gif],
+      ["-y", "-ss", from, "-t", "6", "-i", src, "-i", palette, "-lavfi", `${filters} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, gif],
       { stdio: "ignore" },
     );
     rmSync(vdir, { recursive: true, force: true });

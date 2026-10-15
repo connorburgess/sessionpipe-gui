@@ -1,26 +1,32 @@
 # Screenshots
 
 Every image the README shows, all from **demo data** (`--demo`), never from a real state
-dir: no real session, token or address of anyone's lands here. Dark, the Spacesheep skin,
-1440 × 900 at 2× for the desktop shots, an iPhone 13 viewport at 3× for the phone shots.
-`shoot.mjs` in this folder takes them all in one run (about two minutes).
+dir: no real session, token or address of anyone's lands here. The Spacesheep skin, which
+follows the appearance, so the set shows both of its schemes; 1440 × 900 at 2× for the
+desktop shots, an iPhone 13 viewport at 3× for the phone shots. `shoot.mjs` in this folder
+takes them all in one run (about two minutes).
 
-| File | Page | How it is set up |
-|---|---|---|
-| `board.png` | `/` | Advanced mode; a card in every group, done collapsed |
-| `board.gif` | `/` | Six seconds of the board updating live, 960 px wide, 10 fps; made only when `ffmpeg` is on the PATH |
-| `setup.png` | `/setup` | From the receiver machine; the live steps on a fresh state dir |
-| `session-simple.png` | `/s/…` | Simple mode: the chat, a composer at the bottom, Allow / Deny live |
-| `session-advanced.png` | `/s/…` | Advanced mode: the timeline of the same session, the tier lens |
-| `inbox.png` | `/inbox` | An answerable prompt with live Allow / Deny |
-| `canvas.png` | `/t/canvas` | The canvas view with the Map on, after Tidy and Fit |
-| `office.png` | `/t/office` | The office view, iso style |
-| `review.png` | `/review` | A search for "webhook" with hits, the Files tab below |
-| `connect.png` | `/connect` | The QR code loaded; the sink token in its **masked** state |
-| `appearance.png` | any | The appearance popover open, Spacesheep selected, the installed skins listed |
-| `keyboard.png` | any | The `?` help open |
-| `phone-board.png`, `phone-session.png` | `/`, `/s/…` | The phone viewport, Simple mode |
-| `phone-trust.png` | `/trust` | The TLS instance's trust page on the phone viewport |
+| File | Scheme | Page | How it is set up |
+|---|---|---|---|
+| `board.png` | light | `/` | Advanced mode; a card in every group, done collapsed |
+| `board.gif` | light | `/` | Six seconds of the board updating live, cut from the moment a needs-you card is on it; 960 px wide, 10 fps; made only when `ffmpeg` is on the PATH |
+| `setup.png` | dark | `/setup` | From the receiver machine; the live steps on a fresh state dir |
+| `session-simple.png` | light | `/s/…` | Simple mode: the chat, a composer at the bottom, Allow / Deny live |
+| `session-advanced.png` | dark | `/s/…` | Advanced mode: the timeline of the same session, the tier lens |
+| `inbox.png` | light | `/inbox` | An answerable prompt with live Allow / Deny |
+| `canvas.png` | dark | `/t/canvas` | The canvas view with the Map on, after Tidy and Fit |
+| `office.png` | dark | `/t/office` | The office view, iso style |
+| `review.png` | light | `/review` | A search for "webhook" with hits, the Files tab below |
+| `connect.png` | light | `/connect` | The QR code loaded; the sink token in its **masked** state |
+| `appearance.png` | light | any | The appearance popover open: Light, Spacesheep selected, the installed skins listed |
+| `keyboard.png` | dark | any | The `?` help open |
+| `phone-board.png` | dark | `/` | The phone viewport, Simple mode |
+| `phone-session.png` | light | `/s/…` | The phone viewport, Simple mode |
+| `phone-trust.png` | dark | `/trust` | The TLS instance's trust page on the phone viewport |
+
+The scheme column is the script's default split: `--scheme dark|light` sets the appearance
+every shot gets (dark), and `--light a.png,b.png` names the shots taken in light instead
+(`--light` with no list takes none in light). The themes repo's shots are always dark.
 
 The themes repo's shots (`sessionpipe-gui-themes/docs/screenshots/`: `canvas.png`,
 `office-iso.png`, `office-figures.png`, `spacesheep-vivid-dark.png`, `ping-a-human.png`)
@@ -78,10 +84,11 @@ shows a demo machine; nothing else about the page is changed.
    ```sh
    node docs/screenshots/shoot.mjs --base http://localhost:7391 --tls https://localhost:7392 \
      --themes ../sessionpipe-gui-themes/docs/screenshots      # --no-gif skips the video
+                                                              # --scheme, --light: see the table
    ```
 
    It drives Chromium through the repo's `@playwright/test` dependency, sets Advanced or
-   Simple mode and the dark appearance through `localStorage` before each page, waits for
+   Simple mode and the appearance through `localStorage` before each page, waits for
    the stream to read `live` and for the elements each shot needs, dismisses the toasts the
    live demo raises, and disables CSS animations for the capture. The canvas Map toggle is
    read from the button's state, since the view keeps it in its server-side storage. The
@@ -94,5 +101,4 @@ shows a demo machine; nothing else about the page is changed.
 
 5. Stop the throwaway servers and remove the scratch state dir.
 
-`test/e2e/screenshots.spec.ts` is an older, smaller set the e2e suite can write with
-`SHOTS=1`, under the previous file names; this folder's script supersedes it for the README.
+This folder's script is the only screenshot generator; the README embeds these files by name.
