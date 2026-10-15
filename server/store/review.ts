@@ -21,6 +21,7 @@ import type {
   SessionSummary,
   StoredEvent,
 } from "../../shared/api.js";
+import { changedPaths } from "./paths.js";
 import { newRecord } from "./readings.js";
 import type { Rec } from "./store.js";
 
@@ -115,9 +116,7 @@ function fieldsOf(ev: StoredEvent, summary: SessionSummary | undefined, first: b
     const message = str(d.message);
     if (message) out.push(["message", message]);
   }
-  if (ev.type === "files.changed" && Array.isArray(d.paths)) {
-    for (const p of d.paths) if (typeof p === "string" && p) out.push(["path", p]);
-  }
+  for (const p of changedPaths(ev, summary?.cwd)) out.push(["path", p]);
   if (first) {
     const title = summary?.title ?? ev.session.title;
     if (title) out.push(["title", title]);
@@ -222,20 +221,47 @@ function summaryless(ev: StoredEvent): SessionSummary {
 
 const newer = (a: string, b: string): string => (a > b ? a : b);
 
-/** Paths from files.changed since a time, grouped by repo then path, newest first at
- *  every level, each path with the sessions that touched it. */
+/** A `files.changed` that follows a write tool's own `tool.ended` within this long names
+ *  the same change: it is not counted again. */
+const SAME_CHANGE_MS = 10_000;
+
+/** Paths the sessions changed since a time (files.changed events and successful write
+ *  tools, paths.ts), grouped by repo then path, newest first at every level, each path
+ *  with the sessions that touched it. */
 export function filesChanged(ix: ReviewIndex, q: FilesQuery, now = Date.now()): FilesPage {
   const sinceMs = q.since ? Date.parse(q.since) : Number.NaN;
   const since = Number.isFinite(sinceMs) ? sinceMs : now - DAY_MS;
   const repos = new Map<string, { lastAt: string; sessions: Set<SessionKey>; paths: Map<string, PathAcc> }>();
   const byTime = ix.byTime;
+  // The window's changes, newest first, each with its paths; the write tools' instants per
+  // (session, path) first, so a files.changed that repeats one of them can be skipped.
+  const changes: { rec: Rec; key: SessionKey; summary: SessionSummary | undefined; paths: string[] }[] = [];
+  const writes = new Map<string, number[]>();
   for (let i = byTime.length - 1; i >= 0; i--) {
     const rec = byTime[i]!;
     if (rec.t < since) break;
     const ev = rec.ev;
-    if (ev.type !== "files.changed" || !Array.isArray(ev.data.paths)) continue;
+    if (ev.type !== "files.changed" && ev.type !== "tool.ended") continue;
     const key = keyOf(ev);
     const summary = ix.summary(key);
+    const paths = changedPaths(ev, summary?.cwd ?? ev.session.cwd);
+    if (!paths.length) continue;
+    changes.push({ rec, key, summary, paths });
+    if (ev.type === "tool.ended")
+      for (const p of paths) {
+        const k = `${key}\0${p}`;
+        const list = writes.get(k) ?? [];
+        list.push(rec.t);
+        writes.set(k, list);
+      }
+  }
+  for (const { rec, key, summary, paths: all } of changes) {
+    const ev = rec.ev;
+    const paths =
+      ev.type === "files.changed"
+        ? all.filter((p) => !(writes.get(`${key}\0${p}`) ?? []).some((t) => Math.abs(t - rec.t) <= SAME_CHANGE_MS))
+        : all;
+    if (!paths.length) continue;
     const repo = summary?.repo ?? ev.session.repo ?? "";
     if (q.repo !== undefined && q.repo !== "" && repo !== q.repo) continue;
     const at = new Date(rec.t).toISOString();
@@ -246,8 +272,7 @@ export function filesChanged(ix: ReviewIndex, q: FilesQuery, now = Date.now()): 
     }
     r.lastAt = newer(r.lastAt, at);
     r.sessions.add(key);
-    const paths = ev.data.paths.filter((x): x is string => typeof x === "string" && x !== "");
-    for (const p of new Set(paths)) {
+    for (const p of paths) {
       let acc = r.paths.get(p);
       if (!acc) {
         acc = { count: 0, lastAt: at, sessions: new Map() };
@@ -354,12 +379,10 @@ export function digest(ix: ReviewIndex, q: DigestQuery, now = Date.now()): Diges
       case "context.compacted":
         a.compactions++;
         break;
-      case "files.changed":
-        if (Array.isArray(d.paths)) for (const p of d.paths) if (typeof p === "string" && p) a.files.add(p);
-        break;
       default:
         break;
     }
+    for (const p of changedPaths(ev, a.summary?.cwd ?? ev.session.cwd)) a.files.add(p);
   }
   const sessions: DigestSession[] = [];
   const machines = new Map<string, GroupAcc>();

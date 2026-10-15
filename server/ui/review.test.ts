@@ -12,12 +12,15 @@ let tmp: { dir: string; cleanup: () => void };
 const SID_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const SID_B = "bbbbbbbb-0000-4000-8000-000000000002";
 const SID_C = "cccccccc-0000-4000-8000-000000000003";
+const SID_D = "dddddddd-0000-4000-8000-000000000004";
 const KEY_A = sessionKey("claude-code", SID_A);
 const KEY_B = sessionKey("codex", SID_B);
 const KEY_C = sessionKey("claude-code", SID_C);
+const KEY_D = sessionKey("claude-code", SID_D);
 
 /** 2026-03-10, from 09:00 UTC. */
 const DAY = Date.UTC(2026, 2, 10, 9, 0, 0);
+const DAY_MS = 86_400_000;
 
 const get = async <T>(path: string): Promise<{ status: number; body: T }> => {
   const res = await fetch(`${app.url}${path}`);
@@ -75,6 +78,40 @@ beforeAll(async () => {
       b.ev("files.changed", { paths: ["src/webhooks/handler.ts", ".github/workflows/ci.yml"] }, { session: infra }),
       b.ev("context.compacted", { reason: "auto" }, { session: infra }),
       b.ev("turn.ended", { turn_id: "t1", reason: "stop" }, { session: infra }),
+    ],
+    "http",
+  );
+  // D: a Claude Code session on the 9th that only wrote through Edit/Write (no files.changed,
+  // as the real adapter behaves); its paths are derived from the tool inputs.
+  const d = new Session(SID_D, "claude-code", DAY - 24 * 3600_000);
+  const dBlock = { session: { ...billing, title: "Derived only" } };
+  app.store.ingest(
+    [
+      d.ev("session.started", { source: "startup" }, dBlock),
+      d.ev("turn.started", { turn_id: "t1" }, dBlock),
+      d.ev(
+        "tool.ended",
+        {
+          tool: "Edit",
+          call_id: "e1",
+          ms: 9,
+          ok: true,
+          input: { file_path: "/Users/dev/code/billing/src/lib/money.ts", old_string: "a", new_string: "b" },
+        },
+        dBlock,
+      ),
+      d.ev(
+        "tool.ended",
+        {
+          tool: "Write",
+          call_id: "w1",
+          ms: 3,
+          ok: true,
+          input: { file_path: "/Users/dev/code/billing/docs/MONEY.md", content: "# Money" },
+        },
+        dBlock,
+      ),
+      d.ev("turn.ended", { turn_id: "t1", reason: "stop" }, dBlock),
     ],
     "http",
   );
@@ -180,6 +217,26 @@ describe("GET /api/ui/files", () => {
   });
 });
 
+describe("derived from write tools (no files.changed)", () => {
+  it("files, digest and search all see the paths an Edit / Write named, repo-relative", async () => {
+    const since = new Date(DAY - 2 * DAY_MS).toISOString();
+    const files = (await get<FilesPage>(`${ROUTES.ui.files}?since=${since}&repo=github.com%2Facme%2Fbilling`)).body;
+    const paths = files.repos[0]!.paths;
+    expect(paths.map((p) => p.path)).toEqual([
+      "src/webhooks/handler.ts",
+      "src/webhooks/retry.ts",
+      "docs/MONEY.md",
+      "src/lib/money.ts",
+    ]);
+    expect(paths[2]!.sessions).toEqual([{ key: KEY_D, title: "Derived only", count: 1, lastAt: paths[2]!.lastAt }]);
+    const digest = (await get<Digest>(`${ROUTES.ui.digest}?day=2026-03-09&tz=0`)).body;
+    expect(digest.sessions.map((s) => [s.key, s.filesTouched, s.tools])).toEqual([[KEY_D, 2, 2]]);
+    expect(digest.totals.filesTouched).toBe(2);
+    const hit = (await get<SearchPage>(`${ROUTES.ui.search}?q=money.ts`)).body.hits;
+    expect(hit.map((h) => [h.field, h.snippet, h.event.type])).toEqual([["path", "src/lib/money.ts", "tool.ended"]]);
+  });
+});
+
 describe("GET /api/ui/digest", () => {
   it("lists the day's sessions with their counts and totals per machine and repo", async () => {
     const { status, body } = await get<Digest>(`${ROUTES.ui.digest}?day=2026-03-10&tz=0`);
@@ -238,7 +295,7 @@ describe("GET /api/ui/digest", () => {
     // Nine hours ahead (tz=-540): the 09:00Z session is 18:00 on the 10th; the 12:00Z one 21:00; the late one the 11th.
     const ahead = (await get<Digest>(`${ROUTES.ui.digest}?day=2026-03-10&tz=-540`)).body;
     expect(ahead.sessions.map((s) => s.key)).toEqual([KEY_A, KEY_B]);
-    const empty = (await get<Digest>(`${ROUTES.ui.digest}?day=2026-03-09&tz=0`)).body;
+    const empty = (await get<Digest>(`${ROUTES.ui.digest}?day=2026-03-08&tz=0`)).body;
     expect(empty.sessions).toEqual([]);
     expect(empty.totals).toMatchObject({ sessions: 0, events: 0, filesTouched: 0 });
   });

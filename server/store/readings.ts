@@ -20,6 +20,7 @@ import {
   type Tier,
   type TurnStats,
 } from "../../shared/api.js";
+import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
@@ -68,7 +69,8 @@ export interface SessionRecord {
   ended: boolean;
   /** Whether anything but a backfill arrived. */
   live: boolean;
-  /** Distinct paths from files.changed. */
+  /** Distinct repo-relative paths the session changed: from files.changed, and from the
+   *  file a successful write tool named in its input (paths.ts). */
   files: Set<string>;
   /** Keys of subagent sessions whose parent_id is this one. */
   childKeys: Set<string>;
@@ -382,11 +384,14 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
           s.currentTool = undefined;
       }
       s.currentTurn ??= { turnId: str(d.turn_id), since: at };
+      // A write tool that succeeded changed the file its input names (the adapter sends
+      // no files.changed for it); the same set as below, so the two never double-count.
+      for (const p of changedPaths(ev, s.cwd)) rec.files.add(p);
+      s.counts.filesChanged = rec.files.size;
       break;
     }
     case "files.changed": {
-      const paths = Array.isArray(d.paths) ? d.paths : [];
-      for (const p of paths) if (typeof p === "string") rec.files.add(p);
+      for (const p of changedPaths(ev, s.cwd)) rec.files.add(p);
       s.counts.filesChanged = rec.files.size;
       break;
     }

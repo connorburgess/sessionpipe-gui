@@ -255,7 +255,9 @@ function FilesView() {
       </div>
       {error && <p className="page-note is-err">{error}</p>}
       {page && page.repos.length === 0 && (
-        <p className="page-note">No files changed in this range. Changed paths arrive with tier 1 and up.</p>
+        <p className="page-note">
+          No files changed in this range. Paths come from files.changed events, or from a write tool's input at tier 3.
+        </p>
       )}
       {page?.repos.map((r) => (
         <section key={r.repo || "(none)"} className="group rv-repo" aria-label={r.repo ? repoShort(r.repo) : "no repo"}>
