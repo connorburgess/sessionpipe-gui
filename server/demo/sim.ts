@@ -9,9 +9,11 @@
 import { ulid } from "sessionpipe-core";
 import type { ProtocolEvent, ProtocolSession } from "../../shared/api.js";
 import {
+  ANTIGRAVITY_TURNS,
   BACKFILL_TITLES,
   CLAUDE_TURNS,
   CODEX_TURNS,
+  CURSOR_TURNS,
   GEMINI_TURNS,
   HARNESS_VERSION,
   type HarnessName,
@@ -68,11 +70,29 @@ interface Profile {
   ev: Record<HookKey, string>;
   callId?: (rng: Rng) => string;
   turnId?: (rng: Rng, wall: number) => string;
-  attentionId: (rng: Rng, wall: number) => string;
+  /** Absent: the harness raises no attention here (Cursor's mapping is not recorded yet). */
+  attentionId?: (rng: Rng, wall: number) => string;
   /** Emits turn.progress (optional for senders; the Claude Code client does). */
   progress: boolean;
-  /** Knows the model at session start (Codex's hook payload carries it). */
+  /** Knows the model at session start (the Codex, Antigravity and Cursor payloads carry it). */
   modelAtStart: boolean;
+  /** No session-end hook exists: the session goes silent after its last Stop and the
+   *  receiver infers done (PROTOCOL.md §4). */
+  noSessionEnd?: boolean;
+  /** Every turn opens with the hook that also announces the session (Antigravity's
+   *  PreInvocation with invocationNum 0): session.started { source: unknown } right
+   *  before each turn.started, the git facts and first ask already read. */
+  startsEveryTurn?: boolean;
+  /** No pre-tool hook: a tool is a tool.ended alone (no call_id, ms or output), a
+   *  post-tool payload that names no tool is a session.heartbeat, and so is the hook
+   *  before every later model call (`heartbeat` is its name). */
+  toolsEndedOnly?: boolean;
+  heartbeat?: string;
+  /** turn.started / turn.ended carry no turn_id, prompt_chars or ms: the hook has none. */
+  bareTurns?: boolean;
+  /** The hook that reports an edit as files.changed (Cursor's afterFileEdit); otherwise
+   *  the post-tool hook stands for it. */
+  filesChangedEvent?: string;
 }
 
 const PROFILES: Record<HarnessName, Profile> = {
@@ -140,6 +160,64 @@ const PROFILES: Record<HarnessName, Profile> = {
     progress: false,
     modelAtStart: false,
   },
+  antigravity: {
+    name: "antigravity",
+    // The hook name rides in argv, not stdin; `harness.event` carries it. There is no
+    // PreToolUse (its answer would deny) and no session end.
+    ev: {
+      start: "PreInvocation",
+      prompt: "PreInvocation",
+      preTool: "",
+      postTool: "PostToolUse",
+      postToolFail: "PostToolUse",
+      permission: "",
+      stop: "Stop",
+      stopFail: "Stop",
+      subStart: "",
+      subStop: "",
+      compact: "",
+      end: "",
+    },
+    progress: false,
+    modelAtStart: true,
+    noSessionEnd: true,
+    startsEveryTurn: true,
+    toolsEndedOnly: true,
+    heartbeat: "PreInvocation",
+    bareTurns: true,
+  },
+  cursor: {
+    name: "cursor",
+    ev: {
+      start: "sessionStart",
+      prompt: "beforeSubmitPrompt",
+      preTool: "preToolUse",
+      postTool: "postToolUse",
+      postToolFail: "postToolUseFailure",
+      permission: "",
+      stop: "stop",
+      stopFail: "stop",
+      subStart: "subagentStart",
+      subStop: "subagentStop",
+      compact: "preCompact",
+      end: "sessionEnd",
+    },
+    callId: (r) => r.uuid(),
+    // turn_id is the generation_id.
+    turnId: (r) => r.uuid(),
+    progress: false,
+    modelAtStart: true,
+    filesChangedEvent: "afterFileEdit",
+  },
+};
+
+/** The scripts and repos each harness draws from once the opening scenes are over. */
+const POOL: Record<HarnessName, { turns: readonly TurnScript[]; repos: number[] }> = {
+  "claude-code": { turns: CLAUDE_TURNS, repos: [0, 3, 4, 5] },
+  codex: { turns: CODEX_TURNS, repos: [1, 5] },
+  "gemini-cli": { turns: GEMINI_TURNS, repos: [2] },
+  antigravity: { turns: ANTIGRAVITY_TURNS, repos: [6] },
+  cursor: { turns: CURSOR_TURNS, repos: [7] },
 };
 
 type Block = Omit<ProtocolSession, "id" | "seq">;
@@ -343,6 +421,32 @@ export class Simulation {
       }),
       40_000,
     );
+    // Antigravity in its IDE workspace: no session end, so after its last Stop the board
+    // reads done from silence. Cursor's edits arrive as files.changed from afterFileEdit.
+    this.spawn(
+      this.session({
+        harness: "antigravity",
+        machine: m(1),
+        repo: REPOS[6] as Repo,
+        branch: "feat/tokens-v2",
+        turns: [...ANTIGRAVITY_TURNS],
+        source: "startup",
+        end: "other",
+      }),
+      30_000,
+    );
+    this.spawn(
+      this.session({
+        harness: "cursor",
+        machine: m(0),
+        repo: REPOS[7] as Repo,
+        branch: "fix/digest-dedupe",
+        turns: [...CURSOR_TURNS],
+        source: "startup",
+        end: "exit",
+      }),
+      55_000,
+    );
     this.spawn(
       this.session({
         harness: "claude-code",
@@ -367,15 +471,17 @@ export class Simulation {
         continue;
       }
       if (this.live >= 6) continue;
-      const harness: HarnessName = rng.pick(["claude-code", "claude-code", "claude-code", "codex", "gemini-cli"]);
-      const pool = harness === "claude-code" ? CLAUDE_TURNS : harness === "codex" ? CODEX_TURNS : GEMINI_TURNS;
-      const repos =
-        harness === "claude-code"
-          ? [REPOS[0], REPOS[3], REPOS[4], REPOS[5]]
-          : harness === "codex"
-            ? [REPOS[1], REPOS[5]]
-            : [REPOS[2]];
-      const repo = rng.pick(repos) as Repo;
+      const harness: HarnessName = rng.pick([
+        "claude-code",
+        "claude-code",
+        "claude-code",
+        "codex",
+        "gemini-cli",
+        "antigravity",
+        "cursor",
+      ]);
+      const pool = POOL[harness].turns;
+      const repo = REPOS[rng.pick(POOL[harness].repos)] as Repo;
       const from = rng.int(0, pool.length - 1);
       const n = rng.int(1, Math.min(3, pool.length));
       const turns = Array.from({ length: n }, (_, i) => pool[(from + i) % pool.length] as TurnScript);
@@ -403,7 +509,9 @@ export class Simulation {
     const items: { sess: Sess; startedAt: number; lastAt: number; turns: number }[] = [];
     const count = BACKFILL_TITLES.length - 1;
     for (let i = 0; i < count; i++) {
-      const harness: HarnessName = i % 5 === 3 ? "codex" : i % 7 === 6 ? "gemini-cli" : "claude-code";
+      // Antigravity keeps transcripts under its brain dir, so it backfills too; Cursor has no reader yet.
+      const harness: HarnessName =
+        i % 5 === 3 ? "codex" : i % 7 === 6 ? "gemini-cli" : i % 11 === 10 ? "antigravity" : "claude-code";
       const title = BACKFILL_TITLES[i] as (typeof BACKFILL_TITLES)[number];
       const repo = (i === 0 ? REPOS[4] : rng.pick(REPOS)) as Repo;
       const machine = rng.pick(this.machines);
@@ -463,14 +571,20 @@ export class Simulation {
         ...(profile.modelAtStart ? { model: rng.pick(MODELS[p.harness]) } : {}),
       });
     this.live++;
-    sess.emit("session.started", { source: p.source }, profile.ev.start);
-    yield rng.ms(8000, 2000);
+    const facts = (script: TurnScript) =>
+      sess.learn({ repo: p.repo.repo, branch: p.branch, title: firstAsk(script.prompt), title_source: "first-ask" });
+    if (profile.startsEveryTurn) {
+      // One hook announces the session and the turn (playTurn emits both); the worker
+      // has read the git facts and the first ask from the transcript by then.
+      if (!p.resume) facts(p.turns[0] as TurnScript);
+    } else {
+      sess.emit("session.started", { source: p.source }, profile.ev.start);
+      yield rng.ms(8000, 2000);
+    }
     let turn = p.resume ? rng.int(3, 12) : 0;
     for (const [i, script] of p.turns.entries()) {
-      if (i === 0 && !p.resume) {
-        // The worker reads git facts and the first ask between the start hook and the first prompt.
-        sess.learn({ repo: p.repo.repo, branch: p.branch, title: firstAsk(script.prompt), title_source: "first-ask" });
-      }
+      // The worker reads git facts and the first ask between the start hook and the first prompt.
+      if (i === 0 && !p.resume && !profile.startsEveryTurn) facts(script);
       yield* this.playTurn(sess, script, turn++);
       if (script.abandon) {
         this.live--;
@@ -478,7 +592,8 @@ export class Simulation {
       }
       yield p.pause ?? rng.ms(30_000, 5000);
     }
-    sess.emit("session.ended", { reason: p.end }, profile.ev.end);
+    // No session-end hook: the session just goes quiet after its last Stop.
+    if (!profile.noSessionEnd) sess.emit("session.ended", { reason: p.end }, profile.ev.end);
     this.live--;
     this.ended.push(sess);
   }
@@ -497,12 +612,19 @@ export class Simulation {
       lastProgress = this.now;
     };
 
-    sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...user].length }, ev.prompt);
+    // Antigravity: the first PreInvocation of an execution is the session and the turn at once.
+    if (profile.startsEveryTurn) sess.emit("session.started", { source: "unknown" }, ev.start);
+    sess.emit("turn.started", profile.bareTurns ? {} : { turn_id: turnId, prompt_chars: [...user].length }, ev.prompt);
     if (profile.progress) progress(ev.prompt);
     yield rng.ms(4000, 800);
 
     for (const [i, step] of script.steps.entries()) {
-      if (step.permission) {
+      // Antigravity: a model call precedes every tool but the first; its hook is a heartbeat.
+      if (profile.toolsEndedOnly && i > 0 && profile.heartbeat) {
+        sess.emit("session.heartbeat", {}, profile.heartbeat);
+        yield rng.ms(2500, 600);
+      }
+      if (step.permission && profile.attentionId) {
         const attentionId = profile.attentionId(rng, this.wall());
         sess.emit(
           "attention.needed",
@@ -518,30 +640,42 @@ export class Simulation {
         sess.emit("attention.cleared", { attention_id: attentionId, how: "answered" }, ev.preTool);
       }
       const callId = profile.callId?.(rng);
-      sess.emit("tool.started", { tool: step.tool, call_id: callId, turn_id: turnId, input: step.input }, ev.preTool);
+      if (!profile.toolsEndedOnly)
+        sess.emit("tool.started", { tool: step.tool, call_id: callId, turn_id: turnId, input: step.input }, ev.preTool);
       yield step.ms;
       const ok = step.ok ?? true;
       let output = step.output;
       let agentId: string | undefined;
       if (step.subagent) {
         agentId = rng.agent();
-        output = { ...(output as Record<string, unknown>), agentId };
+        output = typeof output === "string" ? `${output}\nagentId: ${agentId}` : { ...(output as object), agentId };
       }
-      sess.emit(
-        "tool.ended",
-        {
-          tool: step.tool,
-          call_id: callId,
-          turn_id: turnId,
-          ms: step.ms,
-          ok,
-          error: ok ? undefined : step.error,
-          input: step.input,
-          output: output === undefined ? null : output,
-        },
-        ok ? ev.postTool : ev.postToolFail,
-      );
-      if (step.paths) sess.emit("files.changed", { paths: step.paths }, ok ? ev.postTool : ev.postToolFail);
+      const postEvent = ok ? ev.postTool : ev.postToolFail;
+      if (profile.toolsEndedOnly) {
+        // Antigravity's PostToolUse: stepIdx and error, and the tool call when it names one.
+        if (step.unnamed) sess.emit("session.heartbeat", {}, postEvent);
+        else
+          sess.emit(
+            "tool.ended",
+            { tool: step.tool, ok, error: ok ? undefined : step.error, input: step.input },
+            postEvent,
+          );
+      } else
+        sess.emit(
+          "tool.ended",
+          {
+            tool: step.tool,
+            call_id: callId,
+            turn_id: turnId,
+            ms: step.ms,
+            ok,
+            error: ok ? undefined : step.error,
+            input: step.input,
+            output: output === undefined ? null : output,
+          },
+          postEvent,
+        );
+      if (step.paths) sess.emit("files.changed", { paths: step.paths }, profile.filesChangedEvent ?? postEvent);
       if (i === 0 && !sess.block.model) {
         sess.learn({ model: rng.pick(MODELS[profile.name]) });
         if (profile.name === "claude-code") sess.learn({ url: `https://claude.ai/code/session_01${rng.base62(22)}` });
@@ -563,13 +697,21 @@ export class Simulation {
     }
 
     if (script.abandon) return;
+    if (profile.toolsEndedOnly && profile.heartbeat) {
+      // The model call that writes the answer, then the Stop.
+      sess.emit("session.heartbeat", {}, profile.heartbeat);
+      yield rng.ms(6000, 1500);
+    }
     const ms = this.now - startedAt;
     const endEvent = script.error ? ev.stopFail : ev.stop;
+    const reason = script.error ? "error" : "stop";
     sess.emit(
       "turn.ended",
-      script.error
-        ? { turn_id: turnId, reason: "error", error: script.error, ms }
-        : { turn_id: turnId, reason: "stop", ms },
+      profile.bareTurns
+        ? { reason }
+        : script.error
+          ? { turn_id: turnId, reason, error: script.error, ms }
+          : { turn_id: turnId, reason, ms },
       endEvent,
     );
     sess.emit(

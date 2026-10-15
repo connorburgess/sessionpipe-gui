@@ -42,20 +42,21 @@ test.describe("feed", () => {
     await harness.click();
     const list = page.getByRole("listbox", { name: "Harness" });
     const options = await list.getByRole("option").allInnerTexts();
-    expect(options).toContain("Codex");
-    await list.getByRole("option", { name: "Codex" }).click();
+    expect(options).toEqual(expect.arrayContaining(["Claude Code", "Codex", "Antigravity", "Cursor"]));
+    // Claude Code: the busiest harness in the demo, so a live row through the filter is near.
+    await list.getByRole("option", { name: "Claude Code" }).click();
     await expect(list).toHaveCount(0);
-    await expect(harness).toHaveAttribute("data-value", "codex");
+    await expect(harness).toHaveAttribute("data-value", "claude-code");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();
     const harnessOf = () =>
       rows(page).evaluateAll((els) => els.map((el) => el.querySelector(".glyph-wrap")?.getAttribute("title") ?? "?"));
     await expect.poll(harnessOf).not.toHaveLength(0);
-    expect(new Set(await harnessOf())).toEqual(new Set(["Codex"]));
-    // A live row through the filter must be Codex too: wait for one more and check again.
+    expect(new Set(await harnessOf())).toEqual(new Set(["Claude Code"]));
+    // A live row through the filter must be Claude Code too: wait for one more and check again.
     const n = await rows(page).count();
-    await expect.poll(() => rows(page).count(), { timeout: 20_000 }).toBeGreaterThan(n);
-    expect(new Set(await harnessOf())).toEqual(new Set(["Codex"]));
+    await expect.poll(() => rows(page).count(), { timeout: 40_000 }).toBeGreaterThan(n);
+    expect(new Set(await harnessOf())).toEqual(new Set(["Claude Code"]));
 
     await harness.click();
     await page.getByRole("listbox", { name: "Harness" }).getByRole("option", { name: "all harnesses" }).click();

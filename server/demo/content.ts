@@ -5,7 +5,7 @@
 // carry (conformance/harness/* in the sessionpipe repo). No real people, no real
 // secrets: the one secret-looking line is already `[redacted]`, as secrets@1 leaves it.
 
-export type HarnessName = "claude-code" | "codex" | "gemini-cli";
+export type HarnessName = "claude-code" | "codex" | "gemini-cli" | "antigravity" | "cursor";
 
 export const MACHINE_NAMES = ["studio-mac", "build-box", "ci-runner", "lab-pi"] as const;
 
@@ -13,12 +13,16 @@ export const HARNESS_VERSION: Record<HarnessName, string> = {
   "claude-code": "2.1.296",
   codex: "0.157.1",
   "gemini-cli": "0.48.2",
+  antigravity: "1.21.9",
+  cursor: "3.7.36",
 };
 
 export const MODELS: Record<HarnessName, readonly string[]> = {
   "claude-code": ["claude-fable-5-1", "claude-opus-5-5"],
   codex: ["gpt-5.4-codex"],
   "gemini-cli": ["gemini-3-pro"],
+  antigravity: ["gemini-3-pro", "gemini-3-flash"],
+  cursor: ["claude-fable-5-1", "gpt-5.5"],
 };
 
 export interface Repo {
@@ -38,6 +42,9 @@ export const REPOS: readonly Repo[] = [
   { repo: "github.com/acme/mobile", cwd: "~/code/mobile", branches: ["main", "feat/offline-cart"] },
   { repo: "github.com/acme/search-api", cwd: "~/code/search-api", branches: ["main", "perf/bm25-cache"] },
   { repo: "gitlab.com/acme/data-pipeline", cwd: "~/work/data-pipeline", branches: ["main", "fix/late-events"] },
+  // An IDE workspace (Antigravity) and a Cursor project.
+  { repo: "github.com/acme/design-system", cwd: "~/code/design-system", branches: ["main", "feat/tokens-v2"] },
+  { repo: "github.com/acme/notify-service", cwd: "~/code/notify-service", branches: ["main", "fix/digest-dedupe"] },
 ];
 
 /** One tool call inside a turn. `say` is what the assistant has written by then
@@ -51,6 +58,9 @@ export interface ToolStep {
   error?: string;
   paths?: string[];
   say?: string;
+  /** Antigravity's PostToolUse names no tool for this step (only stepIdx and error):
+   *  a session.heartbeat stands in for its tool.ended. */
+  unnamed?: boolean;
   /** Claude Code asks before running this one: an attention.needed stays open first. */
   permission?: string;
   /** The Agent tool: a subagent runs these steps in a child session before the next step. */
@@ -777,6 +787,231 @@ export const GEMINI_TURNS: readonly TurnScript[] = [
     ],
     final:
       "Two pages had no description: `docs/guides/webhooks.md` and `docs/reference/cli.md`. Both now carry a one-sentence description under 155 characters; the rest of `docs/` already had one.",
+  },
+];
+
+// ---------- Antigravity: github.com/acme/design-system (an IDE workspace) ----------
+// Antigravity has no pre-tool hook and its PostToolUse carries no output, so a step's
+// `input` is the toolCall.args the hook saw and there is no `output`; `unnamed` steps
+// are the PostToolUse payloads that name no tool at all (a heartbeat on the wire).
+
+export const ANTIGRAVITY_TURNS: readonly TurnScript[] = [
+  {
+    prompt:
+      "The Button's focus ring disappears on the dark theme. Find which token it reads and fix it without touching the light theme.",
+    steps: [
+      {
+        tool: "grep_search",
+        input: { Query: "focus-ring", SearchPath: "packages/tokens", MatchPerLine: true },
+        ms: 60,
+        unnamed: true,
+      },
+      {
+        tool: "read_file",
+        input: { AbsolutePath: "~/code/design-system/packages/tokens/src/dark.css", StartLine: 1, EndLine: 60 },
+        ms: 5,
+      },
+      {
+        tool: "edit_file",
+        input: {
+          file_path: "~/code/design-system/packages/tokens/src/dark.css",
+          old_string: "  --focus-ring: var(--color-brand-700);",
+          new_string: "  --focus-ring: var(--color-brand-300);",
+        },
+        ms: 7,
+      },
+      {
+        tool: "run_terminal_cmd",
+        input: { CommandLine: "pnpm --filter @acme/tokens test -- --run", Cwd: "~/code/design-system" },
+        ms: 6400,
+        unnamed: true,
+      },
+    ],
+    final:
+      "On the dark theme `--focus-ring` pointed at `--color-brand-700`, which is within two lightness steps of the dark surface, so the ring was there but invisible. It now reads `--color-brand-300` in `dark.css` only; `light.css` is untouched. The tokens package tests pass, including the contrast check, which now reports 4.6:1 for the ring against the dark surface.",
+  },
+  {
+    prompt: "Generate tokens.json from the CSS so the mobile team can consume it, and add a script for it.",
+    steps: [
+      {
+        tool: "list_dir",
+        input: { DirectoryPath: "~/code/design-system/packages/tokens/scripts" },
+        ms: 4,
+        unnamed: true,
+      },
+      {
+        tool: "edit_file",
+        input: {
+          file_path: "~/code/design-system/packages/tokens/scripts/export-json.mjs",
+          old_string: "",
+          new_string:
+            "import { readFileSync, writeFileSync } from 'node:fs';\nconst css = readFileSync('src/light.css', 'utf8') + readFileSync('src/dark.css', 'utf8');\nconst tokens = Object.fromEntries([...css.matchAll(/--([a-z0-9-]+):\\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));\nwriteFileSync('dist/tokens.json', JSON.stringify(tokens, null, 2));\n",
+        },
+        ms: 9,
+      },
+      {
+        tool: "run_terminal_cmd",
+        input: { CommandLine: "node scripts/export-json.mjs", Cwd: "~/code/design-system/packages/tokens" },
+        ms: 420,
+        ok: false,
+        error: "ENOENT: no such file or directory, open 'dist/tokens.json'",
+      },
+      {
+        tool: "edit_file",
+        input: {
+          file_path: "~/code/design-system/packages/tokens/scripts/export-json.mjs",
+          old_string: "writeFileSync('dist/tokens.json'",
+          new_string: "mkdirSync('dist', { recursive: true });\nwriteFileSync('dist/tokens.json'",
+        },
+        ms: 5,
+      },
+      {
+        tool: "run_terminal_cmd",
+        input: {
+          CommandLine: "node scripts/export-json.mjs && wc -l dist/tokens.json",
+          Cwd: "~/code/design-system/packages/tokens",
+        },
+        ms: 380,
+        unnamed: true,
+      },
+    ],
+    final:
+      "`scripts/export-json.mjs` reads both theme files and writes every `--token: value` pair to `dist/tokens.json` (212 tokens). The first run failed because `dist/` did not exist yet; the script now creates it. Dark-theme values overwrite light ones in the flat map, so the mobile team gets one value per name; say if they want the two themes side by side instead.",
+  },
+];
+
+// ---------- Cursor: github.com/acme/notify-service ----------
+// Cursor's hooks carry `tool_input` as an object and `tool_output` as text; an edit is
+// also reported by afterFileEdit, which is where the files.changed comes from.
+
+export const CURSOR_TURNS: readonly TurnScript[] = [
+  {
+    prompt:
+      "Digest emails go out twice when two cron workers overlap. Put a lock around the digest job so only one worker sends.",
+    steps: [
+      {
+        tool: "Grep",
+        input: { pattern: "sendDigest|digestJob", path: "src" },
+        output:
+          "src/jobs/digest.ts:18:export async function digestJob() {\nsrc/jobs/digest.ts:31:    await sendDigest(user);\nsrc/cron.ts:9:  schedule('*/15 * * * *', digestJob);\n",
+        ms: 42,
+      },
+      {
+        tool: "Read",
+        input: { path: "src/jobs/digest.ts" },
+        output:
+          "export async function digestJob() {\n  const users = await usersDueForDigest();\n  for (const user of users) {\n    await sendDigest(user);\n    await markDigested(user.id);\n  }\n}\n",
+        ms: 3,
+      },
+      {
+        tool: "Edit",
+        input: {
+          path: "src/jobs/digest.ts",
+          old_string: "export async function digestJob() {\n  const users = await usersDueForDigest();",
+          new_string:
+            "export async function digestJob() {\n  const lock = await redis.set('lock:digest', workerId, { NX: true, PX: 14 * 60_000 });\n  if (!lock) return;\n  const users = await usersDueForDigest();",
+        },
+        output: "Edited src/jobs/digest.ts",
+        ms: 6,
+        paths: ["src/jobs/digest.ts"],
+      },
+      {
+        tool: "Shell",
+        input: { command: "npx vitest run src/jobs", working_directory: "~/code/notify-service" },
+        output: " ✓ src/jobs/digest.test.ts (5 tests) 143ms\n\n Test Files  1 passed (1)\n      Tests  5 passed (5)\n",
+        ms: 3100,
+      },
+    ],
+    final:
+      "`digestJob` now takes a Redis lock (`SET lock:digest <workerId> NX PX 840000`) before it reads the due users and returns at once when another worker holds it. The 14-minute expiry sits under the 15-minute schedule, so a crashed worker never blocks the next run. The 5 digest tests pass; I did not add a test for the overlap itself because the suite has no second worker to stand up.",
+  },
+  {
+    prompt:
+      "Every HTML email template should have a plain-text twin next to it. Check them all and write the missing ones.",
+    steps: [
+      {
+        tool: "Glob",
+        input: { pattern: "templates/**/*.html" },
+        output:
+          "templates/digest.html\ntemplates/welcome.html\ntemplates/password-reset.html\ntemplates/invoice-ready.html\n",
+        ms: 12,
+      },
+      {
+        tool: "Task",
+        input: {
+          description: "Find templates without a .txt twin",
+          prompt:
+            "For each templates/**/*.html, check whether a .txt file with the same stem exists. List the ones that have none.",
+        },
+        output: "Missing: templates/password-reset.txt, templates/invoice-ready.txt",
+        ms: 4,
+        subagent: {
+          type: "explore",
+          steps: [
+            {
+              tool: "Glob",
+              input: { pattern: "templates/**/*.txt" },
+              output: "templates/digest.txt\ntemplates/welcome.txt\n",
+              ms: 9,
+            },
+            {
+              tool: "Read",
+              input: { path: "templates/password-reset.html" },
+              output:
+                '<p>Someone asked to reset the password for {{email}}.</p>\n<p><a href="{{link}}">Reset it</a> within the next hour.</p>\n',
+              ms: 3,
+            },
+          ],
+        },
+      },
+      {
+        tool: "Write",
+        input: {
+          path: "templates/password-reset.txt",
+          contents: "Someone asked to reset the password for {{email}}.\n\nReset it within the next hour: {{link}}\n",
+        },
+        output: "Wrote templates/password-reset.txt",
+        ms: 4,
+        paths: ["templates/password-reset.txt"],
+      },
+      {
+        tool: "Write",
+        input: {
+          path: "templates/invoice-ready.txt",
+          contents: "Your invoice {{number}} for {{total}} is ready.\n\nView it: {{link}}\n",
+        },
+        output: "Wrote templates/invoice-ready.txt",
+        ms: 4,
+        paths: ["templates/invoice-ready.txt"],
+      },
+      {
+        tool: "Shell",
+        input: { command: "npm run lint:templates", working_directory: "~/code/notify-service" },
+        output: "",
+        ok: false,
+        error: "templates/invoice-ready.txt: unknown placeholder {{total}} (did you mean {{amount}}?)\nExit code 1",
+        ms: 900,
+      },
+      {
+        tool: "Edit",
+        input: {
+          path: "templates/invoice-ready.txt",
+          old_string: "for {{total}} is ready.",
+          new_string: "for {{amount}} is ready.",
+        },
+        output: "Edited templates/invoice-ready.txt",
+        ms: 3,
+        paths: ["templates/invoice-ready.txt"],
+      },
+      {
+        tool: "Shell",
+        input: { command: "npm run lint:templates", working_directory: "~/code/notify-service" },
+        output: "4 templates, 4 plain-text twins, 0 problems\n",
+        ms: 850,
+      },
+    ],
+    final:
+      "Two of the four templates had no plain-text twin: `password-reset` and `invoice-ready`. Both now have one with the same placeholders as the HTML. The template linter caught that I had written `{{total}}` where the HTML uses `{{amount}}`; fixed, and it reports 4 templates, 4 twins, 0 problems.",
   },
 ];
 

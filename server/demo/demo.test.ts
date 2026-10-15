@@ -2,7 +2,8 @@
 // The simulation is checked on its own virtual clock (deterministic, instant), then the
 // runner on the wall clock at speed 1000 against a fake store.
 import { describe, expect, it } from "vitest";
-import type { EventSource, ProtocolEvent } from "../../shared/api.js";
+import { DONE_AFTER_MS, type EventSource, type ProtocolEvent } from "../../shared/api.js";
+import { applyEvent, newRecord, refreshState } from "../store/readings.js";
 import type { Store } from "../store/store.js";
 import { startDemo } from "./index.js";
 import { Simulation } from "./sim.js";
@@ -79,7 +80,7 @@ describe("Simulation: a 10-minute run", () => {
       }
     }
     const starts = events.filter((e) => e.type === "session.started").map((e) => e.data.source);
-    expect(new Set(starts)).toEqual(new Set(["startup", "resume", "compact", "fork"]));
+    expect(new Set(starts)).toEqual(new Set(["startup", "resume", "compact", "fork", "unknown"]));
   });
 
   it("grows the session block COALESCE-style and never drops a learned field", () => {
@@ -144,6 +145,7 @@ describe("Simulation: a 10-minute run", () => {
     const open = new Map<string, ProtocolEvent>();
     const idOf = (e: ProtocolEvent) => `${key(e)}|${(e.data.call_id as string | undefined) ?? e.data.tool}`;
     for (const e of events) {
+      if (e.harness.name === "antigravity") continue; // no pre-tool hook: tool.ended alone (below)
       if (e.type === "tool.started") {
         expect(open.has(idOf(e)), `two tool.started for ${idOf(e)}`).toBe(false);
         open.set(idOf(e), e);
@@ -171,13 +173,15 @@ describe("Simulation: a 10-minute run", () => {
       }
       const ended = events.find((e) => e.type === "subagent.ended" && e.data.agent_id === agentId) as ProtocolEvent;
       expect(ended.session.id).toBe(s.session.id);
+      // The parent's agent tool (Claude Code's Agent, Cursor's Task) names the child in its output.
       const agentTool = events.find(
         (e) =>
           e.type === "tool.ended" &&
-          e.data.tool === "Agent" &&
-          (e.data.output as { agentId?: string }).agentId === agentId,
+          (e.data.tool === "Agent" || e.data.tool === "Task") &&
+          JSON.stringify(e.data.output).includes(agentId),
       );
-      expect(agentTool).toBeDefined();
+      expect(agentTool, `${s.harness.name} ${agentId}`).toBeDefined();
+      expect(agentTool?.session.id).toBe(s.session.id);
     }
   });
 
@@ -248,7 +252,7 @@ describe("Simulation: a 10-minute run", () => {
     expect(events.some((e) => e.type === "tool.ended" && e.data.ok === false && typeof e.data.error === "string")).toBe(
       true,
     );
-    expect(events.some((e) => e.type === "tool.ended" && JSON.stringify(e.data.output).includes("[redacted]"))).toBe(
+    expect(events.some((e) => e.type === "tool.ended" && JSON.stringify(e.data.output)?.includes("[redacted]"))).toBe(
       true,
     );
     expect(
@@ -256,7 +260,7 @@ describe("Simulation: a 10-minute run", () => {
     ).toBe(true);
     expect(
       events
-        .filter((e) => e.type === "turn.ended" && e.data.reason === "stop")
+        .filter((e) => e.type === "turn.ended" && e.data.reason === "stop" && e.harness.name !== "antigravity")
         .every((e) => Number.isInteger(e.data.ms)),
     ).toBe(true);
     expect(events.some((e) => e.type === "context.compacted" && e.data.trigger === "auto")).toBe(true);
@@ -264,8 +268,11 @@ describe("Simulation: a 10-minute run", () => {
 
     expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box"]));
     const models = new Set(events.map((e) => e.session.model).filter(Boolean));
-    for (const m of ["claude-fable-5-1", "claude-opus-5-5", "gpt-5.4-codex", "gemini-3-pro"])
+    for (const m of ["claude-fable-5-1", "claude-opus-5-5", "gpt-5.4-codex", "gemini-3-pro", "gpt-5.5"])
       expect(models, m).toContain(m);
+    expect(new Set(events.map((e) => e.harness.name))).toEqual(
+      new Set(["claude-code", "codex", "gemini-cli", "antigravity", "cursor"]),
+    );
     expect(events.every((e) => !e.session.cwd || e.session.cwd.startsWith("~"))).toBe(true);
   });
 
@@ -285,7 +292,9 @@ describe("Simulation: a 10-minute run", () => {
       expect(last).toBeGreaterThan(started);
       expect(Date.parse(e.time)).toBe(last);
     }
-    expect(new Set(backfill.map((e) => e.harness.name))).toEqual(new Set(["claude-code", "codex", "gemini-cli"]));
+    expect(new Set(backfill.map((e) => e.harness.name))).toEqual(
+      new Set(["claude-code", "codex", "gemini-cli", "antigravity"]),
+    );
     // One of them comes back to life as a resumed session with its seq continuing from 1.
     const resumed = events.find((e) => e.type === "session.started" && e.data.source === "resume") as ProtocolEvent;
     expect(backfill.some((b) => b.session.id === resumed.session.id)).toBe(true);
@@ -344,6 +353,163 @@ describe("Simulation: a 10-minute run", () => {
       expect(sim.live).toBeLessThanOrEqual(7);
     }
     expect(n).toBeGreaterThan(1500);
+  });
+});
+
+describe("Antigravity and Cursor, as ADAPTERS.md maps them", () => {
+  const events = run(7, 12);
+  const of = (harness: string) => events.filter((e) => e.harness.name === harness && e.type !== "session.backfill");
+  const sessionsOf = (harness: string) => {
+    const by = new Map<string, ProtocolEvent[]>();
+    for (const e of of(harness)) by.set(e.session.id, [...(by.get(e.session.id) ?? []), e]);
+    return [...by.values()];
+  };
+  const hookNames = (harness: string) => new Set(of(harness).map((e) => e.harness.event));
+
+  it("Antigravity: PreInvocation 0 is the session and the turn; later hooks are heartbeats or tool.ended", () => {
+    const ag = of("antigravity");
+    expect(ag.length).toBeGreaterThan(20);
+    expect(hookNames("antigravity")).toEqual(new Set(["PreInvocation", "PostToolUse", "Stop"]));
+    for (const e of ag) expect(e.harness.version).toBe("1.21.9");
+    // Every turn.started follows a session.started { source: unknown } from the same hook.
+    for (const list of sessionsOf("antigravity"))
+      for (const [i, e] of list.entries()) {
+        if (e.type !== "turn.started") continue;
+        const prev = list[i - 1] as ProtocolEvent;
+        expect(prev.type).toBe("session.started");
+        expect(prev.data).toEqual({ source: "unknown" });
+        expect(prev.harness.event).toBe("PreInvocation");
+        expect(e.data).toEqual({});
+        expect(prev.session.model).toMatch(/^gemini-/);
+        expect(prev.session.title_source).toBe("first-ask");
+      }
+    const beats = ag.filter((e) => e.type === "session.heartbeat");
+    expect(new Set(beats.map((e) => e.harness.event))).toEqual(new Set(["PreInvocation", "PostToolUse"]));
+    for (const b of beats) expect(b.data).toEqual({});
+    const tools = ag.filter((e) => e.type === "tool.ended");
+    expect(tools.length).toBeGreaterThan(0);
+    for (const t of tools) {
+      expect(t.harness.event).toBe("PostToolUse");
+      expect(Object.keys(t.data).sort()).toEqual(
+        t.data.ok ? ["input", "ok", "tool"] : ["error", "input", "ok", "tool"],
+      );
+    }
+    expect(new Set(tools.map((e) => e.data.tool))).toContain("edit_file");
+    for (const type of ["tool.started", "attention.needed", "attention.cleared", "files.changed", "session.ended"])
+      expect(
+        ag.some((e) => e.type === type),
+        type,
+      ).toBe(false);
+    const stops = ag.filter((e) => e.type === "turn.ended");
+    expect(stops.length).toBeGreaterThan(0);
+    for (const s of stops) {
+      expect(s.harness.event).toBe("Stop");
+      expect(s.data).toEqual({ reason: "stop" });
+    }
+    expect(ag.filter((e) => e.type === "turn.transcript").length).toBe(stops.length);
+  });
+
+  it("Antigravity: a finished session ends on a Stop and its transcript, then nothing", () => {
+    const opening = sessionsOf("antigravity")[0] as ProtocolEvent[];
+    expect(opening[0]?.session.cwd).toBe("~/code/design-system");
+    const types = opening.map((e) => e.type);
+    expect(types.slice(-2)).toEqual(["turn.ended", "turn.transcript"]);
+    expect(types.filter((t) => t === "turn.started").length).toBe(2);
+    // and it is over well before the run ends, with no session.ended ever
+    expect(Date.parse(opening[opening.length - 1]!.time)).toBeLessThan(T0 + 8 * 60_000);
+    expect(types).not.toContain("session.ended");
+  });
+
+  it("Cursor: its own hook names, generation ids, files.changed from afterFileEdit, no attention", () => {
+    const cu = of("cursor");
+    expect(cu.length).toBeGreaterThan(20);
+    for (const n of [
+      "sessionStart",
+      "beforeSubmitPrompt",
+      "preToolUse",
+      "postToolUse",
+      "postToolUseFailure",
+      "afterFileEdit",
+      "subagentStart",
+      "subagentStop",
+      "stop",
+      "sessionEnd",
+    ])
+      expect(hookNames("cursor"), n).toContain(n);
+    for (const e of cu) expect(e.harness.version).toBe("3.7.36");
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const starts = cu.filter((e) => e.type === "session.started" && e.data.source === "startup");
+    expect(starts.length).toBeGreaterThan(0);
+    for (const s of starts) {
+      expect(s.session.id).toMatch(uuid);
+      expect(s.harness.event).toBe("sessionStart");
+      expect(["claude-fable-5-1", "gpt-5.5"]).toContain(s.session.model);
+    }
+    for (const t of cu.filter((e) => e.type === "turn.started")) {
+      expect(t.data.turn_id).toMatch(uuid);
+      expect(Number.isInteger(t.data.prompt_chars)).toBe(true);
+    }
+    const changed = cu.filter((e) => e.type === "files.changed");
+    expect(changed.length).toBeGreaterThan(0);
+    for (const c of changed) {
+      expect(c.harness.event).toBe("afterFileEdit");
+      expect(Array.isArray(c.data.paths) && c.data.paths.length > 0).toBe(true);
+    }
+    const tools = new Set(cu.filter((e) => e.type === "tool.ended").map((e) => e.data.tool));
+    for (const t of ["Shell", "Read", "Edit", "Grep", "Glob", "Write", "Task"]) expect(tools, t).toContain(t);
+    const failed = cu.find((e) => e.type === "tool.ended" && e.data.ok === false) as ProtocolEvent;
+    expect(failed.harness.event).toBe("postToolUseFailure");
+    expect(cu.some((e) => e.type.startsWith("attention."))).toBe(false);
+    for (const s of cu.filter((e) => e.type === "turn.ended")) expect(s.harness.event).toBe("stop");
+    expect(cu.some((e) => e.type === "session.ended" && e.harness.event === "sessionEnd")).toBe(true);
+  });
+
+  it("reads through the store as the spec means: Antigravity done only by silence, Cursor's files counted", () => {
+    const ingest = (list: ProtocolEvent[], now: number) => {
+      const first = list[0] as ProtocolEvent;
+      const rec = newRecord(first.harness.name, first.session.id, first.time, "demo");
+      for (const e of list) applyEvent(rec, e, e.time, "demo");
+      refreshState(rec, now);
+      return rec;
+    };
+    const ag = sessionsOf("antigravity")[0] as ProtocolEvent[];
+    const lastAg = Date.parse(ag[ag.length - 1]!.time);
+    // Mid-turn (after the first heartbeat, before the Stop): working, no current tool.
+    const beat = ag.findIndex((e) => e.type === "session.heartbeat");
+    const mid = ingest(ag.slice(0, beat + 1), Date.parse(ag[beat]!.time) + 1000);
+    expect(mid.summary.state).toBe("working");
+    expect(mid.summary.currentTurn).toBeDefined();
+    expect(mid.summary.currentTool).toBeUndefined();
+    // After the last Stop: idle (the turn's ms came from the clock), not done …
+    const after = ingest(ag, lastAg + 60_000);
+    expect(after.ended).toBe(false);
+    expect(after.summary.state).toBe("idle");
+    expect(after.summary.counts.turns).toBe(2);
+    expect(after.summary.turnStats.count).toBe(2);
+    expect(after.summary.turnStats.lastMs).toBeGreaterThan(0);
+    expect(after.summary.counts.filesChanged).toBeGreaterThan(0); // edit_file's file_path, via paths.ts
+    expect(after.summary.title).toBe("The Button's focus ring disappears on the dark…");
+    expect(after.summary.titleSource).toBe("first-ask");
+    expect(after.summary.model).toMatch(/^gemini-/);
+    // … until it has been silent for a day: the receiver's own reading, flagged as such.
+    const later = ingest(ag, lastAg + DONE_AFTER_MS + 1);
+    expect(later.summary.state).toBe("done");
+    expect(later.ended).toBe(false);
+    expect(later.summary.endedAt).toBeUndefined();
+
+    const cu = sessionsOf("cursor")[0] as ProtocolEvent[];
+    const rec = ingest(cu, Date.parse(cu[cu.length - 1]!.time) + 1000);
+    expect(rec.ended).toBe(true);
+    expect(rec.summary.state).toBe("done");
+    expect(rec.summary.counts.filesChanged).toBe(3);
+    expect([...rec.files].sort()).toEqual([
+      "src/jobs/digest.ts",
+      "templates/invoice-ready.txt",
+      "templates/password-reset.txt",
+    ]);
+    expect(rec.summary.counts.subagents).toBe(1);
+    expect(rec.summary.counts.toolErrors).toBe(1);
+    expect(rec.summary.openAttentions).toEqual([]);
   });
 });
 

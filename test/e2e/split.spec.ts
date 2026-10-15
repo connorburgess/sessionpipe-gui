@@ -9,6 +9,7 @@ import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
 const live = (page: Page) => expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Shift-clicks the first board card; returns its title. */
 async function openBeside(page: Page): Promise<string> {
@@ -75,12 +76,17 @@ test.describe("split panel", () => {
       await expect(panel(page).locator(".sess-counts-ev")).toHaveText(/events$/);
       await expect.poll(() => mainWidth(page)).toBeLessThan(before - 300);
       const url = page.url();
+      // The same session after the reload: by its key in the URL, and the title the panel
+      // showed just before (a demo session may learn a better title mid-turn).
+      const shown = await panel(page).locator(".panel-title").textContent();
 
       await page.reload();
       await live(page);
       await expect(panel(page)).toHaveClass(/panel--open/);
-      await expect(panel(page).locator(".panel-title")).toHaveText(title);
       expect(page.url()).toBe(url);
+      await expect(panel(page).locator(".panel-title")).toHaveText(
+        new RegExp(`^(${escape(title)}|${escape(shown ?? "")})`),
+      );
 
       await page.keyboard.press("Escape");
       await expect(panel(page)).not.toHaveClass(/panel--open/);
