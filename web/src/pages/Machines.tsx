@@ -110,29 +110,27 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
                     {c.mode && <> · mode {c.mode}</>}
                     {c.version && <> · v{c.version}</>}
                   </span>
-                  <span className="machine-ctl-row machine-devices">
-                    Devices that can answer:{" "}
-                    {c.keys.length === 0
-                      ? "none yet"
-                      : c.keys
-                          .map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`)
-                          .join(", ")}
-                    {c.queued > 0 && <> · {c.queued} queued</>}
-                    {" · "}
-                    <details className="machine-add-phone">
-                      <summary>+ Add a phone</summary>
-                      <span>
-                        On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
-                        <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
-                        machine already trusts can vouch for one.
-                      </span>
-                    </details>
-                  </span>
                   {c.folders && c.folders.length > 0 && (
                     <span className="machine-ctl-row mono">{c.folders.join("  ")}</span>
                   )}
                 </>
               )}
+              <span className="machine-ctl-row machine-devices">
+                Devices that can answer:{" "}
+                {c.keys.length === 0
+                  ? "none yet"
+                  : c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")}
+                {c.queued > 0 && <> · {c.queued} queued</>}
+                {" · "}
+                <details className="machine-add-phone">
+                  <summary>+ Add a phone</summary>
+                  <span>
+                    On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
+                    <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
+                    machine already trusts can vouch for one.
+                  </span>
+                </details>
+              </span>
             </dd>
           ) : (
             <dd>
