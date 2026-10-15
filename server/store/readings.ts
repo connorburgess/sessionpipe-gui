@@ -237,6 +237,21 @@ export function answerableAttention(ev: ProtocolEvent): boolean {
   return ev.harness.event === "PermissionRequest" || id.startsWith("perm-");
 }
 
+/** One tool call for the loop reading (evaluateFlags): its name, when, and at tier 3 a
+ *  hash of its input. The same input is judged on what the index keeps of it (slim.ts),
+ *  so a reboot reads the same loop from the slim copies. */
+function noteStart(t: Tracking, tool: string, at: string, ev: ProtocolEvent): void {
+  const input = (ev.data as Record<string, unknown>).input;
+  const text =
+    ev.tier >= 3 && input !== undefined && input !== null
+      ? typeof input === "string"
+        ? input
+        : JSON.stringify(input)
+      : undefined;
+  t.starts.push({ tool, at, ...(text !== undefined ? { hash: fnv(text.slice(0, PREVIEW_CHARS)) } : {}) });
+  if (t.starts.length > LOOP_WINDOW) t.starts.splice(0, t.starts.length - LOOP_WINDOW);
+}
+
 export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: string, source: EventSource): void {
   const s = rec.summary;
   const t = rec.track;
@@ -347,17 +362,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       const tool = str(d.tool);
       if (tool) {
         s.currentTool = { tool, callId: str(d.call_id), since: at, agentId: str(d.agent_id) };
-        // The same input is judged on what the index keeps of it (slim.ts), so a
-        // reboot reads the same loop from the slim copies.
-        const input = d.input;
-        const text =
-          ev.tier >= 3 && input !== undefined && input !== null
-            ? typeof input === "string"
-              ? input
-              : JSON.stringify(input)
-            : undefined;
-        t.starts.push({ tool, at, ...(text !== undefined ? { hash: fnv(text.slice(0, PREVIEW_CHARS)) } : {}) });
-        if (t.starts.length > LOOP_WINDOW) t.starts.splice(0, t.starts.length - LOOP_WINDOW);
+        noteStart(t, tool, at, ev);
       }
       s.currentTurn ??= { turnId: str(d.turn_id), since: at };
       break;
@@ -378,11 +383,20 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.recentTools.push({ tool, ok, ...(ms !== undefined ? { ms } : {}) });
       if (s.recentTools.length > 8) s.recentTools.splice(0, s.recentTools.length - 8);
       const cur = s.currentTool;
+      let matched = false;
       if (cur) {
         const callId = str(d.call_id);
-        if ((callId && cur.callId === callId) || (!callId && cur.tool === tool) || (!cur.callId && cur.tool === tool))
-          s.currentTool = undefined;
+        matched = !!(
+          (callId && cur.callId === callId) ||
+          (!callId && cur.tool === tool) ||
+          (!cur.callId && cur.tool === tool)
+        );
+        if (matched) s.currentTool = undefined;
       }
+      // A harness with no pre-tool hook (Antigravity's PostToolUse is its only tool
+      // event) never sent the start: the loop reading takes the end's input instead, so
+      // "the same call over and over" is read for it too.
+      if (!matched && tool !== "?") noteStart(t, tool, at, ev);
       s.currentTurn ??= { turnId: str(d.turn_id), since: at };
       // A write tool that succeeded changed the file its input names (the adapter sends
       // no files.changed for it); the same set as below, so the two never double-count.

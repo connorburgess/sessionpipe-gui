@@ -530,6 +530,27 @@ export interface TlsInfo {
 // ---------- setup (the first-run page; GET /api/ui/setup/status, this machine only) ----------
 
 /** Live facts the /setup page polls every two seconds. Nothing here is cached. */
+/** One harness of the protocol registry (sessionpipe's spec/ADAPTERS.md) as the setup page
+ *  sees it on this machine (`server/setup/harnesses.ts`). Every registry name is listed,
+ *  installed or not; the page shows the installed ones. */
+export interface HarnessStatus {
+  /** The registry name: `claude-code`, `codex`, `gemini-cli`, `antigravity`, `cursor`, … */
+  name: string;
+  /** The product's name: "Claude Code", "Gemini CLI". */
+  label: string;
+  /** The app or CLI is on this machine: its config dir, its app bundle, or its command on the PATH. */
+  installed: boolean;
+  /** `on`: the harness's hooks config names sessionpipe · `off`: installed, but the hooks are
+   *  not written yet (`npx sessionpipe install`) · `unsupported`: sessionpipe has no adapter
+   *  for it yet (the registry's M7 rows: cursor, copilot-cli, droid, kiro, opencode). */
+  hooks: "on" | "off" | "unsupported";
+  /** Where that harness reads its hooks (the file `sessionpipe install` writes). */
+  configPath: string;
+  /** This machine's sessions in the store for this harness, and their latest event (ISO). */
+  sessions: number;
+  lastEventAt?: string;
+}
+
 export interface SetupStatus {
   sessionpipe: {
     /** A `sessionpipe` CLI on the PATH or at ~/.local/bin. */
@@ -539,6 +560,8 @@ export interface SetupStatus {
     outbox: { path: string; present: boolean; sessions: number };
   };
   events: { total: number; lastAt?: string };
+  /** The registry's harnesses on this machine, in registry order (disk probed every 10 s). */
+  harnesses: HarnessStatus[];
   tls: {
     on: boolean;
     hostname: string;
@@ -610,11 +633,12 @@ export interface ExtraEntry {
   id: string;
   kind: ExtraKind;
   name: string;
-  /** The npm package `extras add` installs. */
+  /** The npm package name it would install from, kept for the day the packages are
+   *  published; today every entry ships inside the GUI and nothing installs from npm. */
   npm: string;
   /** One line. */
   line: string;
-  /** The npm tarball, rounded ("59 kB"). */
+  /** What it weighs as packed, rounded ("59 kB"). */
   size: string;
   /** Ships inside the GUI's package: nothing to install. */
   bundled?: boolean;

@@ -23,6 +23,7 @@ import type { OutboxSource } from "../sources/outbox.js";
 import type { Store } from "../store/store.js";
 import { opensslAvailable, readCerts, TlsError, type TlsMaterial } from "../tls/certs.js";
 import type { ViewerRegistry } from "../ui/viewers.js";
+import { createHarnessDetector, type HarnessFs, realHarnessFs } from "./harnesses.js";
 import { type Exec, execDefault, findCli, isThisMachine } from "./local.js";
 import { Pairer, type SpawnFn } from "./pairer.js";
 import { type AskDaemon, askDaemonDefault, buildStatus, caTrustedOnMac, type Lookup } from "./status.js";
@@ -53,6 +54,8 @@ export interface SetupDeps {
   askDaemon?: AskDaemon;
   opensslPresent?: () => boolean;
   tlsDir?: string;
+  /** The disk the harness probes read (`harnesses.ts`); a fake one in tests. */
+  harnessFs?: HarnessFs;
 }
 
 export const SETUP_ROUTES = {
@@ -82,6 +85,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
   const hostname = deps.hostname ?? os.hostname();
   const tlsDir = deps.tlsDir ?? path.join(deps.info().storage.dir, "tls");
   const pairer = new Pairer(deps.spawn);
+  const harnesses = createHarnessDetector(deps.harnessFs ?? realHarnessFs(home, env, platform));
 
   const local =
     (h: Handler): Handler =>
@@ -128,6 +132,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
           lookup: deps.lookup ?? ((h) => import("node:dns").then((dns) => dns.promises.lookup(h))),
           askDaemon: deps.askDaemon ?? askDaemonDefault,
           opensslPresent: deps.opensslPresent ?? opensslAvailable,
+          harnesses,
         }),
       }),
     ),

@@ -83,14 +83,15 @@ px; the empty board, the trust page and the 401 page show the wordmark at 20 px.
 
 Where the board names the harness a session runs in, it shows that product's mark in
 one colour beside the text (`web/src/lib/harnessIcons.ts`): the Anthropic mark for
-Claude Code, the OpenAI mark for Codex, the Gemini mark for Gemini CLI. The path data
-comes from [simple-icons](https://simple-icons.org) (CC0); the marks themselves are
-trademarks of Anthropic, OpenAI and Google, used here only to identify the software a
-session runs in. This project is not affiliated with, sponsored by or endorsed by any
-of them. Antigravity has no icon there, so it gets a plain glyph of ours, a ring with an
-arrow, not a guess at Google's logo. Harnesses without a mark keep their two-letter
-monogram. The marks stay monochrome and never take a brand colour; the amber is still
-the only accent of the stock scheme.
+Claude Code, the OpenAI mark for Codex, the Gemini mark for Gemini CLI, the Antigravity
+arch for Antigravity, the Cursor mark for Cursor. The path data for all but Antigravity
+comes from [simple-icons](https://simple-icons.org) (CC0); Antigravity's is redrawn in one
+colour from the app's own monochrome asset. The marks themselves are trademarks of
+Anthropic, OpenAI, Google and Anysphere, used here only to identify the software a
+session runs in. This project is not affiliated with, sponsored by or endorsed by any of
+them. Harnesses without a mark (the rest of the registry in sessionpipe's
+`spec/ADAPTERS.md`) keep their two-letter monogram. The marks stay monochrome and never
+take a brand colour; the amber is still the only accent of the stock scheme.
 
 The default skin, **Spacesheep**, carries the colours of [spacesheep](https://spacesheep.dev)
 (the sheep's flame for *needs you*, its indigo for *working*, teal for *stale*, a ground

@@ -1318,5 +1318,5 @@ const HOOK_NAMES: Record<string, Record<string, string>> = {
     "tool.ended": "AfterTool",
     "turn.ended": "AfterAgent",
   },
-  antigravity: { "session.started": "PreInvocation", "tool.started": "PreToolCall", "tool.ended": "PostToolCall" },
+  antigravity: { "session.started": "PreInvocation", "tool.ended": "PostToolUse", "turn.ended": "Stop" },
 };

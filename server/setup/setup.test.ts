@@ -16,6 +16,7 @@ import { Router } from "../http/router.js";
 import { Store } from "../store/store.js";
 import { ensureCerts, opensslAvailable } from "../tls/certs.js";
 import { ViewerRegistry } from "../ui/viewers.js";
+import { realHarnessFs } from "./harnesses.js";
 import { INSTALL_COMMAND, registerSetup, SETUP_ROUTES, type SetupDeps } from "./index.js";
 import { type ExecResult, findCli, isThisMachine, sameMachine } from "./local.js";
 import { lookupWithTimeout } from "./status.js";
@@ -89,6 +90,8 @@ async function boot(tmp: string, o: Partial<SetupDeps> & { tlsOn?: boolean; exec
     return { code: 0, stdout: "", stderr: "" };
   };
   let port = 0;
+  // The harness probes read the temp home as a Linux disk, so this Mac's /Applications stays out of it.
+  const env = { PATH: `${o.env?.PATH ?? path.join(tmp, "nowhere")}:/usr/bin:/bin`, HOME: tmp };
   registerSetup(router, {
     store,
     control,
@@ -110,8 +113,9 @@ async function boot(tmp: string, o: Partial<SetupDeps> & { tlsOn?: boolean; exec
     outboxPath: path.join(tmp, "sp"),
     testDoor: true,
     exec: o.exec ?? exec,
-    env: { PATH: `${o.env?.PATH ?? path.join(tmp, "nowhere")}:/usr/bin:/bin`, HOME: tmp },
+    env,
     platform: o.platform ?? "darwin",
+    harnessFs: realHarnessFs(tmp, env, "linux"),
     home: tmp,
     hostname: "Test-Box.local",
     lookup: o.lookup ?? (async () => ({ address: "192.168.7.9" })),
@@ -184,6 +188,17 @@ describe("setup routes", () => {
   beforeAll(async () => {
     tmp = tempDir("spgui-setup-");
     mkdirSync(path.join(tmp.dir, "sp", "outbox"), { recursive: true });
+    // Two harnesses on this disk: Claude Code with sessionpipe's hooks written, Cursor with none.
+    mkdirSync(path.join(tmp.dir, ".claude"), { recursive: true });
+    writeFileSync(
+      path.join(tmp.dir, ".claude", "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "/n/node /x/sessionpipe/dist/hook.js claude-code Stop" }] }],
+        },
+      }),
+    );
+    mkdirSync(path.join(tmp.dir, ".cursor"), { recursive: true });
     bin = fakeCli(tmp.dir);
     b = await boot(tmp.dir, { env: { PATH: bin } });
     const s = new Session("one");
@@ -212,6 +227,18 @@ describe("setup routes", () => {
     });
     expect(s.events.total).toBe(2);
     expect(s.events.lastAt).toMatch(/^\d{4}-/);
+    // The registry's harnesses on this disk: Claude Code's hooks on with the one session (this
+    // machine's), Cursor installed without an adapter, the rest not here.
+    expect(s.harnesses.map((h) => h.name)).toContain("antigravity");
+    expect(s.harnesses.find((h) => h.name === "claude-code")).toMatchObject({
+      installed: true,
+      hooks: "on",
+      sessions: 1,
+      lastEventAt: s.events.lastAt,
+      configPath: path.join(tmp.dir, ".claude", "settings.json"),
+    });
+    expect(s.harnesses.find((h) => h.name === "cursor")).toMatchObject({ installed: true, hooks: "unsupported" });
+    expect(s.harnesses.filter((h) => h.installed).map((h) => h.name)).toEqual(["claude-code", "cursor"]);
     expect(s.tls).toMatchObject({
       on: false,
       hostname: "test-box.local",
@@ -327,6 +354,8 @@ describe("setup routes", () => {
       const s = (await fetchJson(`${other.url}${SETUP_ROUTES.status}`)).body as unknown as SetupStatus;
       expect(s.sessionpipe.installed).toBe(false);
       expect(s.sessionpipe.outbox.present).toBe(false);
+      expect(s.harnesses).toHaveLength(9);
+      expect(s.harnesses.every((h) => !h.installed)).toBe(true);
     } finally {
       await other.close();
       t2.cleanup();

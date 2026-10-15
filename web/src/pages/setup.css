@@ -188,6 +188,37 @@
   color: var(--fg-3);
   overflow-wrap: anywhere;
 }
+/* Step 1's harnesses: one hairline row per installed harness, its mark and name, then one
+   status. Amber only on "hooks off", the one state that needs the person. */
+.step-harnesses {
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  border-top: var(--hairline) solid var(--line);
+}
+.step-harness {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 0;
+  border-bottom: var(--hairline) solid var(--line);
+  font-size: var(--text-sm);
+}
+.step-harness .glyph-label {
+  font-size: var(--text-sm);
+}
+.step-harness-status {
+  color: var(--fg-3);
+  text-align: right;
+}
+.step-harness--needs .step-harness-status {
+  color: var(--needs-fg);
+}
 .step-inline-pair {
   margin-top: 8px;
   padding: 16px;

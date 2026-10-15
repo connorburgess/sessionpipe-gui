@@ -695,6 +695,24 @@ describe("flags and turn stats", () => {
     expect(store.session(KEY)!.counts.toolErrors).toBe(4);
   });
 
+  it("reads the loop from tool ends alone, for a harness with no pre-tool hook (Antigravity)", () => {
+    const s = new Session();
+    const edit = (file: string) =>
+      s.ev("tool.ended", { tool: "edit_file", ok: true, input: { file_path: file } }, { tier: 3 });
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), edit("a.ts"), edit("b.ts"), edit("a.ts")], "http");
+    expect(store.session(KEY)!.flags).toEqual([]);
+    store.ingest([edit("a.ts")], "http");
+    expect(store.session(KEY)!.flags.map((f) => f.kind)).toEqual(["loop"]);
+    // A start that was matched by its end is counted once, not twice.
+    const t = new Session("pair-0000-0000-0000-000000000000");
+    const pair = (file: string) => [
+      t.ev("tool.started", { tool: "Read", call_id: file, input: { file_path: file } }, { tier: 3 }),
+      t.ev("tool.ended", { tool: "Read", call_id: file, ok: true, input: { file_path: file } }, { tier: 3 }),
+    ];
+    store.ingest([t.ev("session.started"), t.ev("turn.started"), ...pair("x.ts"), ...pair("x.ts")], "http");
+    expect(store.session(sessionKey(t.harness, t.id))!.flags).toEqual([]);
+  });
+
   it("flags a loop: the same tool on the same input three times in the last ten starts, tier 3 only", () => {
     const s = new Session();
     const read = (file: string, tier: 1 | 3 = 3) =>

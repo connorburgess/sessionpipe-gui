@@ -326,7 +326,12 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(page.locator(".ctl-hint")).toContainText(`${MACHINE} is listening`);
   // The day-grant note lives in the chat context line (Simple mode, the default) or in
   // the strip's note (Advanced): either wording is the same promise.
-  await expect(page.locator(".ctl-context, .ctl-note").filter({ hasText: /passkey once/ }).first()).toBeVisible();
+  await expect(
+    page
+      .locator(".ctl-context, .ctl-note")
+      .filter({ hasText: /passkey once/ })
+      .first(),
+  ).toBeVisible();
   await shot(page, "strip-ready-desktop");
 
   await box.fill("Add the Oct 8 row");

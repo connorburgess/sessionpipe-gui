@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Monochrome marks for the harnesses the board shows, drawn in currentColor next to
-// text. Path data for Anthropic, OpenAI and Google Gemini comes from simple-icons
-// (https://simple-icons.org, 16.35.0; the path data is CC0). The marks themselves are
-// trademarks of Anthropic, OpenAI and Google, used here only to identify the software a
-// session runs in, not to suggest affiliation or endorsement (see docs/brand.md,
-// "Third-party marks", and sessionpipe's TRADEMARKS.md). Antigravity has no icon in
-// simple-icons, so it gets a plain glyph of ours: a ring with an arrow up. Harnesses not
+// text. Path data for Anthropic, OpenAI, Google Gemini and Cursor comes from simple-icons
+// (https://simple-icons.org, 16.35.0; the path data is CC0). Antigravity's mark (the "A"
+// arch) is redrawn in one colour from the app's own monochrome asset. The marks themselves
+// are trademarks of Anthropic, OpenAI, Google and Anysphere, used here only to identify
+// the software a session runs in, not to suggest affiliation or endorsement (see
+// docs/brand.md, "Third-party marks", and sessionpipe's TRADEMARKS.md). Harnesses not
 // listed here keep their two-letter monogram (lib/format.ts).
 
 export interface HarnessIcon {
@@ -34,9 +34,14 @@ export const HARNESS_ICONS: Record<string, HarnessIcon> = {
   },
   antigravity: {
     name: "Antigravity",
+    // Wider than tall: the arch sits in a square box so it lines up with the others.
+    viewBox: "0 0 112 112",
+    path: "M89.754 92.75c4.667 3.5 11.667 1.167 5.25-5.25-19.25-18.667-15.167-70-39.083-70-23.917 0-19.834 51.333-39.084 70-7 7 .584 8.75 5.25 5.25C40.171 80.5 39.004 58.917 55.921 58.917c16.916 0 15.75 21.583 33.833 33.833Z",
+  },
+  cursor: {
+    name: "Cursor",
     viewBox: "0 0 24 24",
-    // Ours: a 2-unit ring (outer and inner circles wound opposite ways) and an arrow up.
-    path: "M12 1a11 11 0 1 0 0 22 11 11 0 1 0 0-22Zm0 2a9 9 0 1 1 0 18 9 9 0 1 1 0-18ZM11 18v-7.17l-2.59 2.58L7 12l5-5 5 5-1.41 1.41L13 10.83V18Z",
+    path: "M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23",
   },
 };
 

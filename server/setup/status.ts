@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: onboarding. The live facts behind GET /api/ui/setup/status: the CLI, the
-// outbox, the events, TLS mode and whether this Mac trusts the CA, the daemon and its
-// pairing, phones on the stream, and whether a message ever reached `delivered`.
-// Computed fresh on every call; the page polls it every two seconds.
+// outbox, the events, the registry's harnesses on this disk and their hooks, TLS mode and
+// whether this Mac trusts the CA, the daemon and its pairing, phones on the stream, and
+// whether a message ever reached `delivered`. Computed fresh on every call (the harness
+// probes cached for ten seconds); the page polls it every two seconds.
 import dns from "node:dns";
 import { existsSync } from "node:fs";
 import net from "node:net";
@@ -15,6 +16,7 @@ import { resolveOutboxRoot } from "../sources/outbox.js";
 import type { Store } from "../store/store.js";
 import { localHostname, readCerts, type TlsMaterial } from "../tls/certs.js";
 import type { ViewerRegistry } from "../ui/viewers.js";
+import type { HarnessDetector } from "./harnesses.js";
 import { type Exec, findCli, sameMachine } from "./local.js";
 import type { Pairer } from "./pairer.js";
 
@@ -122,6 +124,8 @@ export interface StatusDeps {
   lookup: Lookup;
   askDaemon: AskDaemon;
   opensslPresent: () => boolean;
+  /** The registry's harnesses on this disk (`harnesses.ts`), its probes cached across polls. */
+  harnesses: HarnessDetector;
 }
 
 export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
@@ -155,10 +159,13 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
       ? { code: child.code, check: child.check, expiresAt: new Date(Date.now() + 60_000).toISOString() }
       : undefined;
 
+  const sessions = d.store.snapshot().sessions;
+  const harnesses = d.harnesses.statuses(sessions, (m) => names.some((n) => sameMachine(m, n)));
+
   const suggestedFolders: string[] = [];
   if (!paired) {
     const seen = new Set<string>();
-    for (const s of d.store.snapshot().sessions) {
+    for (const s of sessions) {
       if (!s.cwd || !names.some((n) => sameMachine(s.machine, n))) continue;
       const abs = s.cwd.startsWith("~") ? path.join(d.home, s.cwd.slice(1)) : s.cwd;
       if (!path.isAbsolute(abs) || seen.has(abs)) continue;
@@ -179,6 +186,7 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
       outbox: { path: outboxDir, present: existsSync(outboxDir), sessions: d.outbox?.status().sessions ?? 0 },
     },
     events: { total: stats.events, ...(lastAt ? { lastAt } : {}) },
+    harnesses,
     tls: {
       on: !!tls,
       hostname,

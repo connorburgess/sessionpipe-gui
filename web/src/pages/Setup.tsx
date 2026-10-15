@@ -4,9 +4,9 @@
 // every two seconds (this machine only), so a step turns green by itself the moment the
 // outbox gets its first event, the CA is trusted, the daemon polls, a phone connects, a
 // message comes back delivered. Everything an action does is explained next to it.
-import type { SessionSummary, SetupStatus } from "@shared/api";
+import type { HarnessStatus, SessionSummary, SetupStatus } from "@shared/api";
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { Ago, CopyButton, Spinner, Toggle } from "../components/bits";
+import { Ago, CopyButton, HarnessGlyph, Spinner, Toggle } from "../components/bits";
 import { Select } from "../components/Select";
 import { ActivityRow } from "../control/Activity";
 import { controlApi, httpsPath, resetInfoCache } from "../control/api";
@@ -187,8 +187,39 @@ const yesNo = (v: boolean | null | undefined) => (v === null || v === undefined 
 
 // ---------- 1 · your sessions ----------
 
+/** One installed harness of the registry and where it stands: hooks on (with this
+ *  machine's sessions), hooks off (the install command writes them), or no adapter yet. */
+function HarnessRow({ h }: { h: HarnessStatus }) {
+  let status: React.ReactNode;
+  if (h.hooks === "on")
+    status = (
+      <>
+        hooks on · {h.sessions === 0 ? "no sessions yet" : `${h.sessions} ${h.sessions === 1 ? "session" : "sessions"}`}
+        {h.lastEventAt && (
+          <>
+            {" "}
+            · last <Ago iso={h.lastEventAt} />
+          </>
+        )}
+      </>
+    );
+  else if (h.hooks === "off") status = "hooks off · run the install command";
+  else status = "installed · sessionpipe support pending";
+  return (
+    <li
+      className={`step-harness${h.hooks === "off" ? " step-harness--needs" : ""}`}
+      data-harness={h.name}
+      data-hooks={h.hooks}
+    >
+      <HarnessGlyph name={h.name} size="sm" withLabel />
+      <span className="step-harness-status">{status}</span>
+    </li>
+  );
+}
+
 function SessionsStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
   const sp = s.sessionpipe;
+  const installed = s.harnesses.filter((h) => h.installed);
   return (
     <Step
       k="sessions"
@@ -203,10 +234,18 @@ function SessionsStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
             ["outbox", `${sp.outbox.path} · ${sp.outbox.present ? "present" : "not there yet"}`],
             ["events", s.events.total.toLocaleString()],
             ["last event", s.events.lastAt ? <Ago iso={s.events.lastAt} /> : "none"],
+            ...installed.map((h): [string, React.ReactNode] => [h.label, <code key={h.name}>{h.configPath}</code>]),
           ]}
         />
       }
     >
+      {installed.length > 0 && (
+        <ul className="step-harnesses" aria-label="Harnesses on this machine">
+          {installed.map((h) => (
+            <HarnessRow key={h.name} h={h} />
+          ))}
+        </ul>
+      )}
       {mark === "done" ? (
         <p className="step-note">
           {s.events.total.toLocaleString()} events
@@ -230,15 +269,17 @@ function SessionsStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
                 <CopyButton text={INSTALL} label="Copy" small />
               </div>
               <p className="step-note">
-                Run it in a terminal on this machine: it adds the hooks to Claude Code (and Codex, Gemini CLI) and
-                starts the outbox. Then start a session anywhere.
+                Run it in a terminal on this machine: it adds the hooks to Claude Code, Codex, Gemini CLI and
+                Antigravity and starts the outbox. Then start a fresh conversation anywhere: a harness reads its hooks
+                when a conversation starts (Antigravity its <code>hooks.json</code>), so one already open stays silent.
               </p>
             </>
           )}
           {sp.installed && (
             <p className="step-note">
-              sessionpipe {sp.version ?? ""} is installed. Start a session (<code>claude</code> in any project folder)
-              and its first event lands here.
+              sessionpipe {sp.version ?? ""} is installed. Start a fresh conversation (<code>claude</code> in any
+              project folder) and its first event lands here; a harness marked <em>hooks off</em> needs the install
+              command run again.
             </p>
           )}
           <p className="step-wait" role="status">
