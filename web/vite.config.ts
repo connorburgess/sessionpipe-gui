@@ -16,6 +16,8 @@ export default defineConfig({
       "/api": "http://127.0.0.1:7373",
       "/.well-known": "http://127.0.0.1:7373",
       "/themes": "http://127.0.0.1:7373",
+      "/skins": "http://127.0.0.1:7373",
+      "/attachments": "http://127.0.0.1:7373",
     },
   },
 });

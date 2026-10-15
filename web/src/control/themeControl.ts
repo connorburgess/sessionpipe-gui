@@ -7,6 +7,7 @@
 import type { ControlActivity, MachineSummary, SessionKey, SessionSummary } from "@shared/api";
 import { sessionKey } from "@shared/api";
 import type { ControlAvailability, ThemeApi } from "@shared/theme-api";
+import { uploadAttachment } from "./Attachments";
 import { rpId as fetchRpId } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
@@ -81,6 +82,9 @@ export function createControlApi(deps: ControlApiDeps): ThemeControl {
     },
     cancel(session) {
       return send(must(resolve(deps, { session })), { kind: "cancel", session });
+    },
+    attach(file) {
+      return uploadAttachment(file);
     },
     async start(machineId, opts) {
       const machine = must(resolve(deps, { machineId }));

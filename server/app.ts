@@ -22,6 +22,7 @@ import { Router } from "./http/router.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
 import { registerSetup } from "./setup/index.js";
+import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
@@ -70,6 +71,8 @@ export interface AppOptions {
   themesDir?: string;
   /** Where installed plugins live; default <stateDir>/plugins. */
   pluginsDir?: string;
+  /** Where installed skins live; default <stateDir>/skins. */
+  skinsDir?: string;
 }
 
 export interface App {
@@ -101,6 +104,7 @@ export interface App {
   outbox: OutboxSource | null;
   themes: ThemeRegistry;
   plugins: PluginHost;
+  skins: SkinRegistry;
   close(): Promise<void>;
 }
 
@@ -231,6 +235,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
   registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
   registerPlugins(router, { host: plugins, uiAuth });
+  const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"));
+  registerSkins(router, { registry: skins, uiAuth });
   registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
 
   const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => void router.handle(req, res);
@@ -303,6 +309,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     outbox,
     themes,
     plugins,
+    skins,
     close: async () => {
       await plugins.stop();
       setup.pairer.close();

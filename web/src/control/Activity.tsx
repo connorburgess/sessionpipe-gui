@@ -4,7 +4,9 @@
 // expired / unsupported / failed / refused, each in words.
 import type { ControlActivity } from "@shared/api";
 import { Ago } from "../components/bits";
+import { Markdown } from "../components/Markdown";
 import { oneLine } from "../lib/format";
+import { AttachmentThumbs, promptParts } from "./Attachments";
 import { isFinal, KIND_LABEL, outcomeWords, shownState } from "./words";
 
 export function ActivityRow({
@@ -21,24 +23,27 @@ export function ActivityRow({
 }) {
   const state = shownState(a);
   const live = !isFinal(a);
+  // A prompt's attachments block (shared/attachments.ts) is drawn as thumbnails, not read as text.
+  const prompt = a.text ? promptParts(a.text) : null;
   return (
     <li className={`ctl-act ctl-act--${state}`} data-outcome={state} data-message={a.id}>
       <div className="ctl-act-head">
         <span className="ctl-act-kind">{KIND_LABEL[a.kind]}</span>
-        {a.text && (
-          <span className="ctl-act-text" title={a.text}>
-            {oneLine(a.text, 120)}
+        {prompt && (prompt.body || prompt.items.length === 0) && (
+          <span className="ctl-act-text" title={prompt.body}>
+            {oneLine(prompt.body, 120)}
           </span>
         )}
         <Ago iso={a.ackedAt ?? a.takenAt ?? a.at} />
       </div>
+      {prompt && prompt.items.length > 0 && <AttachmentThumbs items={prompt.items} small />}
       <p className={`ctl-act-state ${live ? "is-live" : ""}`} aria-live="polite">
         {live && <span className="ctl-act-pulse" aria-hidden="true" />}
         {outcomeWords(a, { machine, online })}
       </p>
       {a.reply ? (
         <blockquote className={`ctl-act-reply ${wide ? "" : "ctl-act-reply--tail"} ${live ? "is-live" : ""}`}>
-          {a.reply}
+          <Markdown text={a.reply} />
           {state === "progress" && <span className="caret" aria-hidden="true" />}
         </blockquote>
       ) : null}
