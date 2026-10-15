@@ -31,10 +31,14 @@ Node 20 or newer. Three ways, one package; Canvas, Office and the Spacesheep ski
 with it:
 
 ```sh
-npx sessionpipe-gui                 # recommended: nothing to install, always the current release
-npm i -g sessionpipe-gui            # or on the PATH for good: `sessionpipe-gui`
-git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd sessionpipe-gui && npm install && npm run build && npm start
+npx github:spacesheep-dev/sessionpipe-gui      # straight from GitHub: builds once on install, then runs
+npm i -g github:spacesheep-dev/sessionpipe-gui # or on the PATH for good: `sessionpipe-gui`
+git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd sessionpipe-gui && npm install && npm start
 ```
+
+Canvas and Office are checked in as built views (`bundled/`), so a clone has them without
+the themes repo; `npm run bundle:sync` refreshes that copy from a themes checkout beside
+this one. The npm package (`npx sessionpipe-gui`) follows once published.
 
 Extras (the other official skins and the ping-a-human Telegram plugin, from npm):
 

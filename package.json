@@ -53,7 +53,9 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "conformance": "node dist/conformance.js"
+    "conformance": "node dist/conformance.js",
+    "prepare": "node scripts/prepare.mjs",
+    "bundle:sync": "node scripts/build.mjs --sync-bundle"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

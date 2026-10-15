@@ -12,7 +12,7 @@
 // unless SPGUI_NO_BUNDLE=1 says so on purpose. The themes repo stays the source of truth:
 // nothing is copied into this repo's git, dist/ is ignored.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, context } from "esbuild";
@@ -59,12 +59,26 @@ const BUNDLED = [
   { kind: "views", pkg: "packages/office", manifest: "theme.json" },
 ];
 
+/** The tracked copy of the bundled views (`bundled/` at the repo root): what a bare
+ *  clone ships when the themes repo isn't checked out beside it. `--sync-bundle`
+ *  refreshes it from a fresh build of the sibling; commit the result. */
+const tracked = path.join(root, "bundled");
+const syncBundle = argv.includes("--sync-bundle");
+
 function bundleExtensions() {
   const i = argv.indexOf("--bundle-from");
-  const from = path.resolve(root, i >= 0 ? argv[i + 1] : "../sessionpipe-gui-themes");
+  const from = path.resolve(root, i >= 0 ? argv[i + 1] : process.env.SPGUI_THEMES_DIR || "../sessionpipe-gui-themes");
   const out = path.join(root, "dist", "bundled");
   if (!existsSync(path.join(from, "packages"))) {
-    missing(`(no themes repo at ${from}; --bundle-from <path> names one)`);
+    if (existsSync(path.join(tracked, "views"))) {
+      rmSync(out, { recursive: true, force: true });
+      cpSync(tracked, out, { recursive: true });
+      for (const kind of readdirSync(tracked))
+        for (const id of readdirSync(path.join(tracked, kind)))
+          console.log(`bundled extensions: ${kind}/${id} ← bundled/ (tracked copy; --sync-bundle refreshes it)`);
+      return;
+    }
+    missing(`(no themes repo at ${from} and no tracked bundled/ copy; --bundle-from <path> names one)`);
     return;
   }
   rmSync(out, { recursive: true, force: true });
@@ -95,6 +109,11 @@ function bundleExtensions() {
       if (existsSync(path.join(pkg, extra))) cpSync(path.join(pkg, extra), path.join(dest, extra));
     }
     console.log(`bundled extensions: ${b.kind}/${manifest.id} ${manifest.version} ← ${b.pkg}`);
+  }
+  if (syncBundle) {
+    rmSync(tracked, { recursive: true, force: true });
+    cpSync(out, tracked, { recursive: true });
+    console.log(`bundled extensions: tracked copy refreshed at bundled/ (commit it)`);
   }
 }
 
