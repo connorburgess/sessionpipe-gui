@@ -2810,3 +2810,10 @@
     box-shadow: inset 2px 0 0 transparent;
   }
 }
+
+.rv-lead {
+  margin: 0 0 16px;
+  max-width: 64ch;
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}

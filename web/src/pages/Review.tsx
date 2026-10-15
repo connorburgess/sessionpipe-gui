@@ -39,8 +39,12 @@ export function Review() {
   const needle = q.trim();
   return (
     <div className="page review">
+      <p className="rv-lead">
+        Look back: find a word in any session, see which files your agents changed, or read one day as a digest. The
+        Board is now; this is what happened.
+      </p>
       <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search transcripts" />
+        <SearchInput value={q} onChange={setQ} placeholder="Search transcripts, tools and file paths" />
       </div>
       {needle && <Hits q={needle} />}
       <div className="rv-tabs" role="tablist" aria-label="Review">
