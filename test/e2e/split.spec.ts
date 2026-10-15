@@ -9,18 +9,27 @@ import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
 const live = (page: Page) => expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
-const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Shift-clicks the first board card; returns its title. */
+/** Shift-clicks the first board card; returns the title the panel shows for it. The
+ *  panel is the source of truth: a demo session may learn a better title mid-turn, so the
+ *  card's text at click time is matched by the session key in the URL, not by its words. */
 async function openBeside(page: Page): Promise<string> {
   await openBoard(page);
   const card = page.locator("article.card").first();
-  const title = (await card.locator(".card-title").textContent())!;
+  const href = (await card.locator("a.card-link").getAttribute("href"))!;
+  const key = href
+    .replace(/^\/s\//, "")
+    .split("/")
+    .slice(0, 2)
+    .map(decodeURIComponent)
+    .join(":");
   await card.locator("a.card-link").click({ modifiers: ["Shift"] });
   await expect(panel(page)).toHaveClass(/panel--open/);
-  await expect(panel(page).locator(".panel-title")).toHaveText(title);
   await expect(page).toHaveURL(/[?&]s=[^&]+(:|%3A)/);
-  return title;
+  expect(decodeURIComponent(new URL(page.url()).searchParams.get("s") ?? "")).toBe(key);
+  await expect(panel(page).locator(".panel-title")).not.toHaveText("");
+  return (await panel(page).locator(".panel-title").textContent())!;
 }
 
 /** One tier-3 session with everything that once widened the panel: a long machine, repo,
@@ -84,9 +93,7 @@ test.describe("split panel", () => {
       await live(page);
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(page.url()).toBe(url);
-      await expect(panel(page).locator(".panel-title")).toHaveText(
-        new RegExp(`^(${escape(title)}|${escape(shown ?? "")})`),
-      );
+      await expect(panel(page).locator(".panel-title")).toHaveText(new RegExp(`^(${rx(title)}|${rx(shown ?? "")})`));
 
       await page.keyboard.press("Escape");
       await expect(panel(page)).not.toHaveClass(/panel--open/);

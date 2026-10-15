@@ -6,14 +6,7 @@
 // lives in lib/settings.ts; the appearance, color theme and text size stay in the popover.
 // Esc and the scrim close it; Tab stays inside.
 import { type Info, ROUTES, type SessionSummary } from "@shared/api";
-import {
-  type ComponentType,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useAppState, useStore } from "../data/hooks";
 import { bytes } from "../lib/format";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
