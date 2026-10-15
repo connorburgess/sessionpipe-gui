@@ -1,0 +1,94 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Plugins section of the Views page: rows share the view list's look (host.css);
+   this is the generated settings form. */
+
+.plug-row {
+  grid-template-columns: 1fr;
+}
+.plug-status--active {
+  border-color: var(--ok-soft, var(--line-2));
+  color: var(--ok, var(--fg-2));
+}
+.plug-status--error {
+  border-color: var(--err-soft);
+  color: var(--err);
+}
+.plug-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-2, transparent);
+}
+.plug-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.plug-field--check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+}
+.plug-help {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.plug-field--check .plug-help {
+  grid-column: 2;
+}
+.plug-label {
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+}
+.plug-field input[type="text"],
+.plug-field input[type="password"],
+.plug-field input[type="number"] {
+  width: 100%;
+  max-width: 48ch;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.plug-field input:disabled {
+  opacity: 0.6;
+}
+.plug-field .sel {
+  width: 100%;
+  max-width: 48ch;
+}
+.plug-secret {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.plug-secret input {
+  flex: 1 1 24ch;
+}
+.plug-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.plug-option {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--text-sm);
+}
+.plug-form-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

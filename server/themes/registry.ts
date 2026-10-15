@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: platform. The installed themes: one folder per theme under
+// Owned by: platform. The installed views (themes): one folder per theme under
 // <stateDir>/themes/<id>/ with a theme.json (ThemeManifest) and the entry module.
 // Scanned at boot and on POST /api/ui/themes/reload. A folder whose manifest is wrong
 // is still listed, with `error`, so the problem shows instead of the theme vanishing.
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+// The folder layout, the scan and the installer are shared with the other kinds of
+// extension (server/extensions); this file is what makes a view a view.
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { type InstalledTheme, THEME_API_VERSION, THEME_ID_RE, type ThemeManifest } from "../../shared/theme-api.js";
+import { type ExtensionKind, isRelativeFile, readManifestOf, scanKind } from "../extensions/kind.js";
 
 /** Everything the server knows about one installed theme. */
 export interface ThemeEntry extends InstalledTheme {
@@ -15,17 +18,14 @@ export interface ThemeEntry extends InstalledTheme {
 
 export const FILES_PREFIX = "/themes";
 
+/** The view kind, for the shared installer and scan: theme.json under `dir`. */
+export function viewKind(dir: string): ExtensionKind<ThemeManifest> {
+  return { kind: "view", noun: "theme", manifestFile: "theme.json", dir, validate: validateManifest };
+}
+
 /** Read and validate a theme.json; throws with a message for the person. */
 export function readManifest(dir: string): ThemeManifest {
-  const file = path.join(dir, "theme.json");
-  if (!existsSync(file)) throw new Error("no theme.json");
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    throw new Error(`theme.json is not valid JSON: ${(e as Error).message}`);
-  }
-  return validateManifest(raw, dir);
+  return readManifestOf(viewKind(path.dirname(dir)), dir);
 }
 
 export function validateManifest(raw: unknown, dir?: string): ThemeManifest {
@@ -73,12 +73,7 @@ export function validateManifest(raw: unknown, dir?: string): ThemeManifest {
   return out;
 }
 
-/** A relative path that stays inside the folder: no absolute, no `..`, no scheme. */
-export function isRelativeFile(p: string): boolean {
-  if (!p || path.isAbsolute(p) || p.startsWith("/") || p.startsWith("\\") || /^[a-z]+:/i.test(p)) return false;
-  const parts = p.split(/[\\/]/);
-  return parts.every((s) => s !== "" && s !== ".." && s !== ".");
-}
+export { isRelativeFile };
 
 export class ThemeRegistry {
   private entries = new Map<string, ThemeEntry>();
@@ -90,41 +85,13 @@ export class ThemeRegistry {
   /** Re-read every folder under the themes dir. Never throws: a missing dir is empty. */
   scan(): ThemeEntry[] {
     const next = new Map<string, ThemeEntry>();
-    let names: string[] = [];
-    try {
-      names = readdirSync(this.themesDir);
-    } catch {
-      names = [];
-    }
-    for (const name of names.sort()) {
-      if (name.startsWith(".")) continue; // .npm and the like
-      const dir = path.join(this.themesDir, name);
-      let linked = false;
-      try {
-        linked = lstatSync(dir).isSymbolicLink();
-        if (!statSync(dir).isDirectory()) continue;
-      } catch {
-        if (linked) next.set(name, broken(name, dir, linked, "linked folder is missing"));
-        continue;
-      }
-      try {
-        const manifest = readManifest(dir);
-        if (manifest.id !== name) {
-          next.set(
-            name,
-            broken(name, dir, linked, `theme.json id "${manifest.id}" does not match the folder "${name}"`),
-          );
-          continue;
-        }
-        const entry: ThemeEntry = { ...manifest, url: `${FILES_PREFIX}/${name}/`, dir };
-        if (linked) {
-          entry.linked = true;
-          entry.source ??= `link:${realpathSync(dir)}`;
-        }
-        next.set(name, entry);
-      } catch (e) {
-        next.set(name, broken(name, dir, linked, (e as Error).message));
-      }
+    for (const f of scanKind(viewKind(this.themesDir))) {
+      const url = `${FILES_PREFIX}/${f.id}/`;
+      const entry: ThemeEntry = f.manifest
+        ? { ...f.manifest, url, dir: f.dir }
+        : { id: f.id, name: f.id, version: "", api: 0, url, dir: f.dir, error: f.error ?? "unreadable" };
+      if (f.linked) entry.linked = true;
+      next.set(f.id, entry);
     }
     this.entries = next;
     return this.list();
@@ -143,12 +110,6 @@ export class ThemeRegistry {
   has(id: string): boolean {
     return this.entries.has(id);
   }
-}
-
-function broken(name: string, dir: string, linked: boolean, error: string): ThemeEntry {
-  const t: ThemeEntry = { id: name, name, version: "", api: 0, url: `${FILES_PREFIX}/${name}/`, dir, error };
-  if (linked) t.linked = true;
-  return t;
 }
 
 /** The listing as the UI API sends it: `dir` only to this machine. */

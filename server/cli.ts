@@ -9,9 +9,11 @@ import QRCode from "qrcode";
 import { DEFAULT_PORT, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
 import { defaultStateDir, packageVersion, readGuiConfig, setTlsPreference } from "./config.js";
+import { InstallError } from "./extensions/install.js";
 import { lanAddresses } from "./http/net.js";
+import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
 import { sameMachine } from "./setup/index.js";
-import { addTheme, formatList, linkTheme, listThemes, removeTheme, ThemeInstallError } from "./themes/index.js";
+import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
 import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
 
 const HELP = `sessionpipe-gui ${packageVersion()} — a sessionpipe receiver with a live board
@@ -23,6 +25,7 @@ usage: sessionpipe-gui [options]
   --state DIR       where events and config live (default ~/.local/state/sessionpipe-gui)
   --no-outbox       do not tail this machine's sessionpipe outbox
   --outbox DIR      tail a sessionpipe state dir other than the default one
+  --keep-days N     events older than N days keep a shorter preview in memory (default 14; 0 = whole)
   --demo            generate synthetic sessions so the board is never empty
   --replay FILE     replay a sessionpipe JSONL file (--speed N: 0 = at once, 1 = real time; idle gaps capped at 10 s)
   --speed N         demo / replay speed
@@ -33,23 +36,30 @@ usage: sessionpipe-gui [options]
   --rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost;
                     with --tls, this machine's <name>.local)
   --test-door       loopback-only test door for the conformance runner
-  --themes-dir DIR  where themes are installed (default <state>/themes)
+  --themes-dir DIR  where views (themes) are installed (default <state>/themes)
+  --plugins-dir DIR where plugins are installed (default <state>/plugins)
   --open            open the board in the browser
   --quiet           no banner
   --version         print the version
   --help            this
 
-themes (plugins kept outside the GUI, loaded by the page at runtime):
+views (themes: pages kept outside the GUI, loaded by the board at runtime):
 
-  sessionpipe-gui theme list                 installed themes
-  sessionpipe-gui theme add <source>         install: a folder, a .tgz/.zip (path or URL),
+  sessionpipe-gui view list                  installed views
+  sessionpipe-gui view add <source>          install: a folder, a .tgz/.zip (path or URL),
                                              an npm package name or a git URL
-  sessionpipe-gui theme link <folder>        symlink a folder, for development
-  sessionpipe-gui theme remove <id>          uninstall
-  --state DIR / --themes-dir DIR apply to these too.
+  sessionpipe-gui view link <folder>         symlink a folder, for development
+  sessionpipe-gui view remove <id>           uninstall
+  "theme" is an alias of "view". --state DIR / --themes-dir DIR apply to these too.
 
-A theme is code running in the board page with access to everything it shows:
-only install themes you trust.
+plugins (server-side code that reacts to events: notifications, suggested answers):
+
+  sessionpipe-gui plugin list|add|link|remove  the same verbs; folders under <state>/plugins,
+                                             settings on the Views page; --plugins-dir DIR
+
+A view is code running in the board page with access to everything it shows. A plugin
+is code running in the receiver process with everything this machine has. Only install
+what you trust, from people you trust.
 
 color themes (token sets, picked in the page's quick settings): drop JSON files into
 <state>/color-themes/*.json; see docs/color-theme.example.json.
@@ -73,6 +83,7 @@ interface Args {
   state?: string;
   outbox: boolean;
   outboxPath?: string;
+  keepDays?: number;
   demo: boolean;
   replay?: string;
   speed?: number;
@@ -81,8 +92,9 @@ interface Args {
   open: boolean;
   quiet: boolean;
   themesDir?: string;
-  /** `theme <verb> [arg]`: a subcommand instead of the server. */
-  theme?: { verb: string; arg?: string };
+  pluginsDir?: string;
+  /** `view|theme|plugin <verb> [arg]`: a subcommand instead of the server. */
+  ext?: { kind: "view" | "plugin"; verb: string; arg?: string };
   /** `--tls` true, `--no-tls` false, neither: whatever config.json remembers. */
   tls?: boolean;
   /** `tls <verb>`: a subcommand instead of the server. */
@@ -121,6 +133,10 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--outbox":
         a.outboxPath = next();
         break;
+      case "--keep-days":
+        a.keepDays = Number(next());
+        if (!Number.isInteger(a.keepDays) || a.keepDays < 0) fail("--keep-days needs a whole number of days");
+        break;
       case "--demo":
         a.demo = true;
         break;
@@ -150,10 +166,15 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--themes-dir":
         a.themesDir = next();
         break;
+      case "--plugins-dir":
+        a.pluginsDir = next();
+        break;
       case "theme":
-        if (a.theme) fail("one theme command at a time");
-        a.theme = { verb: argv[++i] ?? "" };
-        if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.theme.arg = argv[++i];
+      case "view":
+      case "plugin":
+        if (a.ext) fail("one view / plugin command at a time");
+        a.ext = { kind: f === "plugin" ? "plugin" : "view", verb: argv[++i] ?? "" };
+        if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.ext.arg = argv[++i];
         break;
       case "--open":
         a.open = true;
@@ -235,36 +256,54 @@ function openBrowser(url: string): void {
   } catch {}
 }
 
-/** `sessionpipe-gui theme list|add|link|remove`. Prints what it did; exits 1 on a problem. */
-async function themeCommand(parsed: Args): Promise<void> {
-  const { verb, arg } = parsed.theme!;
-  const themesDir = parsed.themesDir ?? path.join(parsed.state ?? defaultStateDir(), "themes");
+/** `sessionpipe-gui view|theme|plugin list|add|link|remove`. Prints what it did; exits 1 on a problem. */
+async function extensionCommand(parsed: Args): Promise<void> {
+  const { kind, verb, arg } = parsed.ext!;
+  const stateDir = parsed.state ?? defaultStateDir();
   const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
+  const ops =
+    kind === "plugin"
+      ? {
+          noun: "plugin",
+          dir: parsed.pluginsDir ?? path.join(stateDir, "plugins"),
+          list: (dir: string) => formatPluginList(dir, listPlugins(dir)),
+          add: addPlugin,
+          link: linkPlugin,
+          remove: removePlugin,
+        }
+      : {
+          noun: "view",
+          dir: parsed.themesDir ?? path.join(stateDir, "themes"),
+          list: (dir: string) => formatList(dir, listThemes(dir)),
+          add: addTheme,
+          link: linkTheme,
+          remove: removeTheme,
+        };
   try {
     switch (verb) {
       case "list":
       case "ls":
-        out(formatList(themesDir, listThemes(themesDir)));
+        out(ops.list(ops.dir));
         return;
       case "add":
       case "install":
-        if (!arg) fail("theme add needs a source: a folder, a .tgz/.zip, an npm package or a git URL");
-        out((await addTheme(themesDir, arg)).message);
+        if (!arg) fail(`${ops.noun} add needs a source: a folder, a .tgz/.zip, an npm package or a git URL`);
+        out((await ops.add(ops.dir, arg)).message);
         return;
       case "link":
-        if (!arg) fail("theme link needs a folder");
-        out(linkTheme(themesDir, arg).message);
+        if (!arg) fail(`${ops.noun} link needs a folder`);
+        out(ops.link(ops.dir, arg).message);
         return;
       case "remove":
       case "rm":
-        if (!arg) fail("theme remove needs a theme id (see `theme list`)");
-        out(removeTheme(themesDir, arg).message);
+        if (!arg) fail(`${ops.noun} remove needs an id (see \`${ops.noun} list\`)`);
+        out(ops.remove(ops.dir, arg).message);
         return;
       default:
-        fail(`unknown theme command "${verb}" (list, add, link, remove)`);
+        fail(`unknown ${ops.noun} command "${verb}" (list, add, link, remove)`);
     }
   } catch (e) {
-    if (e instanceof ThemeInstallError) {
+    if (e instanceof InstallError) {
       process.stderr.write(`sessionpipe-gui: ${e.message}\n`);
       process.exit(1);
     }
@@ -366,7 +405,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${packageVersion()}\n`);
     return;
   }
-  if (parsed.theme) return themeCommand(parsed);
+  if (parsed.ext) return extensionCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
   const t0 = Date.now();
   // --tls / --no-tls are remembered in config.json; a bare start uses the remembered choice.
@@ -383,6 +422,7 @@ async function main(): Promise<void> {
       stateDir: parsed.state,
       outbox: parsed.outbox,
       outboxPath: parsed.outboxPath,
+      keepDays: parsed.keepDays,
       demo: parsed.demo,
       replay: parsed.replay,
       speed: parsed.speed,
@@ -390,6 +430,7 @@ async function main(): Promise<void> {
       testDoor: parsed.testDoor,
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,
+      pluginsDir: parsed.pluginsDir,
       tls,
     });
   } catch (e) {

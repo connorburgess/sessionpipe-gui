@@ -50,8 +50,8 @@ export default {
 Install it and open `/t/tally`:
 
 ```sh
-sessionpipe-gui theme add ./tally       # copies the folder
-sessionpipe-gui theme link ./tally      # or: symlink it while you work on it
+sessionpipe-gui view add ./tally        # copies the folder
+sessionpipe-gui view link ./tally       # or: symlink it while you work on it
 ```
 
 ## The manifest
@@ -96,6 +96,7 @@ Scrolling inside it is yours to do. Return the function that unmounts (it may be
 | `local.get(key)` / `local.set(key, value)` | `localStorage`, namespaced to your theme, for per-device conveniences. May silently be unavailable. |
 | `control` | The control channel, signed by the host: `availability(target)`, `send`, `answer`, `cancel`, `start`. See [Control from a theme](#control-from-a-theme). |
 | `react` | `{ React, ReactDOM, createRoot }`: the host's React 18, for a theme that wants it without bundling its own. |
+| `shortcuts` | The host's keymap: `register(actions)` adds your keys while you are mounted (listed in the `?` help and on `/shortcuts`, rebindable, dispatched by the host), `active()` is every binding in force. See [Keyboard](#keyboard). |
 | `format.ago(iso)` | `"12 s ago"`, `"3 m ago"`, `"yesterday"`. |
 | `format.duration(ms)` | `"0.4 s"`, `"4 m 12 s"`, `"2 h 05 m"`. |
 | `format.title(session)` | The title, else the cwd's basename, else the id's head. |
@@ -114,6 +115,8 @@ A `ThemeSnapshot`:
   recent: readonly StoredEvent[],                       // newest first, the live tail (≤ 1500)
   scheme: "dark" | "light",                             // what the page renders in right now
   viewers: readonly Viewer[],                           // browsers on the stream; `current` marks this one
+  tierLens?: 0 | 1 | 2 | 3 | null,                      // the app-wide tier lens; null = everything (optional to honour)
+  mode?: "simple" | "advanced",                         // Simple: fold HUD extras into one menu, drop the style switch
 }
 ```
 
@@ -182,6 +185,44 @@ button.onclick = async () => {
   }
 };
 ```
+
+## Keyboard
+
+The host has one keymap (`?` lists it, `/shortcuts` edits it). A view joins it instead
+of listening for keys itself:
+
+```js
+const off = api.shortcuts.register([
+  { id: "fit", label: "Fit everything", keys: ["0"], run: () => fit() },
+  { id: "zoom-in", label: "Zoom in", keys: ["plus", "="], run: () => zoom(1) },
+  { id: "legend", label: "Legend", keys: ["shift+l"], run: () => toggleLegend(), hint: "what the colours mean" },
+]);
+// … in your unmount: off();   (the host also removes them when the route changes)
+```
+
+Keys are chord strings (`"a"`, `"shift+enter"`, `"mod+k"`, or two in a row, `"g b"`;
+`mod` is ⌘ on a Mac and ctrl elsewhere). The host ignores a press while a text field
+has focus, runs your `run()` and, on your page, lets your binding shadow one of its own
+for the same chord (`a` in a canvas answers the focused window, not a panel's prompt).
+A person may rebind any of them; `api.shortcuts.active()` tells you the current
+bindings (`active()["zoom-in"]`, and the host's under their ids, `active()["list.down"]`)
+so your hints stay true. A host without `api.shortcuts` (older than this) is fine to
+fall back on with your own listener: `api.shortcuts?.register(…) ?? listenYourself()`.
+
+What a view must do to stay keyboard-accessible, since nothing outside your container
+can reach into it:
+
+- Every clickable thing is a real `<button>` or `<a href>`, or has `tabindex="0"`, a
+  role and a key handler (Enter / Space). A window on a canvas is `tabindex="0"` with
+  `aria-label`; the arrows move it, Enter opens it. Desks in the office are links.
+- Focus is visible: the host's rule is `:focus-visible { outline: 2px solid var(--fg);
+  outline-offset: 2px }`; keep it, or draw a ring as strong, never `outline: none` alone.
+- One tab stop per list or grid (roving `tabindex`: 0 on the current item, -1 on the
+  rest; the arrows move it), so Tab is not a hundred presses.
+- A popover of yours traps focus while open, closes on Esc and gives focus back.
+- Say what changed through an `aria-live="polite"` region when it is not where focus is.
+- Do not take the host's global keys (`?`, `/`, `esc`, `mod+k`, `g` …) unless you mean
+  to; register yours and the table shows the person what wins where.
 
 ## The same theme with `api.react`
 
@@ -263,15 +304,19 @@ name.
 ## Install, link, list, remove
 
 ```sh
-sessionpipe-gui theme add ./my-theme               # a folder: copied
-sessionpipe-gui theme add my-theme-0.1.0.tgz       # an archive: extracted (tar / unzip)
-sessionpipe-gui theme add https://…/my-theme.zip   # downloaded, then extracted
-sessionpipe-gui theme add sessionpipe-theme-tally  # an npm package name (npm install, then copied)
-sessionpipe-gui theme add https://github.com/you/tally.git
-sessionpipe-gui theme link ./my-theme              # a symlink: edits show on the next visit
-sessionpipe-gui theme list
-sessionpipe-gui theme remove tally
+sessionpipe-gui view add ./my-theme               # a folder: copied
+sessionpipe-gui view add my-theme-0.1.0.tgz       # an archive: extracted (tar / unzip)
+sessionpipe-gui view add https://…/my-theme.zip   # downloaded, then extracted
+sessionpipe-gui view add sessionpipe-theme-tally  # an npm package name (npm install, then copied)
+sessionpipe-gui view add https://github.com/you/tally.git
+sessionpipe-gui view link ./my-theme              # a symlink: edits show on the next visit
+sessionpipe-gui view list
+sessionpipe-gui view remove tally
 ```
+
+`theme` is an alias of `view` (`sessionpipe-gui theme add …` still works). Views are one
+of three kinds of extension the same installer handles; the others are plugins
+(server-side code, `plugin-authoring.md`) and skins (token/font/CSS packages, next).
 
 The id always comes from the theme's own `theme.json`; the installed copy records
 where it came from in `source`. `--state DIR` (or `--themes-dir DIR`) chooses the

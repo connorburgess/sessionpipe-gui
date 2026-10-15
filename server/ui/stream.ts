@@ -17,6 +17,8 @@ export interface StreamDeps {
   snapshot: () => Snapshot;
   viewers: ViewerRegistry;
   pingMs?: number;
+  /** The plugin host's own messages (suggestions), when plugins are on. */
+  plugins?: { subscribe(l: (m: StreamMessage) => void): () => void };
 }
 
 export function serveStream(ctx: Ctx, deps: StreamDeps): void {
@@ -54,6 +56,7 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     } else write(m);
   });
   const offViewers = deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }));
+  const offPlugins = deps.plugins?.subscribe(write);
   const ping = setInterval(() => {
     if (res.destroyed || res.writableEnded) return;
     res.write(": ping\n\n");
@@ -67,6 +70,7 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     offStore();
     offControl();
     offViewers();
+    offPlugins?.();
     deps.viewers.remove(me);
     if (!res.writableEnded) res.end();
   };

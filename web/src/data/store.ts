@@ -11,6 +11,7 @@ import type {
   Stats,
   StoredEvent,
   StreamMessage,
+  Suggestion,
   Viewer,
 } from "@shared/api";
 import type { Transport } from "./transport";
@@ -31,6 +32,9 @@ export interface AppState {
   control: readonly ControlActivity[];
   /** Browsers on the stream right now, this one marked `current`. */
   viewers: readonly Viewer[];
+  /** Plugins' suggested answers to open permissions (shared/plugin-api.ts); one per
+   *  attention, kept only while that attention is open. Advice: a person confirms it. */
+  suggestions: readonly Suggestion[];
   /** Counts every message, so a page can tell "something changed" cheaply. */
   version: number;
 }
@@ -47,6 +51,7 @@ const initial: AppState = {
   recent: [],
   control: [],
   viewers: [],
+  suggestions: [],
   version: 0,
 };
 
@@ -113,6 +118,7 @@ export class Store {
           machines: new Map(s.machines.map((x) => [x.name, x])),
           stats: s.stats,
           viewers: s.viewers ?? [],
+          suggestions: s.suggestions ?? [],
         });
         return;
       }
@@ -130,21 +136,22 @@ export class Store {
         sessions.set(m.session.key, m.session);
         const recent = [e, ...this.state.recent];
         if (recent.length > RING) recent.length = RING;
-        this.set({ sessions, recent });
+        this.set({ sessions, recent, suggestions: this.pruneSuggestions(m.session) });
         for (const l of this.eventListeners) l(e, m.session);
         return;
       }
       case "session": {
         const sessions = new Map(this.state.sessions);
         sessions.set(m.session.key, m.session);
-        this.set({ sessions });
+        this.set({ sessions, suggestions: this.pruneSuggestions(m.session) });
         return;
       }
       case "forgotten": {
         const sessions = new Map(this.state.sessions);
         sessions.delete(m.key);
         const recent = this.state.recent.filter((e) => `${e.harness.name}:${e.session.id}` !== m.key);
-        this.set({ sessions, recent });
+        const suggestions = this.state.suggestions.filter((s) => s.session !== m.key);
+        this.set({ sessions, recent, suggestions });
         return;
       }
       case "machine": {
@@ -164,8 +171,27 @@ export class Store {
       case "viewers":
         this.set({ viewers: m.viewers });
         return;
+      case "suggestion": {
+        const s = m.suggestion;
+        const suggestions = [
+          ...this.state.suggestions.filter((x) => !(x.session === s.session && x.attentionId === s.attentionId)),
+          s,
+        ];
+        this.set({ suggestions });
+        return;
+      }
       default:
         return;
     }
+  }
+
+  /** A suggestion outlives neither its attention nor its session (the server drops it
+   *  the same way; this keeps the page right between frames). */
+  private pruneSuggestions(session: SessionSummary): readonly Suggestion[] {
+    const cur = this.state.suggestions;
+    if (!cur.some((s) => s.session === session.key)) return cur;
+    return cur.filter(
+      (s) => s.session !== session.key || session.openAttentions.some((a) => a.attentionId === s.attentionId),
+    );
   }
 }

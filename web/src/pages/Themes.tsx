@@ -4,10 +4,11 @@
 import { useEffect, useState } from "react";
 import { CopyButton } from "../components/bits";
 import { Link } from "../lib/router";
+import { PluginsSection } from "../plugins/PluginsSection";
 import { fetchThemes, reloadThemes, useThemes } from "../themes/host/registry";
 import "../themes/host/host.css";
 
-export const ADD_LINE = "sessionpipe-gui theme add <folder | theme.tgz | theme.zip | npm-package | git-url>";
+export const ADD_LINE = "sessionpipe-gui view add <folder | view.tgz | view.zip | npm-package | git-url>";
 
 export function Themes() {
   const { themes, loaded, error } = useThemes();
@@ -101,13 +102,15 @@ export function Themes() {
           <pre className="cmd-text">
             <code>{ADD_LINE}</code>
           </pre>
-          <CopyButton text="sessionpipe-gui theme add " label="Copy command" />
+          <CopyButton text="sessionpipe-gui view add " label="Copy command" />
         </div>
         <p className="sect-note">
-          Also <code>theme link &lt;folder&gt;</code>, <code>theme remove &lt;id&gt;</code>, <code>theme list</code>.
-          How to write one: <code>docs/theme-authoring.md</code> in the repository.
+          Also <code>view link &lt;folder&gt;</code>, <code>view remove &lt;id&gt;</code>, <code>view list</code> (
+          <code>theme</code> is an alias). How to write one: <code>docs/theme-authoring.md</code> in the repository.
         </p>
       </section>
+
+      <PluginsSection />
 
       <section className="sect">
         <header className="sect-head">

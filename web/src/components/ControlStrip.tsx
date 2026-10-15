@@ -3,8 +3,9 @@
 // until the machine paired and `onSend` is wired (web/src/control/SessionControl.tsx
 // signs and sends). Keep this component self-contained: everything it needs comes
 // through props.
-import type { Attention, MachineControl, SessionSummary } from "@shared/api";
+import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
 import { type KeyboardEvent, useState } from "react";
+import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere } from "../control/api";
 
 export type ControlAction =
@@ -32,6 +33,21 @@ export interface ControlStripProps {
   /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
    *  the machine said the prompt is no longer open (answered in its terminal, or expired). */
   answers?: Readonly<Record<string, "sent" | "closed">>;
+  /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
+   *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
+  suggestions?: readonly Suggestion[];
+  /** The textarea's placeholder; "Ask for the next turn…" by default. */
+  placeholder?: string;
+  /** Simple mode's composer: rounded, a send glyph, the hint folded (SessionControl writes it above). */
+  chat?: boolean;
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
+      <path d="M2.5 3.2 18 10 2.5 16.8l1.9-5.6L12 10l-7.6-1.2z" />
+    </svg>
+  );
 }
 
 /** An attention raised before the daemon said hello cannot be answered from here: the hook
@@ -56,12 +72,17 @@ export function ControlStrip({
   note,
   noteKind = "info",
   answers,
+  suggestions,
+  placeholder = "Ask for the next turn…",
+  chat = false,
 }: ControlStripProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const paired = !!control;
   const httpsHref = blocked ? httpsHere() : null;
   const enabled = paired && !!onSend && !blocked;
+  // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
+  const att = useAttachments({ machine: session.machine, enabled });
   const hint = blocked
     ? blocked
     : !paired
@@ -87,8 +108,14 @@ export function ControlStrip({
   };
   const sendText = () => {
     const t = text.trim();
-    if (!t) return;
-    run("prompt", { kind: "prompt", text: t }, () => setText(""));
+    if (!t && att.items.length === 0) return;
+    // The signed text: the message, then the attachments block (or null while an upload runs).
+    const composed = att.compose(t);
+    if (!composed) return;
+    run("prompt", { kind: "prompt", text: composed.text }, () => {
+      setText("");
+      att.clear();
+    });
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -99,8 +126,9 @@ export function ControlStrip({
 
   return (
     <form
-      className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""}`}
+      className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""} ${chat ? "ctl--chat" : ""} ${att.dragging ? "ctl--drop" : ""}`}
       aria-label="Control"
+      {...att.handlers}
       onSubmit={(e) => {
         e.preventDefault();
         sendText();
@@ -111,6 +139,7 @@ export function ControlStrip({
         const terminal = !answerable(a);
         const early = !terminal && preHello(a, control);
         const off = !enabled || !!busy || status === "sent" || early;
+        const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
         return (
           <div
             className="ctl-answer"
@@ -166,18 +195,46 @@ export function ControlStrip({
                   </span>
                 ) : status === "sent" ? (
                   <span className="ctl-answer-note">answer sent · waiting for {session.machine ?? "the machine"}</span>
+                ) : suggested ? (
+                  <span
+                    className="ctl-suggestion"
+                    data-suggestion={suggested.decision}
+                    title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with your passkey.`}
+                  >
+                    <span className="ctl-suggestion-text">
+                      {suggested.decision === "allow" ? "Allow" : "Deny"} suggested by {suggested.by}
+                    </span>
+                    <span aria-hidden="true"> · </span>
+                    <button
+                      type="button"
+                      className="btn btn--sm ctl-suggestion-confirm"
+                      disabled={off}
+                      onClick={() =>
+                        run(`${suggested.decision}:${a.attentionId}`, {
+                          kind: "permission.answer",
+                          attentionId: a.attentionId,
+                          allow: suggested.decision === "allow",
+                          ...(suggested.note ? { note: suggested.note } : {}),
+                        })
+                      }
+                    >
+                      Confirm
+                    </button>
+                  </span>
                 ) : null}
               </>
             )}
           </div>
         );
       })}
+      <AttachmentTray att={att} />
       <div className="ctl-ask">
+        <AttachButton att={att} disabled={!enabled || !!busy} />
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Ask for the next turn…"
+          placeholder={placeholder}
           disabled={!enabled}
           aria-label="Message for the next turn"
           rows={1}
@@ -186,9 +243,10 @@ export function ControlStrip({
         <button
           type="submit"
           className={`btn ${enabled ? "btn--primary" : "btn--ghost"}`}
-          disabled={!enabled || !!busy || !text.trim()}
+          disabled={!enabled || !!busy || att.uploading || (!text.trim() && att.items.length === 0)}
         >
-          {busy === "prompt" ? "Sending…" : "Send"}
+          {busy === "prompt" ? "Sending…" : chat ? <SendIcon /> : "Send"}
+          {chat && busy !== "prompt" && <span className="sr-only">Send</span>}
         </button>
         {working && (
           <button

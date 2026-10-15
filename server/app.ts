@@ -4,6 +4,7 @@
 import http from "node:http";
 import https from "node:https";
 import type net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { DEFAULT_PORT, type Info, ROUTES } from "../shared/api.js";
 import {
@@ -18,6 +19,7 @@ import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
+import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
 import { registerSetup } from "./setup/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
@@ -27,6 +29,7 @@ import { registerThemes, ThemeRegistry } from "./themes/index.js";
 import { ensureCerts, type TlsMaterial } from "./tls/certs.js";
 import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
+import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi } from "./ui/index.js";
 import { ViewerRegistry } from "./ui/viewers.js";
@@ -61,8 +64,12 @@ export interface AppOptions {
   quiet?: boolean;
   /** Store timer period (tests). */
   tickMs?: number;
+  /** Events older than this many days keep a shorter preview in memory (store.ts; default 14, 0 = whole). */
+  keepDays?: number;
   /** Where installed themes live; default <stateDir>/themes. */
   themesDir?: string;
+  /** Where installed plugins live; default <stateDir>/plugins. */
+  pluginsDir?: string;
 }
 
 export interface App {
@@ -93,6 +100,7 @@ export interface App {
   info: () => Info;
   outbox: OutboxSource | null;
   themes: ThemeRegistry;
+  plugins: PluginHost;
   close(): Promise<void>;
 }
 
@@ -100,7 +108,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
-  const store = new Store(stateDir, { tickMs: opts.tickMs });
+  const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
   const router = new Router();
   let port = opts.port ?? DEFAULT_PORT;
   let tls: TlsMaterial | null = opts.tls
@@ -158,6 +166,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const lanUrls = (): string[] => lanAddresses().map((ip) => `http://${ip}:${port}`);
   const httpsUrl = (): string | undefined => (tls ? `https://${tls.hostname}:${port}` : undefined);
+  const attachments = AttachmentStore.for(stateDir);
   const info = (): Info => {
     const lan = lanUrls();
     const base = lan[0] ?? `http://127.0.0.1:${port}`;
@@ -177,9 +186,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         outbox: ob ? { path: ob.path, sessions: ob.sessions, enabled: true, events: ob.events } : null,
         demo: demo !== null,
       },
-      storage: { dir: stateDir, bytes: stats.storageBytes },
+      storage: { dir: stateDir, bytes: stats.storageBytes + attachments.bytes(), attachments: attachments.bytes() },
       wellKnown: wellKnown(control),
       control: { enabled: true, rpId, machines: control.machines().size },
+      hostname: os.hostname().replace(/\.(local|lan|home)$/i, ""),
       ...(tls
         ? {
             tls: {
@@ -196,6 +206,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   };
 
   const viewers = new ViewerRegistry();
+  const plugins = new PluginHost({
+    registry: new PluginRegistry(opts.pluginsDir ?? path.join(stateDir, "plugins")),
+    settings: new PluginSettings(path.join(stateDir, "plugins-settings")),
+    storageDir: path.join(stateDir, "plugins-storage"),
+    store,
+    control,
+    info,
+  });
   registerUi(router, {
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,
@@ -203,6 +221,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     uiKey,
     info,
     viewers,
+    plugins,
     rotateSinkToken: () => {
       config = rotateSinkToken(stateDir, config);
       return config.sinkToken;
@@ -211,6 +230,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
   registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
+  registerPlugins(router, { host: plugins, uiAuth });
   registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
 
   const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => void router.handle(req, res);
@@ -253,6 +273,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
+  // Plugins start once the port is known: their api names the URLs a message can carry.
+  await plugins.start();
 
   return {
     server,
@@ -280,7 +302,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     info,
     outbox,
     themes,
+    plugins,
     close: async () => {
+      await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
       setDemo(false);

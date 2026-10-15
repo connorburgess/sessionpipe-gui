@@ -26,13 +26,13 @@ client against a receiver you can see into.
 | Web | React 18 + Vite, hand-written CSS with design tokens, no component library | Distinctive, fast, small |
 | Live updates | SSE `GET /api/ui/stream`: a snapshot first, then deltas | Works through any proxy, reconnects by itself |
 | Storage | `~/.local/state/sessionpipe-gui/events/<harness>/<session>.jsonl` (append-only, full events) + an index rebuilt at boot | No DB; `forget` deletes one file |
-| Memory | Index holds summaries and *slim* events (tool `input`/`output` cut to a 2 KB preview, `output` kept as length + preview); full data is read back from the file by byte offset on demand | 100k events must fit |
+| Memory | Index holds summaries and *slim* events (tool `input`/`output` cut to a 2 KB preview, `output` kept as length + preview; 280 chars once an event is older than `--keep-days`, default 14); full data is read back from the file by byte offset on demand. Boot streams each file line by line and keeps only the slim copy, so a 150 MB session file never sits in memory | 100k events must fit |
 | Sources | (1) HTTP receiver, bearer sink token. (2) Local outbox tailer, like `sessionpipe tail` (`Outbox.read` every 500 ms, tier 3, `source: "outbox"`). (3) Demo generator | Zero config on the dev machine, real protocol from everywhere else. Dedup on (harness, session.id, seq) resolves overlap |
 | Auth | Events: `Bearer <sink token>` always. UI API + page: loopback free; otherwise cookie `spgui=<ui key>` set by `?k=`. Well-known: public. Machine calls: the machine's own token | One QR code gets a phone in; the token never has to be typed |
 | Readings | State machine in `shared/api.ts` (`needs_you` › `working` › `stale` › `idle` › `done`) | Spec §1: the receiver's reading, shown as such |
 | Control | Full receiver side (pair, hello, poll, ack, off, queue, redelivery, `taken` pause); UI signs with WebAuthn passkeys + a day key. `rp_id` is `localhost` by default, `<machine>.local` with `--tls` | Phones need HTTPS and a DNS name for passkeys |
 | TLS | `--tls`: a local CA + server cert made with the `openssl` CLI under `<stateDir>/tls`; one `net.Server` peeks the first byte and hands TLS to an `https.Server`, the rest to the `http.Server`, same handler, same port. `/trust` (plain http) walks a phone through trusting the CA; the QR points there | Passkeys from a phone with nothing to install but one certificate; loopback and sinks stay plain http |
-| Themes | Plugins: an ES module + `theme.json` outside this repo, loaded at runtime with `ThemeApi` (`shared/theme-api.ts`, `docs/theme-authoring.md`); the official ones live in `sessionpipe-gui-themes` | Themes stay out of the main GUI and can be installed, linked for development, or removed |
+| Extensions | Three kinds, one installer (`server/extensions`, `sessionpipe-gui <kind> add\|link\|remove\|list`): **views** (themes: an ES module + `theme.json`, loaded by the page with `ThemeApi`, `docs/theme-authoring.md`), **plugins** (an ES module + `plugin.json`, imported into the receiver process with `PluginApi`, `shared/plugin-api.ts`, `docs/plugin-authoring.md`), **skins** (token/font/CSS packages, `skin.json`; next). The official ones live in `sessionpipe-gui-themes` | Everything optional stays out of the main GUI and can be installed, linked for development, or removed. A plugin may notify and *suggest* an answer to a permission; it never signs one: the receiver holds no key |
 | Conformance | Our own runner for `conformance/delivery/*.json` from a sessionpipe checkout (the upstream runner's receiver mode lands in M3) | We must score 100 % |
 
 ## Modules and owners
@@ -52,8 +52,11 @@ client against a receiver you can see into.
 | `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`) |
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
 | `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |
-| `server/themes/*` | platform | theme registry (`<stateDir>/themes/<id>/theme.json`), `/api/ui/themes`, per-theme state, `/themes/:id/*` static, `theme add/link/remove/list` |
+| `server/extensions/*` | platform | `ExtensionKind { kind, noun, manifestFile, dir, validate }`, `scanKind`, `addExtension/linkExtension/removeExtension/formatEntries`: the folder layout, scan and installer every kind shares |
+| `server/themes/*` | platform | the view kind (`<stateDir>/themes/<id>/theme.json`): `ThemeRegistry`, `/api/ui/themes`, per-theme state, `/themes/:id/*` static, `view add/link/remove/list` (`theme` alias) |
+| `server/plugins/*` | platform | the plugin kind (`<stateDir>/plugins/<id>/plugin.json`): `PluginRegistry`, `PluginHost` (import at boot / reload, `PluginApi`, suggestions), settings at `<stateDir>/plugins-settings/<id>.json` (0600, secrets masked on the wire), `/api/ui/plugins`, `/api/ui/plugins/reload` and `PUT …/:id/settings` (loopback), `plugin add/link/remove/list` |
 | `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`) |
+| `web/src/plugins/*` | platform | the Plugins section of the Views page: the list from `/api/ui/plugins`, the settings form made from each manifest, Reload; suggestions reach the control strip through `AppState.suggestions` |
 | `web/*` | web | the app; `web/src/mock/` a mock stream so it runs with no server |
 
 A module touches only its own paths; a change it needs elsewhere is a request to the
@@ -81,13 +84,16 @@ function names above.
 |---|---|
 | GET `/info` | `Info` (sink token and UI key only to loopback or an authenticated UI) |
 | GET `/snapshot` | `Snapshot` |
-| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot; a `: ping` comment every 15 s |
+| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions`); a `suggestion` frame when a plugin suggests an answer; a `: ping` comment every 15 s |
 | GET `/sessions/:harness/:id?after=<seq>&limit=<n>` | `SessionDetail` (full events, read from disk) |
 | GET `/events?limit&before&harness&machine&type&session&q` | `FeedPage`, newest first |
 | POST `/sessions/:harness/:id/forget` | 204; same effect as a `session.forgotten` event |
 | POST `/token/rotate` | `{ sinkToken }` (loopback only) |
 | POST `/demo` `{ on }` | `{ on }` |
 | `/control/*` | phase 2 (control agent + web) |
+| GET `/plugins` | `{ plugins: InstalledPlugin[] }`: status, error, `values` with secrets masked (`shared/plugin-api.ts`) |
+| POST `/plugins/reload` | loopback: deactivate every plugin, re-read the folder, import afresh → `{ plugins }` |
+| PUT `/plugins/:id/settings` | loopback: `{ key: value }` → `{ settings }` (masked); a masked secret sent back is left as stored |
 
 ## Running
 

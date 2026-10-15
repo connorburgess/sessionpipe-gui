@@ -9,15 +9,19 @@ import {
   type MachineSummary,
   ROUTES,
   type Snapshot,
+  type StreamMessage,
+  type Suggestion,
   sessionKey,
   UI_KEY_PARAM,
 } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import type { Store } from "../store/store.js";
+import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
 import { cutPreview } from "./preview.js";
+import { registerProcessStats } from "./process.js";
 import { registerReview } from "./review.js";
 import { serveStream } from "./stream.js";
 import { ViewerRegistry } from "./viewers.js";
@@ -37,6 +41,9 @@ export interface UiDeps {
   viewers?: ViewerRegistry;
   /** `<stateDir>/color-themes`: JSON token sets served at /api/ui/color-themes. */
   colorThemesDir?: string;
+  /** The plugin host (server/plugins): its open suggestions ride on the snapshot, its
+   *  messages on the stream. */
+  plugins?: { currentSuggestions(): Suggestion[]; subscribe(l: (m: StreamMessage) => void): () => void };
 }
 
 /** The store's snapshot with what control knows about each machine merged in, plus
@@ -73,7 +80,11 @@ export function registerUi(router: Router, deps: UiDeps): void {
     (ctx) =>
       uiAuth(ctx, deps.uiKey()) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
   const viewers = deps.viewers ?? new ViewerRegistry();
-  const snapshot = (): Snapshot => ({ ...snapshotWithControl(deps.store, deps.control), viewers: viewers.list() });
+  const snapshot = (): Snapshot => ({
+    ...snapshotWithControl(deps.store, deps.control),
+    viewers: viewers.list(),
+    ...(deps.plugins ? { suggestions: deps.plugins.currentSuggestions() } : {}),
+  });
 
   router.get(
     ROUTES.ui.info,
@@ -83,10 +94,19 @@ export function registerUi(router: Router, deps: UiDeps): void {
     ROUTES.ui.snapshot,
     guard(() => ({ status: 200, json: snapshot() })),
   );
+  registerProcessStats(router, deps.store, guard);
+  registerAttachments(router, { info: deps.info }, guard);
   router.get(
     ROUTES.ui.stream,
     guard((ctx) => {
-      serveStream(ctx, { store: deps.store, control: deps.control, snapshot, viewers, pingMs: deps.pingMs });
+      serveStream(ctx, {
+        store: deps.store,
+        control: deps.control,
+        snapshot,
+        viewers,
+        pingMs: deps.pingMs,
+        plugins: deps.plugins,
+      });
     }),
   );
   router.get(

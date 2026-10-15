@@ -150,13 +150,20 @@ test.describe("themes", () => {
     await expect(counter.locator(".themes-row-meta")).toContainText("fixtures");
     await expect(counter.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/t/e2e-counter");
     await expect(page.locator("[data-theme-row='e2e-broken'] .themes-flag")).toHaveText("experimental");
-    await expect(page.locator(".cmd-text")).toContainText("sessionpipe-gui theme add");
+    await expect(page.locator(".cmd-text").first()).toContainText("sessionpipe-gui view add");
     await expect(page.locator(".themes-trust")).toContainText("Only install themes you trust");
-    const reload = page.getByRole("button", { name: "Reload" });
+    // The Plugins section: nothing installed in the e2e state dir, the add line, the warning.
+    const plugins = page.locator("[data-plugins]");
+    await expect(plugins.locator("h2")).toHaveText("Plugins");
+    await expect(plugins.locator(".themes-empty")).toHaveText(/No plugins installed/);
+    await expect(plugins.locator(".cmd-text")).toContainText("sessionpipe-gui plugin add");
+    await expect(plugins).toContainText("runs inside the receiver process");
+    await expect(plugins.getByRole("button", { name: "Reload plugins" })).toBeEnabled();
+    const reload = page.getByRole("button", { name: "Reload", exact: true });
     await expect(reload).toBeEnabled();
     await reload.click();
     await expect(page.locator(".themes-tools .sect-note")).toHaveText("Re-read the themes folder.");
     // The rail footer links here.
-    await expect(page.locator("nav.rail .rail-foot a[aria-label='Themes']")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("nav.rail .rail-foot a[aria-label='Views']")).toHaveAttribute("aria-current", "page");
   });
 });

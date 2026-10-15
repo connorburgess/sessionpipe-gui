@@ -56,7 +56,8 @@ name needs avahi-daemon.
 | **Feed** | The live event stream, like `sessionpipe tail`, with filters and search. |
 | **Machines** | Every machine that reports here, its harness versions, and its control status. |
 | **Connect** | The QR code and address for a phone, the one-line command for another machine, the sink token, and what this receiver is doing. |
-| **Themes** | Plugins that draw the board their own way, on the rail under *experimental*: the office from the `sessionpipe-gui-themes` repo (each machine a room, each session a person at a desk), and whatever you install with `sessionpipe-gui theme add`. |
+| **Views** | Themes that draw the board their own way, on the rail under *experimental*: the office from the `sessionpipe-gui-themes` repo (each machine a room, each session a person at a desk), and whatever you install with `sessionpipe-gui view add`. |
+| **Plugins** | Server-side code that reacts to events, from the same page: ping-a-human sends a Telegram message when a session needs you and, when you tap Allow or Deny there, shows the answer beside the prompt as a *suggestion* you confirm with your passkey. `sessionpipe-gui plugin add`; a plugin runs inside the receiver with everything this machine has. |
 
 Keyboard: `/` search, `j` / `k` move, `Enter` open, `Esc` back. Dark and light follow the
 system; `prefers-reduced-motion` is honoured.
@@ -173,6 +174,7 @@ Delete a session from its page (Forget), or delete the whole directory to start 
 --state DIR       where events and config live
 --no-outbox       do not tail this machine's sessionpipe outbox
 --outbox DIR      tail a sessionpipe state dir other than the default one
+--keep-days N     events older than N days keep a shorter preview in memory (default 14; 0 = whole)
 --demo            generate synthetic sessions
 --replay FILE     replay a sessionpipe JSONL file (--speed N: 0 = at once, 1 = real time)
 --tls             TLS mode: https on the same port from a local CA, for passkeys on a phone (remembered)
