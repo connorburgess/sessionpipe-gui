@@ -2,7 +2,7 @@
 // React bindings for the store. One Store per page load, chosen in main.tsx (real or mock).
 import type { Attention, MachineSummary, SessionKey, SessionState, SessionSummary } from "@shared/api";
 import { SESSION_STATES } from "@shared/api";
-import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
 import type { AppState, Store } from "./store";
@@ -25,8 +25,19 @@ export function useConnection() {
   return { connection: s.connection, retryAt: s.retryAt, snapshotAt: s.snapshotAt };
 }
 
+/** One session's summary: re-renders only when that session changes, not on every event
+ *  of every other session (a whole-state subscription did, at one render per event). */
 export function useSession(key: SessionKey): SessionSummary | undefined {
-  return useAppState().sessions.get(key);
+  const store = useStore();
+  const read = useCallback(() => store.get().sessions.get(key), [store, key]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** The machines map alone (it changes at most about once a second). */
+export function useMachinesMap(): ReadonlyMap<string, MachineSummary> {
+  const store = useStore();
+  const read = useCallback(() => store.get().machines, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
 }
 
 const STATE_RANK: Record<SessionState, number> = Object.fromEntries(SESSION_STATES.map((s, i) => [s, i])) as Record<

@@ -13,6 +13,7 @@ import {
   packageVersion,
   readGuiConfig,
   rotateSinkToken,
+  setDisabled,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
@@ -73,6 +74,8 @@ export interface AppOptions {
   pluginsDir?: string;
   /** Where installed skins live; default <stateDir>/skins. */
   skinsDir?: string;
+  /** Where the views that ship with the GUI are; default dist/bundled/views beside the bundle. */
+  bundledDir?: string;
 }
 
 export interface App {
@@ -232,8 +235,18 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     },
     demo: { on: () => demo !== null, set: setDemo },
   });
-  const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"));
-  registerThemes(router, { registry: themes, uiAuth, stateDir: path.join(stateDir, "themes-state") });
+  const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
+    bundledDir: opts.bundledDir,
+    disabled: () => config.disabled ?? [],
+  });
+  registerThemes(router, {
+    registry: themes,
+    uiAuth,
+    stateDir: path.join(stateDir, "themes-state"),
+    setDisabled: (id, off) => {
+      config = setDisabled(stateDir, config, `view:${id}`, off);
+    },
+  });
   registerPlugins(router, { host: plugins, uiAuth });
   const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"));
   registerSkins(router, { registry: skins, uiAuth });

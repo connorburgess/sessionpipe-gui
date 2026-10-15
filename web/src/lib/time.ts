@@ -4,33 +4,72 @@
 import { useSyncExternalStore } from "react";
 
 let now = Date.now();
-const listeners = new Set<() => void>();
+const fine = new Set<() => void>();
+const coarse = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
+let ticks = 0;
+/** Coarse subscribers hear every COARSE_EVERY-th second. */
+const COARSE_EVERY = 10;
 
-const subscribe = (l: () => void) => {
-  listeners.add(l);
+const run = () => {
+  now = Date.now();
+  ticks++;
+  for (const fn of fine) fn();
+  if (ticks % COARSE_EVERY === 0) for (const fn of coarse) fn();
+};
+const settle = () => {
+  if (fine.size === 0 && coarse.size === 0 && timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+};
+const subscribeTo = (set: Set<() => void>) => (l: () => void) => {
+  set.add(l);
   if (!timer) {
-    timer = setInterval(() => {
-      now = Date.now();
-      for (const fn of listeners) fn();
-    }, 1000);
+    // The clock stood still while nothing listened; the first reading is fresh.
+    now = Date.now();
+    timer = setInterval(run, 1000);
   }
   return () => {
-    listeners.delete(l);
-    if (listeners.size === 0 && timer) {
-      clearInterval(timer);
-      timer = null;
-    }
+    set.delete(l);
+    settle();
   };
 };
+const subscribeFine = subscribeTo(fine);
+const subscribeCoarse = subscribeTo(coarse);
+const subscribeOff = () => () => {};
+const getNow = () => now;
 
-/** Re-renders the caller every second. */
-export function useNow(): number {
+/** How often a reading of the clock needs to change on screen: every second while it
+ *  shows seconds, every ten seconds once it shows minutes or more, never when nothing
+ *  it renders moves. */
+export type Tick = "fine" | "coarse" | "off";
+
+/** Re-renders the caller as its `tick` asks; "fine" (the default) every second. With
+ *  "off" the value is the clock as of the last render that needed it. */
+export function useNow(tick: Tick = "fine"): number {
   return useSyncExternalStore(
-    subscribe,
-    () => now,
-    () => now,
+    tick === "fine" ? subscribeFine : tick === "coarse" ? subscribeCoarse : subscribeOff,
+    getNow,
+    getNow,
   );
+}
+
+/** The tick a relative time of `ageMs` needs: seconds show below `secondsUntil`. */
+export const tickFor = (ageMs: number, secondsUntil = 3_600_000): Tick =>
+  Number.isNaN(ageMs) ? "off" : ageMs < secondsUntil ? "fine" : "coarse";
+
+const dayStart = (t: number) => {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+const getToday = () => dayStart(now);
+
+/** The current local day as its start (ms): changes once at midnight, so a list of
+ *  day labels re-renders then and not every second. */
+export function useToday(): number {
+  return useSyncExternalStore(subscribeCoarse, getToday, getToday);
 }
 
 export const ms = (iso: string | undefined): number => (iso ? Date.parse(iso) : Number.NaN);

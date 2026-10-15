@@ -24,10 +24,10 @@ import {
   sessionKey,
   splitKey,
 } from "../../shared/api.js";
-import { EventFiles, type Line } from "./files.js";
+import { EventFiles } from "./files.js";
 import { applyEvent, newRecord, refreshFlags, refreshState, type SessionRecord } from "./readings.js";
 import { digest, filesChanged, type ReviewIndex, search } from "./review.js";
-import { type SlimEvent, slimEvent } from "./slim.js";
+import { type SlimEvent, slimEvent, trimPreview } from "./slim.js";
 
 export interface IngestResult {
   accepted: number;
@@ -45,7 +45,16 @@ export interface StoreOptions {
   tickMs?: number;
   /** How often stats are emitted when changed (default 5 s). */
   statsMs?: number;
+  /** Events older than this many days keep a shorter preview of their big `data`
+   *  strings in memory (OLD_PREVIEW_CHARS instead of PREVIEW_CHARS); the full event is
+   *  on disk either way. Default 14; 0 keeps every preview whole. */
+  keepDays?: number;
 }
+
+/** Characters of each big `data` string kept for events past `keepDays`: enough for a
+ *  feed row and a search hit on the opening of a transcript. */
+export const OLD_PREVIEW_CHARS = 280;
+export const KEEP_DAYS_DEFAULT = 14;
 
 /** One indexed event: the slim copy, where its full line is on disk, its event time
  *  (ms, clamped to arrival) and its arrival number. The feed orders by (t, no). */
@@ -94,6 +103,9 @@ const FEED_MAX = 500;
 const DETAIL_DEFAULT = 200;
 const DETAIL_MAX = 1000;
 const LATENCY_WINDOW = 200;
+/** How long a machine frame that only moves `lastAt` may wait, so a burst of events is one frame. */
+const MACHINE_LASTAT_MS = 1_000;
+const withoutLastAt = (json: string): string => json.replace(/"lastAt":"[^"]*",?/, "");
 
 export class Store {
   private readonly files: EventFiles;
@@ -109,16 +121,21 @@ export class Store {
   private arrivals: number[] = [];
   private storageBytes = 0;
   private readonly machinesSent = new Map<string, string>();
+  /** Machines whose lastAt moved since their last frame; sent together by flushMachines. */
+  private readonly machinesDue = new Set<string>();
+  private machineFlush: NodeJS.Timeout | undefined;
   private statsSent = "";
   private readonly startedAt = Date.now();
   private readonly timers: NodeJS.Timeout[] = [];
   private closed = false;
+  private readonly keepDays: number;
 
   constructor(
     readonly dir: string,
     opts: StoreOptions = {},
   ) {
     this.files = new EventFiles(dir);
+    this.keepDays = opts.keepDays ?? KEEP_DAYS_DEFAULT;
     this.boot();
     const tick = setInterval(() => this.tick(), opts.tickMs ?? 30_000);
     const stats = setInterval(() => this.emitStats(), opts.statsMs ?? 5_000);
@@ -130,34 +147,38 @@ export class Store {
   // ---------- boot ----------
 
   private boot(): void {
-    const all: { key: SessionKey; line: Line; harness: string; id: string }[] = [];
-    for (const f of this.files.scan()) {
+    // Each line is slimmed the moment it is read (files.scanEach never holds a file whole),
+    // so boot holds the index and nothing more; the full event is read back from disk.
+    const all: { key: SessionKey; ev: SlimEvent; offset: number; bytes: number }[] = [];
+    const files = this.files.scanEach((f, line) => {
+      all.push({ key: sessionKey(f.harness, f.id), ev: slimEvent(line.event), offset: line.offset, bytes: line.bytes });
+    });
+    for (const f of files) {
       this.storageBytes += f.size;
-      if (!f.lines.length) continue;
-      const key = sessionKey(f.harness, f.id);
-      const entry = this.entry(f.harness, f.id, f.lines[0]?.event.arrivedAt ?? new Date().toISOString(), "outbox");
+      if (!f.lines) continue;
+      const entry = this.entry(f.harness, f.id, f.firstArrivedAt ?? new Date().toISOString(), "outbox");
       entry.size = f.size;
-      for (const line of f.lines) all.push({ key, line, harness: f.harness, id: f.id });
     }
     // Arrival order across files is the feed's order; within a file it is append order.
-    all.sort((a, b) =>
-      a.line.event.arrivedAt < b.line.event.arrivedAt ? -1 : a.line.event.arrivedAt > b.line.event.arrivedAt ? 1 : 0,
-    );
+    all.sort((a, b) => (a.ev.arrivedAt < b.ev.arrivedAt ? -1 : a.ev.arrivedAt > b.ev.arrivedAt ? 1 : 0));
     // A seq stored twice (a tier-0 copy over HTTP and the tier-3 copy from the outbox,
     // see ingest) keeps its richest line: the highest tier, the later one on a tie.
     const best = new Map<string, number>();
-    all.forEach(({ key, line }, i) => {
-      const k = `${key}#${line.event.session.seq}`;
+    all.forEach(({ key, ev }, i) => {
+      const k = `${key}#${ev.session.seq}`;
       const prev = best.get(k);
-      if (prev === undefined || all[prev]!.line.event.tier <= line.event.tier) best.set(k, i);
+      if (prev === undefined || all[prev]!.ev.tier <= ev.tier) best.set(k, i);
     });
     const now = Date.now();
-    all.forEach(({ key, line }, i) => {
-      if (best.get(`${key}#${line.event.session.seq}`) !== i) return;
+    const keepAfter = this.keepDays > 0 ? now - this.keepDays * 86_400_000 : Number.NEGATIVE_INFINITY;
+    all.forEach(({ key, ev, offset, bytes }, i) => {
+      if (best.get(`${key}#${ev.session.seq}`) !== i) return;
       const entry = this.sessions.get(key)!;
-      const ev = line.event;
-      this.index(entry, ev, line.offset, line.bytes);
+      // The readings come from the slim copy, as they do in rebuild(): readings.ts cuts
+      // and hashes within PREVIEW_CHARS, so they read the same as from the full event.
       applyEvent(entry, ev, ev.arrivedAt, ev.source ?? "http");
+      const rec = this.index(entry, ev, offset, bytes, true);
+      if (rec.t < keepAfter) rec.ev = trimPreview(ev, OLD_PREVIEW_CHARS);
     });
     for (const entry of this.sessions.values()) this.refresh(entry, now);
   }
@@ -205,11 +226,12 @@ export class Store {
     this.refresh(entry, now);
   }
 
-  private index(entry: Entry, ev: StoredEvent, offset: number, bytes: number): Rec {
+  /** `slim`: `ev` is already the slim copy (boot), so it is kept as it is. */
+  private index(entry: Entry, ev: StoredEvent, offset: number, bytes: number, slim = false): Rec {
     const arrived = Date.parse(ev.arrivedAt);
     const time = Date.parse(ev.time);
     const t = Number.isFinite(time) ? Math.min(time, arrived) : arrived;
-    const rec: Rec = { ev: slimEvent(ev), offset, bytes, t, no: this.nextNo++ };
+    const rec: Rec = { ev: slim ? ev : slimEvent(ev), offset, bytes, t, no: this.nextNo++ };
     const seq = ev.session.seq;
     entry.seqs.add(seq);
     // Insert by seq; appends are the common case.
@@ -293,6 +315,31 @@ export class Store {
     if (!this.listeners.size) return;
     const all = this.machines();
     for (const name of new Set(names)) {
+      const m = all.find((x) => x.name === name);
+      if (!m) continue;
+      const json = JSON.stringify(m);
+      const prev = this.machinesSent.get(name);
+      if (prev === json) continue;
+      // Every event moves the machine's lastAt; that alone is not worth a frame per
+      // event to every client (it doubled their work). It rides a flush a second later;
+      // anything else about the machine goes out at once.
+      if (prev !== undefined && withoutLastAt(prev) === withoutLastAt(json)) {
+        this.machinesDue.add(name);
+        this.machineFlush ??= setTimeout(() => this.flushMachines(), MACHINE_LASTAT_MS).unref();
+        continue;
+      }
+      this.machinesSent.set(name, json);
+      this.emit({ kind: "machine", machine: m });
+    }
+  }
+
+  private flushMachines(): void {
+    this.machineFlush = undefined;
+    if (this.closed || !this.listeners.size) return;
+    const due = [...this.machinesDue];
+    this.machinesDue.clear();
+    const all = this.machines();
+    for (const name of due) {
       const m = all.find((x) => x.name === name);
       if (!m) continue;
       const json = JSON.stringify(m);
@@ -631,6 +678,7 @@ export class Store {
   async close(): Promise<void> {
     this.closed = true;
     for (const t of this.timers) clearInterval(t);
+    if (this.machineFlush) clearTimeout(this.machineFlush);
     this.listeners.clear();
   }
 }

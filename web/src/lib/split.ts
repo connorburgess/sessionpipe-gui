@@ -5,7 +5,7 @@
 // when present). The width is per device; the rectangle an open animates out of is
 // handed over once and consumed by the panel.
 import type { SessionKey } from "@shared/api";
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, setSearchParams, useSearchParam } from "./router";
 
 export interface Rect {
@@ -204,7 +204,9 @@ export function takeFrom(): Rect | null {
 export function useSplit(): SplitState {
   const s = useSearchParam(SPLIT_PARAM);
   const t = useSearchParam(SPLIT_ACTIVE_PARAM);
-  return parseSplit(s, t);
+  // One state object per URL: the panel keys effects on `tabs`, and a fresh array every
+  // render had those effects setting state (and rendering) in a loop, ~1000 commits/s.
+  return useMemo(() => parseSplit(s, t), [s, t]);
 }
 
 /** The active session key in the panel, or null. */

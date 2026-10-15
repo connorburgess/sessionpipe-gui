@@ -9,7 +9,6 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
-  readFileSync,
   readSync,
   rmSync,
   statSync,
@@ -31,12 +30,61 @@ export interface Line {
   bytes: number;
 }
 
-export interface ScannedFile {
+export interface ScannedFileInfo {
   harness: string;
   id: string;
   file: string;
   size: number;
+  /** Valid lines seen so far. */
+  lines: number;
+  /** `arrivedAt` of the first valid line. */
+  firstArrivedAt?: string;
+}
+
+export interface ScannedFile extends Omit<ScannedFileInfo, "lines" | "firstArrivedAt"> {
   lines: Line[];
+}
+
+/** Bytes read at a time while scanning; a line longer than this is joined from pieces. */
+const CHUNK = 256 * 1024;
+
+/** Calls `onLine(text, offset, bytes)` for every newline-terminated line of a file (and
+ *  a last line without one), reading CHUNK bytes at a time into one reused buffer.
+ *  Returns the file size. Empty lines are skipped but still take their byte. */
+export function readLines(file: string, onLine: (text: string, offset: number, bytes: number) => void): number {
+  const fd = openSync(file, "r");
+  try {
+    const chunk = Buffer.allocUnsafe(CHUNK);
+    let pending: Buffer[] = [];
+    let pos = 0;
+    let lineStart = 0;
+    for (;;) {
+      const n = readSync(fd, chunk, 0, CHUNK, pos);
+      if (n <= 0) break;
+      let from = 0;
+      for (;;) {
+        const nl = chunk.indexOf(10, from);
+        if (nl < 0 || nl >= n) break;
+        let text: string;
+        if (pending.length) {
+          pending.push(chunk.subarray(from, nl));
+          text = Buffer.concat(pending).toString("utf8");
+          pending = [];
+        } else text = chunk.toString("utf8", from, nl);
+        const bytes = pos + nl - lineStart;
+        if (bytes > 0) onLine(text, lineStart, bytes);
+        lineStart = pos + nl + 1;
+        from = nl + 1;
+      }
+      // The tail of this chunk belongs to a line that continues; the buffer is reused, so copy.
+      if (from < n) pending.push(Buffer.from(chunk.subarray(from, n)));
+      pos += n;
+    }
+    if (pending.length) onLine(Buffer.concat(pending).toString("utf8"), lineStart, pos - lineStart);
+    return pos;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export class EventFiles {
@@ -49,10 +97,13 @@ export class EventFiles {
     return path.join(this.root, safeName(harness), `${safeName(id)}.jsonl`);
   }
 
-  /** Every session file with its lines, in directory order. A line that is not JSON
-   *  is skipped; its bytes still count toward the offsets after it. */
-  scan(): ScannedFile[] {
-    const out: ScannedFile[] = [];
+  /** Every session file (directory order) with what its lines hold, handed over one
+   *  line at a time as the file is read in CHUNK-sized pieces, so no file is ever whole
+   *  in memory: the store keeps the slim copy and lets the full line go. A line that is
+   *  not JSON is skipped; its bytes still count toward the offsets after it. The
+   *  file's harness and id come from its first valid line (the name on disk otherwise). */
+  scanEach(visit: (file: ScannedFileInfo, line: Line) => void): ScannedFileInfo[] {
+    const out: ScannedFileInfo[] = [];
     if (!existsSync(this.root)) return out;
     for (const h of readdirSync(this.root)) {
       const dir = path.join(this.root, h);
@@ -64,36 +115,52 @@ export class EventFiles {
       }
       for (const n of names) {
         const file = path.join(dir, n);
-        let buf: Buffer;
+        const info: ScannedFileInfo = { harness: h, id: n.slice(0, -6), file, size: 0, lines: 0 };
         try {
-          buf = readFileSync(file);
+          info.size = readLines(file, (text, offset, bytes) => {
+            let event: StoredEvent;
+            try {
+              event = JSON.parse(text) as StoredEvent;
+            } catch {
+              return;
+            }
+            if (!event || typeof event !== "object" || !event.session || typeof event.session.id !== "string") return;
+            if (info.lines === 0) {
+              info.harness = event.harness.name;
+              info.id = event.session.id;
+              info.firstArrivedAt = event.arrivedAt;
+            }
+            info.lines++;
+            visit(info, { event, offset, bytes });
+          });
         } catch {
           continue;
         }
-        const lines: Line[] = [];
-        let harness = h;
-        let id = n.slice(0, -6);
-        let pos = 0;
-        while (pos < buf.length) {
-          let nl = buf.indexOf(10, pos);
-          if (nl < 0) nl = buf.length;
-          const bytes = nl - pos;
-          if (bytes > 0) {
-            try {
-              const event = JSON.parse(buf.toString("utf8", pos, nl)) as StoredEvent;
-              if (event && typeof event === "object" && event.session && typeof event.session.id === "string") {
-                harness = event.harness.name;
-                id = event.session.id;
-                lines.push({ event, offset: pos, bytes });
-              }
-            } catch {}
-          }
-          pos = nl + 1;
-        }
-        out.push({ harness, id, file, size: buf.length, lines });
+        out.push(info);
       }
     }
     return out;
+  }
+
+  /** Every session file with all its lines in memory (tests and small stores); the
+   *  store boots with `scanEach` instead. */
+  scan(): ScannedFile[] {
+    const files = new Map<string, ScannedFile>();
+    const infos = this.scanEach((f, line) => {
+      let sf = files.get(f.file);
+      if (!sf) {
+        sf = { harness: f.harness, id: f.id, file: f.file, size: 0, lines: [] };
+        files.set(f.file, sf);
+      }
+      sf.lines.push(line);
+    });
+    return infos.map((f) => {
+      const sf = files.get(f.file) ?? { harness: f.harness, id: f.id, file: f.file, size: 0, lines: [] };
+      sf.harness = f.harness;
+      sf.id = f.id;
+      sf.size = f.size;
+      return sf;
+    });
   }
 
   /** Append events to a session's file; returns each line's offset and length. */

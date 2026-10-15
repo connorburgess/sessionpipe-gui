@@ -8,11 +8,12 @@ import path from "node:path";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { defaultStateDir, packageVersion, readGuiConfig, setTlsPreference } from "./config.js";
+import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setTlsPreference } from "./config.js";
 import { InstallError } from "./extensions/install.js";
 import { lanAddresses } from "./http/net.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
 import { sameMachine } from "./setup/index.js";
+import { addSkin, formatSkinList, linkSkin, listSkins, removeSkin } from "./skins/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
 import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
 
@@ -38,6 +39,8 @@ usage: sessionpipe-gui [options]
   --test-door       loopback-only test door for the conformance runner
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
+  --skins-dir DIR   where skins are installed (default <state>/skins)
+  --bundled-dir DIR where the views that ship with the GUI are (default dist/bundled/views)
   --open            open the board in the browser
   --quiet           no banner
   --version         print the version
@@ -50,6 +53,8 @@ views (themes: pages kept outside the GUI, loaded by the board at runtime):
                                              an npm package name or a git URL
   sessionpipe-gui view link <folder>         symlink a folder, for development
   sessionpipe-gui view remove <id>           uninstall
+  sessionpipe-gui view disable|enable <id>   hide a view (Canvas and Office ship bundled and
+                                             cannot be removed) or show it again
   "theme" is an alias of "view". --state DIR / --themes-dir DIR apply to these too.
 
 plugins (server-side code that reacts to events: notifications, suggested answers):
@@ -57,12 +62,16 @@ plugins (server-side code that reacts to events: notifications, suggested answer
   sessionpipe-gui plugin list|add|link|remove  the same verbs; folders under <state>/plugins,
                                              settings on the Views page; --plugins-dir DIR
 
+skins (tokens, fonts, radius, density and an optional stylesheet; no code):
+
+  sessionpipe-gui skin list|add|link|remove    the same verbs; folders under <state>/skins,
+                                             picked in the page's quick settings; --skins-dir DIR
+  Plain color-theme JSON files in <state>/color-themes/*.json still work and are listed
+  with the skins; see docs/skin-authoring.md and docs/color-theme.example.json.
+
 A view is code running in the board page with access to everything it shows. A plugin
 is code running in the receiver process with everything this machine has. Only install
-what you trust, from people you trust.
-
-color themes (token sets, picked in the page's quick settings): drop JSON files into
-<state>/color-themes/*.json; see docs/color-theme.example.json.
+what you trust, from people you trust. A skin runs no code.
 
 tls (passkeys from a phone; README "Passkeys from a phone"):
 
@@ -93,8 +102,10 @@ interface Args {
   quiet: boolean;
   themesDir?: string;
   pluginsDir?: string;
-  /** `view|theme|plugin <verb> [arg]`: a subcommand instead of the server. */
-  ext?: { kind: "view" | "plugin"; verb: string; arg?: string };
+  skinsDir?: string;
+  bundledDir?: string;
+  /** `view|theme|plugin|skin <verb> [arg]`: a subcommand instead of the server. */
+  ext?: { kind: "view" | "plugin" | "skin"; verb: string; arg?: string };
   /** `--tls` true, `--no-tls` false, neither: whatever config.json remembers. */
   tls?: boolean;
   /** `tls <verb>`: a subcommand instead of the server. */
@@ -169,11 +180,18 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--plugins-dir":
         a.pluginsDir = next();
         break;
+      case "--skins-dir":
+        a.skinsDir = next();
+        break;
+      case "--bundled-dir":
+        a.bundledDir = next();
+        break;
       case "theme":
       case "view":
       case "plugin":
-        if (a.ext) fail("one view / plugin command at a time");
-        a.ext = { kind: f === "plugin" ? "plugin" : "view", verb: argv[++i] ?? "" };
+      case "skin":
+        if (a.ext) fail("one view / plugin / skin command at a time");
+        a.ext = { kind: f === "plugin" || f === "skin" ? f : "view", verb: argv[++i] ?? "" };
         if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.ext.arg = argv[++i];
         break;
       case "--open":
@@ -256,7 +274,7 @@ function openBrowser(url: string): void {
   } catch {}
 }
 
-/** `sessionpipe-gui view|theme|plugin list|add|link|remove`. Prints what it did; exits 1 on a problem. */
+/** `sessionpipe-gui view|theme|plugin|skin list|add|link|remove`. Prints what it did; exits 1 on a problem. */
 async function extensionCommand(parsed: Args): Promise<void> {
   const { kind, verb, arg } = parsed.ext!;
   const stateDir = parsed.state ?? defaultStateDir();
@@ -271,16 +289,38 @@ async function extensionCommand(parsed: Args): Promise<void> {
           link: linkPlugin,
           remove: removePlugin,
         }
-      : {
-          noun: "view",
-          dir: parsed.themesDir ?? path.join(stateDir, "themes"),
-          list: (dir: string) => formatList(dir, listThemes(dir)),
-          add: addTheme,
-          link: linkTheme,
-          remove: removeTheme,
-        };
+      : kind === "skin"
+        ? {
+            noun: "skin",
+            dir: parsed.skinsDir ?? path.join(stateDir, "skins"),
+            list: (dir: string) => formatSkinList(dir, listSkins(dir)),
+            add: addSkin,
+            link: linkSkin,
+            remove: removeSkin,
+          }
+        : {
+            noun: "view",
+            dir: parsed.themesDir ?? path.join(stateDir, "themes"),
+            list: (dir: string) => formatList(dir, listThemes(dir, viewOpts())),
+            add: addTheme,
+            link: linkTheme,
+            remove: (dir: string, id: string) => removeTheme(dir, id, viewOpts()),
+          };
+  function viewOpts() {
+    return { bundledDir: parsed.bundledDir, disabled: () => readGuiConfig(stateDir).disabled ?? [] };
+  }
   try {
     switch (verb) {
+      case "disable":
+      case "enable": {
+        if (kind !== "view") fail(`${ops.noun}s are removed, not disabled (\`${ops.noun} remove <id>\`)`);
+        if (!arg) fail(`view ${verb} needs an id (see \`view list\`)`);
+        const reg = listThemes(ops.dir, viewOpts());
+        if (!reg.some((t) => t.id === arg)) fail(`no view "${arg}" (see \`view list\`)`);
+        setDisabled(stateDir, readGuiConfig(stateDir), `view:${arg}`, verb === "disable");
+        out(verb === "disable" ? `${arg} is off: hidden from the rail; \`view enable ${arg}\` brings it back` : `${arg} is on`);
+        return;
+      }
       case "list":
       case "ls":
         out(ops.list(ops.dir));
@@ -300,7 +340,7 @@ async function extensionCommand(parsed: Args): Promise<void> {
         out(ops.remove(ops.dir, arg).message);
         return;
       default:
-        fail(`unknown ${ops.noun} command "${verb}" (list, add, link, remove)`);
+        fail(`unknown ${ops.noun} command "${verb}" (list, add, link, remove${kind === "view" ? ", disable, enable" : ""})`);
     }
   } catch (e) {
     if (e instanceof InstallError) {
@@ -431,6 +471,8 @@ async function main(): Promise<void> {
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,
       pluginsDir: parsed.pluginsDir,
+      skinsDir: parsed.skinsDir,
+      bundledDir: parsed.bundledDir,
       tls,
     });
   } catch (e) {

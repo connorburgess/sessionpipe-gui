@@ -20,7 +20,56 @@ export interface SlimEvent extends StoredEvent {
   preview?: Record<string, number>;
 }
 
+/** Short strings every event of a session repeats (type, harness, machine, cwd, repo,
+ *  model, source…): JSON.parse makes a fresh copy of each, so the index shares one.
+ *  The table is bounded; when full it starts over. */
+const INTERN_MAX_CHARS = 128;
+const INTERN_MAX_ENTRIES = 8192;
+let interned = new Map<string, string>();
+export function intern(s: string): string {
+  if (s.length > INTERN_MAX_CHARS) return s;
+  const have = interned.get(s);
+  if (have !== undefined) return have;
+  if (interned.size >= INTERN_MAX_ENTRIES) interned = new Map();
+  interned.set(s, s);
+  return s;
+}
+const internField = <T extends object>(o: T, k: keyof T): void => {
+  const v = o[k];
+  if (typeof v === "string") (o as Record<string, unknown>)[k as string] = intern(v);
+};
+
+/** The slim copy with its repeated short strings shared (see `intern`). The event's own
+ *  blocks are copied, never written through. */
+function internEvent(ev: SlimEvent): SlimEvent {
+  const out: SlimEvent = { ...ev, harness: { ...ev.harness }, session: { ...ev.session } };
+  internField(out, "type");
+  internField(out, "source");
+  internField(out.harness, "name");
+  internField(out.harness, "version");
+  internField(out.harness, "event");
+  for (const k of [
+    "machine",
+    "cwd",
+    "repo",
+    "branch",
+    "model",
+    "title",
+    "title_source",
+    "account_id",
+    "parent_id",
+  ] as const)
+    internField(out.session, k);
+  if (ev.privacy && Array.isArray(ev.privacy.rulesets))
+    out.privacy = { ...ev.privacy, rulesets: ev.privacy.rulesets.map((r) => (typeof r === "string" ? intern(r) : r)) };
+  return out;
+}
+
 export function slimEvent(ev: StoredEvent): SlimEvent {
+  return internEvent(slimData(ev));
+}
+
+function slimData(ev: StoredEvent): SlimEvent {
   let data: Record<string, unknown> | null = null;
   let preview: Record<string, number> | null = null;
   for (const k of BIG_KEYS) {
@@ -38,4 +87,23 @@ export function slimEvent(ev: StoredEvent): SlimEvent {
   }
   if (!data) return ev;
   return { ...ev, data, preview: preview! };
+}
+
+/** The same slim copy with each big `data` string cut to at most `chars` (a list page's
+ *  shorter preview, or an old event's). `preview` keeps the original lengths. */
+export function trimPreview(ev: SlimEvent, chars: number): SlimEvent {
+  const had = ev.preview ?? {};
+  let data: Record<string, unknown> | null = null;
+  let preview: Record<string, number> | null = null;
+  for (const k of BIG_KEYS) {
+    const v = ev.data[k];
+    if (v === undefined || v === null) continue;
+    const text = typeof v === "string" ? v : JSON.stringify(v);
+    if (text.length <= chars) continue;
+    data ??= { ...ev.data };
+    preview ??= { ...had };
+    data[k] = detach(text.slice(0, chars));
+    preview[k] = had[k] ?? text.length;
+  }
+  return data ? { ...ev, data, preview: preview! } : ev;
 }
