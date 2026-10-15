@@ -16,7 +16,7 @@
   <a href="DCO"><img alt="DCO" src="https://img.shields.io/badge/contributions-DCO-informational"></a>
 </p>
 
-![The board: sessions grouped by state, the one that needs you first](docs/screenshots/board.png)
+![The board, live: sessions grouped by state, the one that needs you first](docs/screenshots/board.gif)
 
 One Node process on your machine is a [sessionpipe receiver](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
 with a face. It reads the sessions Claude Code, Codex, Gemini CLI and the other harnesses
@@ -49,6 +49,7 @@ sessionpipe-gui 0.1.0 · ~/.local/state/sessionpipe-gui
   tls     off (passkeys from a phone need it: --tls)
 
   Ctrl-C to stop
+  ready in 180 ms · 14 sessions · 1 039 events
 ```
 
 If `sessionpipe install` already ran on this machine there is nothing to configure: the
@@ -86,6 +87,8 @@ steps are green. The setup routes answer only from this machine.
 ## Tour
 
 ### Board
+
+![The board: needs you, working, idle; done collapsed](docs/screenshots/board.png)
 
 Sessions grouped by state, in the order you would look: **needs you**, **working**,
 **stale**, **idle**, **done** (collapsed, with a count). A card is the title, where it is
@@ -130,7 +133,9 @@ fleet, double-click one to watch it work inline. The **Map** draws the infrastru
 around them in lanes: the browsers looking at this GUI, the accounts per harness, the
 machines, the repos, with hairlines for who runs where. Drag an account chip onto a
 machine to start a session there. The layout is kept by the receiver, so it is the same
-on every device. From the [themes repo](https://github.com/spacesheep-dev/sessionpipe-gui-themes).
+on every device. Canvas and Office ship with the GUI (their sources live in the
+[themes repo](https://github.com/spacesheep-dev/sessionpipe-gui-themes)); they sit on the
+rail under *experimental*, and `sessionpipe-gui view disable canvas` hides one.
 
 ### Office
 
@@ -138,8 +143,7 @@ on every device. From the [themes repo](https://github.com/spacesheep-dev/sessio
 
 Every machine a room, every live session a person at a desk, every subagent a helper at a
 side table. Posture is the state; amber marks who needs you; a tally by the door counts
-who went home today. An isometric floor by default, figures on request. Also from the
-themes repo.
+who went home today. An isometric floor by default, figures on request.
 
 ### Review
 
@@ -237,10 +241,9 @@ and installed, linked for development or removed with the same verbs. A **view**
 ES module that draws the board its own way on a page of the GUI, with a `ThemeApi` for
 the live state, control, storage and the keymap. A **skin** is tokens, fonts, radius,
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
-receiver process that reacts to events: notifications, suggested answers.
-
-Canvas and Office come bundled with the GUI (built from the themes repo at build time);
-`view disable canvas` hides one, since a bundled view cannot be removed.
+receiver process that reacts to events: notifications, suggested answers. Canvas and
+Office are views bundled into the package (`view disable <id>` hides one, since a bundled
+view cannot be removed); Spacesheep Vivid and Paper Serif are skins you install.
 
 ```sh
 sessionpipe-gui view add   <folder | .tgz | .zip | npm package | git url>
@@ -290,6 +293,13 @@ protocol's facts, as the spec intends; they are never sent anywhere.
 Delete a session from its page (*Forget*, which also honours a `session.forgotten`
 event) or delete the directory to start over. `--keep-days N` (default 14) shortens the
 in-memory preview of older events; the files are never trimmed.
+
+**Footprint.** Measured on a real store of 177 sessions and 11 027 events (182 MB of
+JSONL, one session alone a 150 MB file), on an M-series Mac: the CLI answers its first
+request about 1 s after start; RSS is 185 MB at boot and settles at 95–100 MB after about
+35 s; idle CPU is 0.2 %, 0.3 % with two browsers streaming; after 30 minutes of streaming
+the Board's JS heap is flat at 9 MB. The method, the before and after, and what is still
+slow are in [docs/perf.md](docs/perf.md).
 
 **Privacy.** The GUI shows what arrived and nothing more. What leaves each machine is
 decided there, by the tier its sink is set to, with secrets redacted before the outbox;
