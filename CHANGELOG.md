@@ -34,15 +34,28 @@ The first public release: a sessionpipe receiver with a face.
   optional stylesheet) and plugins (server-side, `PluginApi`), installed from a folder,
   archive, npm package or git URL; Canvas and Office bundled from
   `sessionpipe-gui-themes`; six built-in skins with Spacesheep as the default.
-- **Extras.** `sessionpipe-gui extras list|add <id|all>`: the curated catalogue of
-  official views, skins and plugins (Spacesheep Vivid, Paper Serif, ping-a-human; Canvas
-  and Office marked bundled), installed from npm with the same installer; the same list
-  with one-click buttons on the Views page (receiver machine only), and a line on the
-  setup page pointing at it.
-- **Packaging.** `npx sessionpipe-gui` / `npm i -g sessionpipe-gui`; `prepublishOnly`
-  builds with the bundled views required; no source maps in the tarball; a plain
-  "needs Node 20 or newer" instead of a stack trace on an old Node; releases published
-  from a `v*` tag by GitHub Actions with npm provenance (RELEASING.md).
+- **Extras.** Every official extension ships inside the GUI: Spacesheep Vivid, Paper
+  Serif and ping-a-human bundled beside Canvas and Office (`dist/bundled/{views,skins,plugins}`,
+  with a tracked copy in `bundled/` that `npm run bundle:sync` refreshes from the themes
+  repo). `sessionpipe-gui extras list` is the catalogue with every entry marked bundled;
+  bundled skins and plugins are listed after the person's own (an install of the same id
+  overrides), cannot be removed, and are turned off with `skin|plugin disable <id>`. A
+  bundled plugin is off until enabled: `plugin enable ping-a-human`, or Enable on the
+  Views page (`POST /api/ui/plugins/:id/enable|disable`, loopback), remembered in
+  `config.json` `enabled`.
+- **Harnesses.** Every name in the protocol registry is known (Claude Code, Codex, Gemini
+  CLI, Antigravity, Cursor, Copilot CLI, Droid, Kiro, OpenCode), with monochrome marks for
+  the first five (Antigravity's official arch, Cursor's cube) and monograms for the rest;
+  the setup page lists the harnesses installed on this machine with their hook state
+  (`SetupStatus.harnesses`); a loop of identical tool calls is read from tool ends alone
+  for a harness with no pre-tool hook (Antigravity); `--demo` plays Antigravity and Cursor
+  sessions as ADAPTERS.md maps them.
+- **Packaging.** Installs from GitHub while the package is not on npm:
+  `npx github:spacesheep-dev/sessionpipe-gui`, `npm i -g github:…`, or a clone with
+  `npm install && npm start` (`prepare` builds once, with the bundled extensions from the
+  tracked copy); no source maps in the tarball; a plain "needs Node 20 or newer" instead
+  of a stack trace on an old Node; a `v*` tag makes a GitHub Release with the tarball
+  (npm publishing waits for the `PUBLISH_NPM` variable; RELEASING.md).
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 

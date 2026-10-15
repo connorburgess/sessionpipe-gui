@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# A `v*` tag publishes sessionpipe-gui to npm through trusted publishing (OIDC: no token in
-# this repo) with provenance, and creates the GitHub Release from the CHANGELOG section.
-# The themes repo is checked out beside this one so the build bundles Canvas and Office;
-# the build refuses to ship without them (scripts/build.mjs --require-bundle). One-time
-# setup and the manual first publish: RELEASING.md.
+# A `v*` tag runs the gates, packs the tarball and creates the GitHub Release from the
+# CHANGELOG section. The package carries Canvas, Office, Spacesheep Vivid, Paper Serif
+# and ping-a-human from the tracked bundled/ copy (refreshed with `npm run bundle:sync`
+# from a checkout of sessionpipe-gui-themes beside this repo, and committed), so the
+# workflow needs no second checkout and no token. Publishing to npm is off until the
+# repository variable PUBLISH_NPM is `true` (RELEASING.md: trusted publishing, the `npm`
+# environment); installs come from GitHub: `npx github:spacesheep-dev/sessionpipe-gui`.
 name: Release
 
 on:
@@ -12,62 +14,42 @@ on:
 
 permissions:
   contents: write # the GitHub Release
-  id-token: write # npm trusted publishing + provenance
+  id-token: write # npm trusted publishing + provenance, when PUBLISH_NPM is on
 
 concurrency:
   group: release-${{ github.ref }}
 
 jobs:
-  publish:
-    name: gates · publish · release
+  release:
+    name: gates · pack · release
     runs-on: ubuntu-latest
-    environment: npm
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: sessionpipe-gui
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: sessionpipe-gui
-
-      # The views that ship in the package. THEMES_REF (a repository variable) pins a tag
-      # of the themes repo; unset, the build takes its main.
-      - uses: actions/checkout@v4
-        with:
-          repository: spacesheep-dev/sessionpipe-gui-themes
-          ref: ${{ vars.THEMES_REF || 'main' }}
-          path: sessionpipe-gui-themes
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: sessionpipe-gui/.nvmrc
+          node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
           cache: npm
-          cache-dependency-path: sessionpipe-gui/package-lock.json
-
-      # Trusted publishing needs npm 11.5.1 or newer.
-      - run: npm install -g npm@latest && npm --version
 
       - name: The tag is package.json's version
         run: |
           v="$(node -p "require('./package.json').version")"
           [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $v"; exit 1; }
 
-      - name: Themes repo dependencies (the bundled views build with them)
-        working-directory: sessionpipe-gui-themes
-        run: npm ci
-
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # --require-bundle: the build refuses to ship without the bundled extensions; here
+      # they come from the tracked bundled/ copy.
       - run: npm run build:release
       - run: npm run pack:check
 
-      - name: Publish
+      - name: Publish to npm (only when PUBLISH_NPM is true)
         if: vars.PUBLISH_NPM == 'true'
-        run: npm publish --provenance --access public
+        run: npm install -g npm@latest && npm publish --provenance --access public
 
       - name: GitHub Release
         env:
