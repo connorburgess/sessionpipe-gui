@@ -6,8 +6,11 @@
 // into dist/bundled/views/<id>/ from the themes repo's packages, built first with their
 // own `npm run build`. `--bundle-from <path>` names that checkout (default: the sibling
 // ../sessionpipe-gui-themes); when it is absent the step is skipped with a note, so a
-// bare clone still builds. `--no-bundle` skips it. The themes repo stays the source of
-// truth: nothing is copied into this repo's git, dist/ is ignored.
+// bare clone still builds. `--no-bundle` (or SPGUI_NO_BUNDLE=1) skips it. A release must
+// not ship without them by accident: `--require-bundle` (what `npm publish` runs through
+// prepublishOnly) fails the build when the checkout is missing or a package's build fails,
+// unless SPGUI_NO_BUNDLE=1 says so on purpose. The themes repo stays the source of truth:
+// nothing is copied into this repo's git, dist/ is ignored.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +20,20 @@ import { build, context } from "esbuild";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
 const watch = argv.includes("--watch");
+const noBundle = argv.includes("--no-bundle") || process.env.SPGUI_NO_BUNDLE === "1";
+const requireBundle = argv.includes("--require-bundle") && !noBundle;
+
+/** A missing piece of the bundle: a note in a dev build, the end of a release build. */
+function missing(msg) {
+  if (!requireBundle) {
+    console.log(`bundled extensions: skipped ${msg}`);
+    return;
+  }
+  console.error(
+    `bundled extensions: ${msg}\n  a release ships Canvas and Office: clone spacesheep-dev/sessionpipe-gui-themes beside this repo (or --bundle-from <path>) and \`npm ci && npm run build\` there; SPGUI_NO_BUNDLE=1 publishes without them on purpose`,
+  );
+  process.exit(1);
+}
 mkdirSync(path.join(root, "dist"), { recursive: true });
 
 const options = {
@@ -47,7 +64,7 @@ function bundleExtensions() {
   const from = path.resolve(root, i >= 0 ? argv[i + 1] : "../sessionpipe-gui-themes");
   const out = path.join(root, "dist", "bundled");
   if (!existsSync(path.join(from, "packages"))) {
-    console.log(`bundled extensions: skipped (no themes repo at ${from}; --bundle-from <path> names one)`);
+    missing(`(no themes repo at ${from}; --bundle-from <path> names one)`);
     return;
   }
   rmSync(out, { recursive: true, force: true });
@@ -55,12 +72,12 @@ function bundleExtensions() {
     const pkg = path.join(from, b.pkg);
     const manifestFile = path.join(pkg, b.manifest);
     if (!existsSync(manifestFile)) {
-      console.log(`bundled extensions: skipped ${b.pkg} (no ${b.manifest})`);
+      missing(`${b.pkg} (no ${b.manifest})`);
       continue;
     }
     const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: pkg, encoding: "utf8" });
     if (r.status !== 0) {
-      console.log(`bundled extensions: skipped ${b.pkg} (its build failed)\n${(r.stderr || r.stdout).trim()}`);
+      missing(`${b.pkg} (its build failed)\n${(r.stderr || r.stdout).trim()}`);
       continue;
     }
     const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
@@ -86,5 +103,7 @@ if (watch) {
   await ctx.watch();
 } else {
   await build(options);
-  if (!argv.includes("--no-bundle")) bundleExtensions();
+  if (!noBundle) bundleExtensions();
+  else if (requireBundle === false && argv.includes("--require-bundle"))
+    console.log("bundled extensions: skipped on purpose (SPGUI_NO_BUNDLE=1)");
 }

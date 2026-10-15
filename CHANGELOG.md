@@ -34,6 +34,15 @@ The first public release: a sessionpipe receiver with a face.
   optional stylesheet) and plugins (server-side, `PluginApi`), installed from a folder,
   archive, npm package or git URL; Canvas and Office bundled from
   `sessionpipe-gui-themes`; six built-in skins with Spacesheep as the default.
+- **Extras.** `sessionpipe-gui extras list|add <id|all>`: the curated catalogue of
+  official views, skins and plugins (Spacesheep Vivid, Paper Serif, ping-a-human; Canvas
+  and Office marked bundled), installed from npm with the same installer; the same list
+  with one-click buttons on the Views page (receiver machine only), and a line on the
+  setup page pointing at it.
+- **Packaging.** `npx sessionpipe-gui` / `npm i -g sessionpipe-gui`; `prepublishOnly`
+  builds with the bundled views required; no source maps in the tarball; a plain
+  "needs Node 20 or newer" instead of a stack trace on an old Node; releases published
+  from a `v*` tag by GitHub Actions with npm provenance (RELEASING.md).
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 

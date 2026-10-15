@@ -2,6 +2,17 @@
   "name": "sessionpipe-gui",
   "version": "0.1.0",
   "description": "The sessionpipe GUI: a local receiver with a live board for every coding-agent session on your machines, open from any device on your network.",
+  "keywords": [
+    "sessionpipe",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "receiver",
+    "dashboard",
+    "local-first",
+    "control-channel"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -15,11 +26,15 @@
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "sessionpipe-gui": "./dist/cli.js"
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "README.md",
     "LICENSE",
     "NOTICE"
@@ -29,6 +44,9 @@
     "dev:server": "node scripts/build.mjs --watch",
     "dev:web": "vite --config web/vite.config.ts",
     "build": "node scripts/build.mjs && vite build --config web/vite.config.ts",
+    "build:release": "node scripts/build.mjs --require-bundle && vite build --config web/vite.config.ts",
+    "prepublishOnly": "npm run build:release",
+    "pack:check": "node scripts/pack-check.mjs",
     "start": "node dist/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "lint": "biome check .",

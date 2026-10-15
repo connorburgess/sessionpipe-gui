@@ -18,7 +18,11 @@ import { chromium, devices } from "@playwright/test";
 const args = Object.fromEntries(
   process.argv
     .slice(2)
-    .map((a, i, all) => (a.startsWith("--") ? [a.slice(2), all[i + 1]?.startsWith("--") || all[i + 1] === undefined ? true : all[i + 1]] : null))
+    .map((a, i, all) =>
+      a.startsWith("--")
+        ? [a.slice(2), all[i + 1]?.startsWith("--") || all[i + 1] === undefined ? true : all[i + 1]]
+        : null,
+    )
     .filter(Boolean),
 );
 const BASE = args.base ?? "http://localhost:7391";
@@ -38,7 +42,14 @@ const DEFAULT_LIGHT = [
   "phone-session.png",
 ];
 const LIGHT = new Set(
-  typeof args.light === "string" ? args.light.split(",").map((s) => s.trim()).filter(Boolean) : args.light === true ? [] : DEFAULT_LIGHT,
+  typeof args.light === "string"
+    ? args.light
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : args.light === true
+      ? []
+      : DEFAULT_LIGHT,
 );
 /** The appearance a shot is taken in. */
 const schemeOf = (file) => (LIGHT.has(file) ? "light" : DEFAULT_SCHEME);
@@ -83,7 +94,8 @@ async function enrollMachine(name) {
     }),
   }).catch(() => {});
   // One poll marks it online for the next 50 s; keep polling in the background.
-  const poll = () => fetch(`${CONTROL}?machine=${encodeURIComponent(machine)}&wait=0`, { headers: auth }).catch(() => {});
+  const poll = () =>
+    fetch(`${CONTROL}?machine=${encodeURIComponent(machine)}&wait=0`, { headers: auth }).catch(() => {});
   await poll();
   const t = setInterval(poll, 20_000);
   t.unref();
@@ -134,13 +146,69 @@ async function postNeedsYou() {
   const events = [
     ev("session.started", { source: "startup" }, 0, "SessionStart"),
     ev("turn.started", { turn_id: turnId, prompt_chars: 142 }, 2_000, "UserPromptSubmit"),
-    ev("tool.started", { tool: "Read", call_id: "toolu_01Read0001", turn_id: turnId, input: { file_path: "src/search/bm25.ts" } }, 4_000, "PreToolUse"),
-    ev("tool.ended", { tool: "Read", call_id: "toolu_01Read0001", turn_id: turnId, ms: 310, ok: true, input: { file_path: "src/search/bm25.ts" }, output: "export class Bm25Cache { … }" }, 4_400, "PostToolUse"),
-    ev("tool.started", { tool: "Bash", call_id: "toolu_01Test0002", turn_id: turnId, input: { command: "npm test -- bm25" } }, 6_000, "PreToolUse"),
-    ev("tool.ended", { tool: "Bash", call_id: "toolu_01Test0002", turn_id: turnId, ms: 18_400, ok: true, input: { command: "npm test -- bm25" }, output: "Tests: 41 passed, 41 total\nTime: 17.9 s" }, 24_500, "PostToolUse"),
-    ev("turn.progress", { turn_id: turnId, user: "Cache the BM25 scores per query and ship it to staging so we can compare p95 against prod.", assistant: "Tests pass with the cache on (41/41). Deploying the branch to the staging target now; I will compare p95 latency once it is up." }, 60_000, "Progress"),
-    ev("tool.started", { tool: "Bash", call_id: callId, turn_id: turnId, input: { command: "npm run deploy -- --target staging" } }, 90_000, "PreToolUse"),
-    ev("attention.needed", { attention_id: "att_01Deploy", kind: "permission", tool: "Bash", message: "npm run deploy -- --target staging" }, 90_500, "PermissionRequest"),
+    ev(
+      "tool.started",
+      { tool: "Read", call_id: "toolu_01Read0001", turn_id: turnId, input: { file_path: "src/search/bm25.ts" } },
+      4_000,
+      "PreToolUse",
+    ),
+    ev(
+      "tool.ended",
+      {
+        tool: "Read",
+        call_id: "toolu_01Read0001",
+        turn_id: turnId,
+        ms: 310,
+        ok: true,
+        input: { file_path: "src/search/bm25.ts" },
+        output: "export class Bm25Cache { … }",
+      },
+      4_400,
+      "PostToolUse",
+    ),
+    ev(
+      "tool.started",
+      { tool: "Bash", call_id: "toolu_01Test0002", turn_id: turnId, input: { command: "npm test -- bm25" } },
+      6_000,
+      "PreToolUse",
+    ),
+    ev(
+      "tool.ended",
+      {
+        tool: "Bash",
+        call_id: "toolu_01Test0002",
+        turn_id: turnId,
+        ms: 18_400,
+        ok: true,
+        input: { command: "npm test -- bm25" },
+        output: "Tests: 41 passed, 41 total\nTime: 17.9 s",
+      },
+      24_500,
+      "PostToolUse",
+    ),
+    ev(
+      "turn.progress",
+      {
+        turn_id: turnId,
+        user: "Cache the BM25 scores per query and ship it to staging so we can compare p95 against prod.",
+        assistant:
+          "Tests pass with the cache on (41/41). Deploying the branch to the staging target now; I will compare p95 latency once it is up.",
+      },
+      60_000,
+      "Progress",
+    ),
+    ev(
+      "tool.started",
+      { tool: "Bash", call_id: callId, turn_id: turnId, input: { command: "npm run deploy -- --target staging" } },
+      90_000,
+      "PreToolUse",
+    ),
+    ev(
+      "attention.needed",
+      { attention_id: "att_01Deploy", kind: "permission", tool: "Bash", message: "npm run deploy -- --target staging" },
+      90_500,
+      "PermissionRequest",
+    ),
   ];
   // A previous run left the same session behind: forget it first, so these events are not
   // dropped as duplicates and the prompt is raised after the machine's hello (else the GUI
@@ -191,7 +259,9 @@ async function open(page, url) {
   await page.goto(url.startsWith("http") ? url : `${BASE}${url}`);
   // The pill is in the DOM on every device but visible only on the rail; its class says the state.
   await page.locator(".conn").first().waitFor({ state: "attached", timeout: 20_000 });
-  await page.waitForFunction(() => document.querySelector(".conn")?.classList.contains("conn--live"), null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.querySelector(".conn")?.classList.contains("conn--live"), null, {
+    timeout: 20_000,
+  });
 }
 
 async function settle(page) {
@@ -207,7 +277,11 @@ async function shot(page, file, opts = {}) {
   if (!opts.keepToasts) await clearToasts(page);
   await settle(page);
   const target = opts.themes ? path.join(THEMES ?? OUT, file) : path.join(OUT, file);
-  await (opts.locator ?? page).screenshot({ path: target, animations: "disabled", ...(opts.locator ? {} : { fullPage: false }) });
+  await (opts.locator ?? page).screenshot({
+    path: target,
+    animations: "disabled",
+    ...(opts.locator ? {} : { fullPage: false }),
+  });
   const kb = Math.round(statSync(target).size / 1024);
   log(`${path.relative(process.cwd(), target)}  ${kb} KB  ${opts.themes ? "" : schemeOf(file)}`);
 }
@@ -220,7 +294,11 @@ const sessionPath = (key) => {
 // ---------- the shots, one function each, so a shot can run in either appearance ----------
 
 const machineId = await enrollMachine("studio-mac");
-log(machineId ? `test door: studio-mac enrolled as ${machineId}` : "test door: not available (start with --test-door); Allow / Deny will read unpaired");
+log(
+  machineId
+    ? `test door: studio-mac enrolled as ${machineId}`
+    : "test door: not available (start with --test-door); Allow / Deny will read unpaired",
+);
 const needsKey = await postNeedsYou();
 await sleep(1500);
 
@@ -228,8 +306,16 @@ const desktopAdvanced = {
   "board.png": async (page) => {
     await open(page, "/");
     await page.locator("article.card").first().waitFor();
-    await page.locator("article.card--needs_you").first().waitFor({ timeout: 30_000 }).catch(() => log("board: no needs-you card in time"));
-    await page.locator("article.card--working").first().waitFor({ timeout: 60_000 }).catch(() => log("board: no working card in time"));
+    await page
+      .locator("article.card--needs_you")
+      .first()
+      .waitFor({ timeout: 30_000 })
+      .catch(() => log("board: no needs-you card in time"));
+    await page
+      .locator("article.card--working")
+      .first()
+      .waitFor({ timeout: 60_000 })
+      .catch(() => log("board: no working card in time"));
     await shot(page, "board.png");
   },
   "appearance.png": async (page) => {
@@ -265,7 +351,11 @@ const desktopAdvanced = {
   "review.png": async (page) => {
     await open(page, "/review");
     await page.getByPlaceholder(/Search transcripts/).fill("webhook");
-    await page.locator(".rv-hit, .hit, [class*=hit]").first().waitFor({ timeout: 20_000 }).catch(() => log("review: no hits rendered"));
+    await page
+      .locator(".rv-hit, .hit, [class*=hit]")
+      .first()
+      .waitFor({ timeout: 20_000 })
+      .catch(() => log("review: no hits rendered"));
     await sleep(800);
     await shot(page, "review.png");
   },
@@ -307,9 +397,12 @@ const desktopAdvanced = {
     await shot(page, "office.png");
     if (THEMES) {
       await shot(page, "office-iso.png", { themes: true });
-      await page.getByRole("button", { name: "figures", exact: true }).click().catch(async () => {
-        await page.getByText("figures", { exact: true }).click();
-      });
+      await page
+        .getByRole("button", { name: "figures", exact: true })
+        .click()
+        .catch(async () => {
+          await page.getByText("figures", { exact: true }).click();
+        });
       await sleep(1500);
       await shot(page, "office-figures.png", { themes: true });
     }
@@ -414,7 +507,11 @@ if (GIF) {
     const t0 = Date.now();
     await open(page, "/");
     await page.locator("article.card").first().waitFor();
-    await page.locator("article.card--needs_you").first().waitFor({ timeout: 30_000 }).catch(() => log("gif: no needs-you card in time"));
+    await page
+      .locator("article.card--needs_you")
+      .first()
+      .waitFor({ timeout: 30_000 })
+      .catch(() => log("gif: no needs-you card in time"));
     await clearToasts(page);
     const from = ((Date.now() - t0) / 1000 + 0.5).toFixed(1);
     await sleep(8000);
@@ -424,10 +521,27 @@ if (GIF) {
     const palette = path.join(vdir, "palette.png");
     const gif = path.join(OUT, "board.gif");
     const filters = "fps=10,scale=960:-1:flags=lanczos";
-    spawnSync("ffmpeg", ["-y", "-ss", from, "-t", "6", "-i", src, "-vf", `${filters},palettegen=stats_mode=diff`, palette], { stdio: "ignore" });
     spawnSync(
       "ffmpeg",
-      ["-y", "-ss", from, "-t", "6", "-i", src, "-i", palette, "-lavfi", `${filters} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`, gif],
+      ["-y", "-ss", from, "-t", "6", "-i", src, "-vf", `${filters},palettegen=stats_mode=diff`, palette],
+      { stdio: "ignore" },
+    );
+    spawnSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-ss",
+        from,
+        "-t",
+        "6",
+        "-i",
+        src,
+        "-i",
+        palette,
+        "-lavfi",
+        `${filters} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
+        gif,
+      ],
       { stdio: "ignore" },
     );
     rmSync(vdir, { recursive: true, force: true });

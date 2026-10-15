@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
+import { registerExtras } from "./extensions/extras.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
@@ -250,6 +251,20 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
   const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"));
   registerSkins(router, { registry: skins, uiAuth });
+  registerExtras(router, {
+    uiAuth,
+    dirs: {
+      themes: opts.themesDir ?? path.join(stateDir, "themes"),
+      skins: opts.skinsDir ?? path.join(stateDir, "skins"),
+      plugins: opts.pluginsDir ?? path.join(stateDir, "plugins"),
+      bundled: opts.bundledDir,
+    },
+    after: async (kind) => {
+      if (kind === "view") themes.scan();
+      else if (kind === "skin") skins.scan();
+      else await plugins.reload();
+    },
+  });
   registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
 
   const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => void router.handle(req, res);

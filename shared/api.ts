@@ -601,6 +601,29 @@ export interface ControlActivity {
   ackedAt?: string;
 }
 
+// ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------
+
+export type ExtraKind = "view" | "skin" | "plugin";
+
+export interface ExtraEntry {
+  /** The manifest id the installed folder gets. */
+  id: string;
+  kind: ExtraKind;
+  name: string;
+  /** The npm package `extras add` installs. */
+  npm: string;
+  /** One line. */
+  line: string;
+  /** The npm tarball, rounded ("59 kB"). */
+  size: string;
+  /** Ships inside the GUI's package: nothing to install. */
+  bundled?: boolean;
+}
+
+export interface ExtrasResponse {
+  extras: (ExtraEntry & { installed: boolean })[];
+}
+
 // ---------- routes ----------
 
 export const ROUTES = {
@@ -646,6 +669,10 @@ export const ROUTES = {
      *  as multipart/form-data file parts → Attachment (one file), or { attachments } (several).
      *  413 `too_large` over ATTACHMENT_MAX_BYTES, 415 `unsupported_type`, 400 `not_an_image`. */
     attachments: "/api/ui/attachments",
+    /** GET → ExtrasResponse: the curated catalogue of official views, skins and plugins
+     *  with what is installed. POST /api/ui/extras/:id/install (loopback): install one
+     *  from npm; streams text/plain and ends with a line `ok` or `failed`. */
+    extras: "/api/ui/extras",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

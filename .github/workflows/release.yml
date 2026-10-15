@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+# A `v*` tag publishes sessionpipe-gui to npm through trusted publishing (OIDC: no token in
+# this repo) with provenance, and creates the GitHub Release from the CHANGELOG section.
+# The themes repo is checked out beside this one so the build bundles Canvas and Office;
+# the build refuses to ship without them (scripts/build.mjs --require-bundle). One-time
+# setup and the manual first publish: RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # the GitHub Release
+  id-token: write # npm trusted publishing + provenance
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  publish:
+    name: gates · publish · release
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: sessionpipe-gui
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sessionpipe-gui
+
+      # The views that ship in the package. THEMES_REF (a repository variable) pins a tag
+      # of the themes repo; unset, the build takes its main.
+      - uses: actions/checkout@v4
+        with:
+          repository: spacesheep-dev/sessionpipe-gui-themes
+          ref: ${{ vars.THEMES_REF || 'main' }}
+          path: sessionpipe-gui-themes
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: sessionpipe-gui/.nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: sessionpipe-gui/package-lock.json
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest && npm --version
+
+      - name: The tag is package.json's version
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $v"; exit 1; }
+
+      - name: Themes repo dependencies (the bundled views build with them)
+        working-directory: sessionpipe-gui-themes
+        run: npm ci
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build:release
+      - run: npm run pack:check
+
+      - name: Publish
+        run: npm publish --provenance --access public
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME" > /tmp/notes.md
+          npm pack --silent --pack-destination /tmp
+          gh release create "$GITHUB_REF_NAME" --title "sessionpipe-gui $GITHUB_REF_NAME" --notes-file /tmp/notes.md /tmp/sessionpipe-gui-*.tgz

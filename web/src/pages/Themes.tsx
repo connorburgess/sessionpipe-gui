@@ -3,6 +3,7 @@
 // line that installs more, and the warning that a theme is code running in this page.
 import { useEffect, useState } from "react";
 import { CopyButton } from "../components/bits";
+import { Extras } from "../components/Extras";
 import { Link } from "../lib/router";
 import { PluginsSection } from "../plugins/PluginsSection";
 import { fetchThemes, reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
@@ -143,6 +144,8 @@ export function Themes() {
           <code>docs/theme-authoring.md</code> in the repository.
         </p>
       </section>
+
+      <Extras loopback={loopback} />
 
       <PluginsSection />
 

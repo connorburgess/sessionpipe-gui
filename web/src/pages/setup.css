@@ -331,3 +331,19 @@
     align-self: center;
   }
 }
+
+/* The optional extras line under the steps: not a step, so no mark and no number. */
+.setup-extras {
+  margin-top: 4px;
+}
+.setup-extras code {
+  font-family: var(--font-mono);
+}
+.setup-extras-link {
+  color: var(--fg-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.setup-extras-link:hover {
+  color: var(--fg);
+}

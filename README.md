@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="web/public/brand/wordmark-dark.svg">
-    <img src="web/public/brand/wordmark.svg" alt="sessionpipe gui" width="274">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/web/public/brand/wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/web/public/brand/wordmark.svg" alt="sessionpipe gui" width="274">
   </picture>
 </p>
 
@@ -16,7 +16,7 @@
   <a href="DCO"><img alt="DCO" src="https://img.shields.io/badge/contributions-DCO-informational"></a>
 </p>
 
-![The board, live: sessions grouped by state, the one that needs you first](docs/screenshots/board.gif)
+![The board, live: sessions grouped by state, the one that needs you first](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.gif)
 
 One Node process on your machine is a [sessionpipe receiver](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
 with a face. It reads the sessions Claude Code, Codex, Gemini CLI and the other harnesses
@@ -27,11 +27,23 @@ that runs it.
 
 ## Install
 
+Node 20 or newer. Three ways, one package; Canvas, Office and the Spacesheep skin come
+with it:
+
 ```sh
-npx sessionpipe-gui
+npx sessionpipe-gui                 # recommended: nothing to install, always the current release
+npm i -g sessionpipe-gui            # or on the PATH for good: `sessionpipe-gui`
+git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd sessionpipe-gui && npm install && npm run build && npm start
 ```
 
-That starts the receiver on port 7373 and prints where to open it:
+Extras (the other official skins and the ping-a-human Telegram plugin, from npm):
+
+```sh
+sessionpipe-gui extras list         # Spacesheep Vivid, Paper Serif, ping-a-human; Canvas and Office marked bundled
+sessionpipe-gui extras add all      # or one: `extras add paper-serif`; the Views page has the same list with buttons
+```
+
+`npx sessionpipe-gui` starts the receiver on port 7373 and prints where to open it:
 
 ```
 sessionpipe-gui 0.1.0 · ~/.local/state/sessionpipe-gui
@@ -63,7 +75,7 @@ this machine has done its part, each with one button. The page checks every two 
 so a step turns green by itself when the outbox gets its first event, the certificate is
 trusted, the daemon polls, a phone connects, a message comes back `delivered`.
 
-![Setup: five live-detected steps](docs/screenshots/setup.png)
+![Setup: five live-detected steps](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/setup.png)
 
 1. **Your sessions**: `npx sessionpipe install` if the CLI is missing.
 2. **Secure address**: turn on https from the GUI's own local CA (no restart) and trust it
@@ -88,7 +100,7 @@ steps are green. The setup routes answer only from this machine.
 
 ### Board
 
-![The board: needs you, working, idle; done collapsed](docs/screenshots/board.png)
+![The board: needs you, working, idle; done collapsed](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.png)
 
 Sessions grouped by state, in the order you would look: **needs you**, **working**,
 **stale**, **idle**, **done** (collapsed, with a count). A card is the title, where it is
@@ -100,7 +112,7 @@ times, repeated compactions, a gap in the sequence. Filter by machine, harness o
 
 ### Session
 
-![A session in Simple mode: a chat, the tools of a turn folded into one line](docs/screenshots/session-simple.png)
+![A session in Simple mode: a chat, the tools of a turn folded into one line](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/session-simple.png)
 
 In **Simple** mode (the default) a session is a chat: your prompts on the right, the
 assistant's replies as markdown on the left, the tools of each turn folded into one line,
@@ -110,11 +122,11 @@ turn statistics, and a *tier lens* that shows the same session as a tier 0, 1, 2
 receiver would have got it. Both modes open the newest turn first and page older turns
 on demand; a session can open as the page or beside it, in a split panel with tabs.
 
-![The same session in Advanced mode: the timeline, turn by turn](docs/screenshots/session-advanced.png)
+![The same session in Advanced mode: the timeline, turn by turn](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/session-advanced.png)
 
 ### Inbox and notifications
 
-![Inbox: every open prompt across every machine, Allow and Deny where an answer can reach](docs/screenshots/inbox.png)
+![Inbox: every open prompt across every machine, Allow and Deny where an answer can reach](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/inbox.png)
 
 Every open prompt, question and error from every session and machine, newest first, in
 two groups: the ones a signed answer can reach (**Allow** / **Deny** right on the row) and
@@ -126,7 +138,7 @@ upload, all per device.
 
 ### Canvas
 
-![Canvas with the map on: windows for sessions, lanes for devices, agents, machines and repos](docs/screenshots/canvas.png)
+![Canvas with the map on: windows for sessions, lanes for devices, agents, machines and repos](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/canvas.png)
 
 Every live session as a window on an infinite canvas: drag, resize, zoom out to see the
 fleet, double-click one to watch it work inline. The **Map** draws the infrastructure
@@ -139,7 +151,7 @@ rail under *experimental*, and `sessionpipe-gui view disable canvas` hides one.
 
 ### Office
 
-![Office: every machine a room, every live session a person at a desk](docs/screenshots/office.png)
+![Office: every machine a room, every live session a person at a desk](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/office.png)
 
 Every machine a room, every live session a person at a desk, every subagent a helper at a
 side table. Posture is the state; amber marks who needs you; a tally by the door counts
@@ -147,7 +159,7 @@ who went home today. An isometric floor by default, figures on request.
 
 ### Review
 
-![Review: search across transcripts, the files changed by repo, one day as a digest](docs/screenshots/review.png)
+![Review: search across transcripts, the files changed by repo, one day as a digest](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/review.png)
 
 The Board is now; Review is what happened. Search transcripts, tool names, file paths and
 titles across every session (a hit opens the session beside the page at that turn). Then
@@ -158,7 +170,7 @@ sender, its harness versions, its pairing).
 
 ### Connect and your phone
 
-![Connect: the QR code for a phone, the one line for another machine, the sink token masked](docs/screenshots/connect.png)
+![Connect: the QR code for a phone, the one line for another machine, the sink token masked](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/connect.png)
 
 Scan the QR code in the terminal or on the Connect page. The address carries a key that
 signs the phone into the page; without it the network answers 401. On the machine itself
@@ -172,12 +184,12 @@ walks the phone through installing that one certificate (compare the SHA-256 fin
 it shows with the one in the profile) and forwards it to `https://<machine>.local:7373`.
 The daemon and the sinks keep using plain http.
 
-| ![The trust page on a phone](docs/screenshots/phone-trust.png) | ![The board on a phone](docs/screenshots/phone-board.png) | ![A session on a phone](docs/screenshots/phone-session.png) |
+| ![The trust page on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-trust.png) | ![The board on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-board.png) | ![A session on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-session.png) |
 |---|---|---|
 
 ### Settings and skins
 
-![The appearance popover: system, dark or light; the skin; the text size](docs/screenshots/appearance.png)
+![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)
 
 Appearance (system, dark, light), skin and text size are one tap from the rail and are
 kept per device. **Spacesheep** is the default skin, the colours of
@@ -191,7 +203,7 @@ plugins, what is on disk, and the receiver's own numbers.
 
 ### Keyboard
 
-![The keyboard help: every binding in force, grouped, searchable](docs/screenshots/keyboard.png)
+![The keyboard help: every binding in force, grouped, searchable](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/keyboard.png)
 
 `?` lists every binding in force, `/shortcuts` rebinds them (vim and emacs presets
 included). The ones to know: `⌘K` palette, `/` search this page, `j` `k` move,
@@ -245,11 +257,12 @@ the live state, control, storage and the keymap. A **skin** is tokens, fonts, ra
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
 receiver process that reacts to events: notifications, suggested answers. Canvas and
 Office are views bundled into the package (`view disable <id>` hides one, since a bundled
-view cannot be removed); Spacesheep Vivid and Paper Serif are skins you install.
+view cannot be removed); Spacesheep Vivid, Paper Serif and ping-a-human are one
+`sessionpipe-gui extras add <id|all>` away, or a button on the Views page. Anything else:
 
 ```sh
 sessionpipe-gui view add   <folder | .tgz | .zip | npm package | git url>
-sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>
+sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>     # e.g. @sessionpipe-gui/skin-paper-serif
 sessionpipe-gui plugin add <folder | .tgz | .zip | npm package | git url>
 ```
 
@@ -338,6 +351,7 @@ test/       vitest fixtures and the Playwright suite
 ```
 
 Architecture, module owners and the API contract: [ARCHITECTURE.md](ARCHITECTURE.md).
+Cutting a release: [RELEASING.md](RELEASING.md).
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Every commit is signed off under the
 [DCO](DCO) (`git commit -s`); there is no CLA.
 

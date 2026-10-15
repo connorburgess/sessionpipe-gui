@@ -6,9 +6,11 @@ import { execFileSync, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import QRCode from "qrcode";
-import { DEFAULT_PORT, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
+import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
 import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setTlsPreference } from "./config.js";
+import { findExtra, formatCatalog, installableExtras } from "./extensions/catalog.js";
+import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
 import { lanAddresses } from "./http/net.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
@@ -16,6 +18,14 @@ import { sameMachine } from "./setup/index.js";
 import { addSkin, formatSkinList, linkSkin, listSkins, removeSkin } from "./skins/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
 import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
+
+// Before anything else: an old Node fails somewhere deep with a stack trace; say it plainly.
+// (Imports are hoisted above this line, but the two external ones load on any Node.)
+const NODE_MAJOR = Number(process.versions.node.split(".")[0]);
+if (NODE_MAJOR < 20) {
+  process.stderr.write(`sessionpipe-gui needs Node 20 or newer (you have v${process.versions.node})\n`);
+  process.exit(1);
+}
 
 const HELP = `sessionpipe-gui ${packageVersion()} — a sessionpipe receiver with a live board
 
@@ -69,6 +79,12 @@ skins (tokens, fonts, radius, density and an optional stylesheet; no code):
   Plain color-theme JSON files in <state>/color-themes/*.json still work and are listed
   with the skins; see docs/skin-authoring.md and docs/color-theme.example.json.
 
+extras (the official views, skins and plugins, from npm; Canvas and Office are bundled):
+
+  sessionpipe-gui extras list                catalogue: id, kind, one line, npm name, size
+  sessionpipe-gui extras add <id|all>        install one from npm, or every one not bundled
+  The same list, with one-click install, is on the Views page (on this machine only).
+
 A view is code running in the board page with access to everything it shows. A plugin
 is code running in the receiver process with everything this machine has. Only install
 what you trust, from people you trust. A skin runs no code.
@@ -106,6 +122,8 @@ interface Args {
   bundledDir?: string;
   /** `view|theme|plugin|skin <verb> [arg]`: a subcommand instead of the server. */
   ext?: { kind: "view" | "plugin" | "skin"; verb: string; arg?: string };
+  /** `extras list|add <id|all>`: a subcommand instead of the server. */
+  extras?: { verb: string; arg?: string };
   /** `--tls` true, `--no-tls` false, neither: whatever config.json remembers. */
   tls?: boolean;
   /** `tls <verb>`: a subcommand instead of the server. */
@@ -193,6 +211,11 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         if (a.ext) fail("one view / plugin / skin command at a time");
         a.ext = { kind: f === "plugin" || f === "skin" ? f : "view", verb: argv[++i] ?? "" };
         if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.ext.arg = argv[++i];
+        break;
+      case "extras":
+        if (a.extras) fail("one extras command at a time");
+        a.extras = { verb: argv[++i] ?? "list" };
+        if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.extras.arg = argv[++i];
         break;
       case "--open":
         a.open = true;
@@ -357,6 +380,52 @@ async function extensionCommand(parsed: Args): Promise<void> {
   }
 }
 
+/** `sessionpipe-gui extras list|add <id|all>`: the catalogue, and installs from npm. */
+async function extrasCommand(parsed: Args): Promise<void> {
+  const { verb, arg } = parsed.extras!;
+  const stateDir = parsed.state ?? defaultStateDir();
+  const dirs = {
+    themes: parsed.themesDir ?? path.join(stateDir, "themes"),
+    skins: parsed.skinsDir ?? path.join(stateDir, "skins"),
+    plugins: parsed.pluginsDir ?? path.join(stateDir, "plugins"),
+    bundled: parsed.bundledDir,
+  };
+  const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
+  switch (verb) {
+    case "list":
+    case "ls":
+      out(formatCatalog((e) => extraInstalled(dirs, e)));
+      out("`extras add <id>` installs one from npm; `extras add all` every one that is not bundled.");
+      return;
+    case "add":
+    case "install": {
+      if (!arg) fail("extras add needs an id from `extras list`, or `all`");
+      const wanted = arg === "all" ? installableExtras() : [findExtra(arg)];
+      if (wanted[0] === undefined) fail(`no extra "${arg}" (see \`extras list\`)`);
+      let failed = 0;
+      for (const entry of wanted as ExtraEntry[]) {
+        if (entry.bundled) {
+          out(`${entry.id}: bundled with the GUI, nothing to install`);
+          continue;
+        }
+        out(`${entry.id}: installing ${entry.npm}…`);
+        try {
+          out((await installExtra(dirs, entry)).message);
+        } catch (e) {
+          if (!(e instanceof InstallError)) throw e;
+          failed++;
+          process.stderr.write(`sessionpipe-gui: ${entry.id}: ${e.message}\n`);
+        }
+      }
+      if (failed) process.exit(1);
+      out("A skin shows in the appearance popover after Reload; a plugin on the Views page after Reload plugins.");
+      return;
+    }
+    default:
+      fail(`unknown extras command "${verb}" (list, add)`);
+  }
+}
+
 /** `sessionpipe-gui tls status|trust|reset`. */
 function tlsCommand(parsed: Args): void {
   const verb = parsed.tlsCommand!;
@@ -452,6 +521,7 @@ async function main(): Promise<void> {
     return;
   }
   if (parsed.ext) return extensionCommand(parsed);
+  if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
   const t0 = Date.now();
   // --tls / --no-tls are remembered in config.json; a bare start uses the remembered choice.

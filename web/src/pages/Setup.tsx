@@ -77,6 +77,18 @@ export function Setup() {
           <TryStep s={s} mark={marks.try} ready={done.secure && done.pair} onDelivered={() => setTried(true)} />
         </ol>
       )}
+      {s && done && (
+        <p className="page-note setup-extras" data-setup-extras>
+          <span>
+            <strong>Optional · Extras.</strong> Canvas and Office are already in; Spacesheep Vivid, Paper Serif and the
+            ping-a-human Telegram plugin are one click each on the{" "}
+            <Link to="/themes" className="setup-extras-link">
+              Views page
+            </Link>
+            , or <code>sessionpipe-gui extras add all</code> in a terminal.
+          </span>
+        </p>
+      )}
       {s &&
         (allDone ? (
           <div className="setup-done" role="status" data-setup-done>

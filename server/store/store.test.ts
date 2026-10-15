@@ -477,7 +477,8 @@ describe("tier upgrade", () => {
     const store = new Store(dir, { tickMs: 3600_000, statsMs: 3600_000 });
     const base = {
       protocol: 1 as const,
-      time: "2026-10-14T10:00:00.000Z",
+      // A fresh timestamp: a session silent for a day is read as done and its prompts closed.
+      time: new Date(Date.now() - 60_000).toISOString(),
       harness: { name: "claude-code" },
       privacy: { rulesets: ["secrets@1"], pii: false },
     };
