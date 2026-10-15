@@ -17,7 +17,7 @@ export const isLoopbackPage = (): boolean =>
   typeof location !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 
 export function PluginsSection() {
-  const { plugins, loaded, error } = usePlugins();
+  const { plugins, loaded, error, demo } = usePlugins();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const loopback = isLoopbackPage();
@@ -50,6 +50,11 @@ export function PluginsSection() {
         </p>
       </header>
       {error && <p className="page-note is-err">{error}</p>}
+      {demo && (
+        <p className="page-note">
+          Demo mode: plugins stay inactive, so a throwaway server never messages anyone about pretend sessions.
+        </p>
+      )}
       {loaded && plugins.length === 0 && !error && (
         <p className="themes-empty">No plugins installed. Add one with the command below.</p>
       )}

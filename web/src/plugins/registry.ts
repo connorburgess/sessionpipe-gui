@@ -11,9 +11,11 @@ export interface PluginsState {
   /** The first fetch finished (with a list or an error). */
   loaded: boolean;
   error: string | null;
+  /** The server runs in demo mode: plugins stay inactive. */
+  demo: boolean;
 }
 
-let state: PluginsState = { plugins: [], loaded: false, error: null };
+let state: PluginsState = { plugins: [], loaded: false, error: null, demo: false };
 const listeners = new Set<() => void>();
 let inflight: Promise<void> | null = null;
 
@@ -54,8 +56,8 @@ const listOf = (body: { plugins?: InstalledPlugin[] }): InstalledPlugin[] =>
 /** Fetch the list; concurrent calls share one request. */
 export function fetchPlugins(): Promise<void> {
   if (inflight) return inflight;
-  inflight = request<{ plugins?: InstalledPlugin[] }>(PLUGIN_ROUTES.list, "GET")
-    .then((body) => set({ plugins: listOf(body), loaded: true, error: null }))
+  inflight = request<{ plugins?: InstalledPlugin[]; demo?: boolean }>(PLUGIN_ROUTES.list, "GET")
+    .then((body) => set({ plugins: listOf(body), loaded: true, error: null, demo: body.demo === true }))
     .catch((e: unknown) => set({ loaded: true, error: e instanceof Error ? e.message : String(e) }))
     .finally(() => {
       inflight = null;

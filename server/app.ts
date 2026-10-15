@@ -247,7 +247,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       config = setDisabled(stateDir, config, `view:${id}`, off);
     },
   });
-  registerPlugins(router, { host: plugins, uiAuth });
+  registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
   const skins = new SkinRegistry(opts.skinsDir ?? path.join(stateDir, "skins"), path.join(stateDir, "color-themes"));
   registerSkins(router, { registry: skins, uiAuth });
   registerTrust(router, { uiAuth, uiKey, tls: () => tls, info });
@@ -293,7 +293,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
   // Plugins start once the port is known: their api names the URLs a message can carry.
-  await plugins.start();
+  // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
+  // at the UI with synthetic sessions, so it never activates them: a throwaway server
+  // must not ping a real phone about pretend prompts.
+  if (opts.demo) {
+    if (!opts.quiet) process.stderr.write("[sessionpipe-gui] plugins are off in demo mode\n");
+  } else await plugins.start();
 
   return {
     server,

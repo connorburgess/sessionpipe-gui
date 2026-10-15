@@ -12,6 +12,8 @@ export const SETTINGS_MAX_BYTES = 64 * 1024;
 export interface PluginRouteDeps {
   host: PluginHost;
   uiAuth: (ctx: Ctx) => boolean;
+  /** Demo mode: plugins stay inactive; the listing says so. */
+  demo?: boolean;
 }
 
 export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
@@ -26,7 +28,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
       (ctx): Reply => ({
         status: 200,
         headers: { "cache-control": "no-store" },
-        json: { plugins: deps.host.list(ctx.remote.loopback) },
+        json: { plugins: deps.host.list(ctx.remote.loopback), demo: deps.demo === true },
       }),
     ),
   );
@@ -36,7 +38,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
     guard(async (ctx): Promise<Reply> => {
       if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
       await deps.host.reload();
-      return { status: 200, json: { plugins: deps.host.list(true) } };
+      return { status: 200, json: { plugins: deps.host.list(true), demo: deps.demo === true } };
     }),
   );
 

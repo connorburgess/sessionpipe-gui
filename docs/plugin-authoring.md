@@ -197,6 +197,14 @@ so a linked plugin shows its edits without a restart.
 Routes: `GET /api/ui/plugins` → `{ plugins: InstalledPlugin[] }` (status, error, masked
 values); `PUT /api/ui/plugins/:id/settings` `{ key: value }` → `{ settings }` (loopback).
 
+## Demo mode never runs plugins
+
+`sessionpipe-gui --demo` exists to look at the UI with synthetic sessions. Plugins are
+not activated in that mode (the listing reports `demo: true` and the Plugins section
+says so), because a plugin may reach outside the machine: nobody wants a Telegram
+message about a pretend prompt from a throwaway server. Test a plugin against real
+events on a scratch state dir without `--demo`, or with its own `dryRun` setting.
+
 ## Rules of the house
 
 - Never block the host: no synchronous waits, no long loops. `await` your channel, and
