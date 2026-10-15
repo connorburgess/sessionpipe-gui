@@ -45,6 +45,9 @@ export function Feed() {
   const [loaded, setRows] = useState<StoredEvent[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
+  /** The filter the rows on screen were loaded for; until the fetch for the current
+   *  filter lands, the list is busy and stale rows are hidden by the client-side filter. */
+  const [loadedFor, setLoadedFor] = useState<FeedQuery | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const pending = useRef<StoredEvent[]>([]);
@@ -81,6 +84,7 @@ export function Feed() {
           if (cancelled) return;
           setRows(p.events);
           setCursor(p.cursor);
+          setLoadedFor(filter);
         })
         .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)))
         .finally(() => !cancelled && setLoading(false));
@@ -146,8 +150,12 @@ export function Feed() {
     [loaded, lens],
   );
   const hiddenByLens = loaded.length - rows.length;
-  const hrefs = useMemo(() => rows.map((e) => sessionPath(e.harness.name, e.session.id)), [rows]);
-  const keys = useMemo(() => rows.map(storedKey), [rows]);
+  // Belt and braces: never show a row the current filter would not have loaded, even
+  // for the frame between a filter change and its fetch.
+  const shown = useMemo(() => rows.filter((e) => applyFilter(e, filter)), [rows, filter]);
+  const busy = loading || loadedFor !== filter;
+  const hrefs = useMemo(() => shown.map((e) => sessionPath(e.harness.name, e.session.id)), [shown]);
+  const keys = useMemo(() => shown.map(storedKey), [shown]);
   const { cursor: cur } = useListNav(hrefs, true, keys);
   useShortcut("feed.pause", () => (paused ? resume() : setPaused(true)));
   useShortcut("feed.new", () => {
@@ -199,8 +207,8 @@ export function Feed() {
       {error && <p className="page-note is-err">{error}</p>}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      <ol className="rows" aria-busy={loading}>
-        {rows.map((e, i) => {
+      <ol className="rows" aria-busy={busy}>
+        {shown.map((e, i) => {
           const day = dayLabel(e.time, now);
           const showDay = day !== lastDay;
           lastDay = day;
@@ -264,7 +272,7 @@ export function Feed() {
           <Spinner /> loading…
         </p>
       )}
-      {!loading && rows.length === 0 && <p className="page-note">No events match.</p>}
+      {!busy && shown.length === 0 && <p className="page-note">No events match.</p>}
       {!loading && cursor && (
         <button type="button" className="btn btn--ghost more" onClick={older}>
           Older events
