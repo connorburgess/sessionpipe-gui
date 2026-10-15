@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "The sessionpipe GUI: a local receiver with a live board for every coding-agent session on your machines, open from any device on your network.",
   "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/spacesheep-dev/sessionpipe-gui.git" },
+  "homepage": "https://github.com/spacesheep-dev/sessionpipe-gui#readme",
+  "bugs": { "url": "https://github.com/spacesheep-dev/sessionpipe-gui/issues" },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -34,6 +37,7 @@
     "sessionpipe-core": "^0.7.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@biomejs/biome": "^2.5.15",
     "@playwright/test": "^1.58.0",
     "@types/node": "^22.0.0",

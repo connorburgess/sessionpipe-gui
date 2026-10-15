@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
 import { INFO, WELL_KNOWN } from "./helpers.js";
 
 /** The TLS instance's port, as playwright.config.ts (E2E_TLS_PORT) starts it. */
-const E2E_TLS_PORT = 7312;
+const E2E_TLS_PORT = Number(process.env.SPGUI_E2E_TLS_PORT ?? 7312);
 const E2E_TLS_BASE = `https://localhost:${E2E_TLS_PORT}`;
 const HTTP_BASE = `http://127.0.0.1:${E2E_TLS_PORT}`;
 const CONTROL = "/api/sessionpipe/v1/control";

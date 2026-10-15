@@ -26,6 +26,14 @@
   --radius: 6px;
   --radius-sm: 6px;
   --radius-pill: 999px;
+  /* Every rule and border that is a hairline today; a skin may make it 1.5 or 2. */
+  --hairline: 1px;
+  /* Row heights (and the padding between rows): the three heights the app uses. A skin's
+     density moves them (html[data-density], app.css). */
+  --row-sm: 32px;
+  --row: 36px;
+  --row-lg: 40px;
+  --row-pad: 8px;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -48,13 +56,15 @@
   --line-2: oklch(0.8 0.01 85);
   --fg: oklch(0.22 0.014 265);
   --fg-2: oklch(0.42 0.016 265);
-  --fg-3: oklch(0.52 0.014 265);
+  --fg-3: oklch(0.5 0.014 265);
   --fg-4: oklch(0.64 0.01 265);
 
   --needs: oklch(0.72 0.15 65);
   --needs-fg: oklch(0.5 0.12 60);
   --needs-bg: oklch(0.965 0.03 82);
   --needs-line: oklch(0.86 0.08 75);
+  /* Text on a --needs fill (the unread badge, the "new" pill). */
+  --needs-ink: oklch(0.2 0.03 60);
   /* State colours for views that colour-code (the canvas): working is cool, stale is
      slate; idle and done stay neutral. Amber (--needs) remains the only warm accent. */
   --state-working: oklch(0.6 0.11 200);
@@ -86,6 +96,10 @@
   --mark: oklch(0.93 0.07 90);
   --mark-fg: oklch(0.4 0.09 70);
   --shadow: none;
+  /* The QR code's ground and its "no network" text: paper and ink in both schemes, so a
+     phone camera reads it. */
+  --qr-bg: oklch(0.995 0.002 85);
+  --qr-fg: oklch(0.6 0.01 265);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -105,6 +119,7 @@
     --needs-fg: oklch(0.84 0.11 75);
     --needs-bg: oklch(0.235 0.03 65);
     --needs-line: oklch(0.4 0.07 65);
+    --needs-ink: oklch(0.2 0.03 60);
     --state-working: oklch(0.75 0.1 200);
     --state-working-bg: oklch(0.25 0.03 200);
     --state-stale: oklch(0.66 0.05 280);
@@ -138,6 +153,7 @@
   --needs-fg: oklch(0.84 0.11 75);
   --needs-bg: oklch(0.235 0.03 65);
   --needs-line: oklch(0.4 0.07 65);
+  --needs-ink: oklch(0.2 0.03 60);
 
   --ok: oklch(0.7 0.1 150);
   --err: oklch(0.7 0.14 25);
@@ -146,4 +162,15 @@
   --focus: oklch(0.72 0.01 85);
   --mark: oklch(0.38 0.07 85);
   --mark-fg: oklch(0.92 0.08 90);
+}
+
+/* More contrast asked for: hairlines a step darker, the muted tiers a step up, so the
+   meta text and the dividers read on every background. */
+@media (prefers-contrast: more) {
+  :root {
+    --line: var(--fg-4);
+    --line-2: var(--fg-3);
+    --fg-3: var(--fg-2);
+    --fg-4: var(--fg-3);
+  }
 }

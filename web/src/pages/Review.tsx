@@ -7,6 +7,7 @@ import type { Digest, DigestGroup, FilesPage, SearchHit, SearchPage } from "@sha
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HarnessGlyph, Redacted, SearchInput, Segmented, Spinner } from "../components/bits";
 import { useStore } from "../data/hooks";
+import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort } from "../lib/format";
 import { openSplit } from "../lib/split";
 import { ago, clock, dayLabel, durCoarse, useNow } from "../lib/time";
@@ -47,7 +48,20 @@ export function Review() {
         <SearchInput value={q} onChange={setQ} placeholder="Search transcripts, tools and file paths" />
       </div>
       {needle && <Hits q={needle} />}
-      <div className="rv-tabs" role="tablist" aria-label="Review">
+      <div
+        className="rv-tabs"
+        role="tablist"
+        aria-label="Review"
+        onKeyDown={(e) => {
+          const tabs = ["files", "day"] as const;
+          tablistKey(e, tabs.length, tabs.indexOf(tab), {
+            activate: (i) => {
+              setTab(tabs[i]!);
+              focusTab(e.currentTarget, i);
+            },
+          });
+        }}
+      >
         <button
           type="button"
           role="tab"
@@ -55,6 +69,7 @@ export function Review() {
           className="rv-tab"
           aria-selected={tab === "files"}
           aria-controls="rv-panel"
+          tabIndex={tab === "files" ? 0 : -1}
           onClick={() => setTab("files")}
         >
           Files
@@ -66,6 +81,7 @@ export function Review() {
           className="rv-tab"
           aria-selected={tab === "day"}
           aria-controls="rv-panel"
+          tabIndex={tab === "day" ? 0 : -1}
           onClick={() => setTab("day")}
         >
           Day

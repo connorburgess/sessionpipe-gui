@@ -9,6 +9,7 @@ import type { SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
   createRef,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -18,8 +19,10 @@ import {
   useState,
 } from "react";
 import { useAppState } from "../data/hooks";
+import { focusTab, tablistKey } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
+import { useShortcut } from "../lib/shortcuts";
 import {
   activateTab,
   closeSplit,
@@ -166,35 +169,31 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     strip.classList.toggle("tabs--overflow", overflow);
   }, [activeKey, tabs, width]);
 
-  // Keyboard: ctrl+tab cycles, ⌘/ctrl+1…9 jump, ⌘/ctrl+w closes the active tab when the
-  // panel has focus. (Browsers reserve some of these for their own tabs; they work where
-  // the page is allowed to take them.)
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        cycleTab(e.shiftKey ? -1 : 1);
-        return;
-      }
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod || e.altKey || e.shiftKey) return;
-      if (/^[1-9]$/.test(e.key)) {
-        const i = Number(e.key) - 1;
-        if (i < tabs.length) {
-          e.preventDefault();
-          activateTab(i);
-        }
-        return;
-      }
-      if (e.key === "w" && panelRef.current?.contains(document.activeElement)) {
-        e.preventDefault();
-        closeTab(active);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, tabs.length, active]);
+  // Keyboard, through the keymap (lib/shortcuts.ts): [ / ] (and ctrl+tab) cycle, mod+1…9
+  // jump, mod+w closes the active tab while the panel has focus (the browser keeps it
+  // otherwise), x closes the panel.
+  useShortcut("panel.prev", () => (tabs.length > 1 ? cycleTab(-1) : false), { enabled: open });
+  useShortcut("panel.next", () => (tabs.length > 1 ? cycleTab(1) : false), { enabled: open });
+  useShortcut("panel.close", () => closeSplit(), { enabled: open });
+  useShortcut("panel.closeTab", () => (panelRef.current?.contains(document.activeElement) ? closeTab(active) : false), {
+    enabled: open,
+  });
+  for (let i = 1; i <= 9; i++) {
+    useShortcut(`panel.tab${i}`, () => (i <= tabs.length ? activateTab(i - 1) : false), { enabled: open });
+  }
+
+  // The divider by keyboard: the arrows move it 24 px, shift 96 px.
+  const onGripKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 96 : 24;
+    let w = width;
+    if (e.key === "ArrowLeft") w += step;
+    else if (e.key === "ArrowRight") w -= step;
+    else if (e.key === "Home") w = window.innerWidth - PAGE_MIN;
+    else if (e.key === "End") w = SPLIT_MIN;
+    else return;
+    e.preventDefault();
+    setSplitWidth(Math.max(SPLIT_MIN, Math.min(w, window.innerWidth - PAGE_MIN)));
+  };
 
   // The divider: drag to resize; the page keeps PAGE_MIN, the panel keeps SPLIT_MIN.
   const onGrip = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -290,8 +289,12 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           aria-orientation="vertical"
           aria-label="Resize panel"
           aria-valuenow={Math.round(width)}
+          aria-valuemin={SPLIT_MIN}
+          aria-valuemax={Math.max(SPLIT_MIN, window.innerWidth - PAGE_MIN)}
+          aria-valuetext={`${Math.round(width)} px wide; arrows resize`}
           onPointerDown={onGrip}
-          tabIndex={-1}
+          onKeyDown={onGripKey}
+          tabIndex={0}
         />
       )}
       <div className="panel-bodies">
@@ -329,7 +332,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             to={sessionPath(splitKey(activeKey).harness, splitKey(activeKey).id)}
             className="theme-btn panel-btn"
             aria-label="Open as page"
-            title="Open as page"
+            data-tip="Open as page · o"
+            data-tip-side="bottom"
           >
             <svg
               viewBox="0 0 20 20"
@@ -353,7 +357,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           className="theme-btn panel-btn"
           onClick={closeSplit}
           aria-label="Close panel"
-          title="Close (Esc)"
+          data-tip="Close · x"
+          data-tip-side="bottom"
           data-dismiss
         >
           <svg
@@ -389,7 +394,18 @@ export function SessionPanel({ phone }: { phone: boolean }) {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   activateTab(i);
+                  return;
                 }
+                tablistKey(e, shown.length, i, {
+                  activate: (n) => {
+                    activateTab(n);
+                    focusTab(stripRef.current, n);
+                  },
+                  close: (n) => {
+                    closeTab(n);
+                    focusTab(stripRef.current, Math.min(n, shown.length - 2));
+                  },
+                });
               }}
             >
               <span className={`tab-dot tab-dot--${sm?.state ?? "idle"}`} aria-hidden="true" />
