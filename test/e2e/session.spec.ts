@@ -4,7 +4,8 @@
 // something), follow (in "⋯"), back, and Forget (in "⋯").
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { SETTINGS_KEY } from "../../playwright.config.js";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
 async function openWorking(page: Page): Promise<string> {
@@ -174,6 +175,43 @@ test.describe("session page", () => {
     // Show all puts the lens back to everything, and its line goes.
     await page.locator(".sess-lens").getByRole("button", { name: "Show all" }).click();
     await expect(page.locator(".sess-lens")).toHaveCount(0);
+  });
+
+  test("a launched session names and links its launcher, which links it back; neither is a subagent", async ({
+    page,
+    request,
+  }) => {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const post = async (events: Record<string, unknown>[]) => {
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const launcher = tier1Batch({ title: `E2E launcher ${randomUUID().slice(0, 8)}` });
+    const launched = tier1Batch({ title: `E2E launched ${randomUUID().slice(0, 8)}` });
+    const launchedBy = `${launcher.harness}:${launcher.sessionId}`;
+    await post(launcher.events);
+    await post(launched.events.map((e) => ({ ...e, session: { ...(e.session as object), launched_by: launchedBy } })));
+
+    await openPage(page, sessionUrl(launched.harness, launched.sessionId));
+    const link = page.locator(".sess-where .sess-copy a", { hasText: launcher.title });
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(page.locator("h1.sess-title")).toHaveText(launcher.title);
+    await expect(page.locator(".sess-where .sess-copy a", { hasText: launched.title })).toBeVisible();
+    await expect(page.getByText(/subagent/)).toHaveCount(0);
+    // Simple mode, the default for a new device, shows both links too.
+    await page.evaluate((k) => localStorage.setItem(k, JSON.stringify({ mode: "simple" })), SETTINGS_KEY);
+    await page.reload();
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await page.locator(".sess-where .sess-copy a", { hasText: launched.title }).click();
+    await expect(page.locator(".sess-where .sess-copy a", { hasText: launcher.title })).toBeVisible();
   });
 
   test("follow toggles from the menu and back returns to the board", async ({ page, request }) => {

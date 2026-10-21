@@ -859,6 +859,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         title: originalSummary ? sessionTitle(originalSummary) : "another session",
       }
     : undefined;
+  const launcherSummary = s?.launchedBy ? store.get().sessions.get(s.launchedBy) : undefined;
+  const launcher = s?.launchedBy
+    ? {
+        path: launcherSummary ? sessionPath(launcherSummary.harness, launcherSummary.id) : null,
+        title: launcherSummary ? sessionTitle(launcherSummary) : "a session not on this receiver",
+      }
+    : undefined;
+  const launched = s
+    ? launchedFromStore(store, key).map((l) => ({ path: sessionPath(l.harness, l.id), title: sessionTitle(l) }))
+    : [];
 
   // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
   // a message, Stop), how the view shows and what it is (Follow, the lens, its own
@@ -939,7 +949,14 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               meta={
                 s ? (
                   <>
-                    <SessionMeta s={s} total={total} copyOf={copyOf} chat={chat} />
+                    <SessionMeta
+                      s={s}
+                      total={total}
+                      copyOf={copyOf}
+                      launcher={launcher}
+                      launched={launched}
+                      chat={chat}
+                    />
                     {applied && <span className="sess-applied">{applied}</span>}
                   </>
                 ) : (
@@ -1078,12 +1095,18 @@ function SessionMeta({
   s,
   total,
   copyOf,
+  launcher,
+  launched,
   chat,
 }: {
   s: SessionSummary;
   total: number;
   /** This session is a copy (a fork) of that one. */
   copyOf?: { path: string; title: string };
+  /** The session that launched this one (`session.launched_by`); no path when this receiver never saw it. */
+  launcher?: { path: string | null; title: string };
+  /** Sessions this one launched. */
+  launched?: { path: string; title: string }[];
   chat: boolean;
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
@@ -1116,6 +1139,26 @@ function SessionMeta({
       ) : (
         place && <span className="sess-repo">{place}</span>
       )}
+      {launcher && (
+        <span className="sess-copy">
+          Launched by{" "}
+          {launcher.path ? (
+            <Link to={launcher.path} title={launcher.title}>
+              {launcher.title}
+            </Link>
+          ) : (
+            launcher.title
+          )}
+        </span>
+      )}
+      {launched?.map((l) => (
+        <span key={l.path} className="sess-copy">
+          Launched{" "}
+          <Link to={l.path} title={l.title}>
+            {l.title}
+          </Link>
+        </span>
+      ))}
     </span>
   );
 }
@@ -1156,6 +1199,12 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
   const out: SessionSummary[] = [];
   const { harness, id } = { harness: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1) };
   for (const s of store.get().sessions.values()) if (s.harness === harness && s.parentId === id) out.push(s);
+  return out;
+}
+
+function launchedFromStore(store: ReturnType<typeof useStore>, key: string): SessionSummary[] {
+  const out: SessionSummary[] = [];
+  for (const s of store.get().sessions.values()) if (s.launchedBy === key) out.push(s);
   return out;
 }
 
