@@ -13,20 +13,24 @@
 //   POST /pair          spawn `sessionpipe control pair http://localhost:<port>` → { started }
 //                       (409 not_installed with the install command when there is no CLI)
 //   POST /pair/cancel   kill it → { cancelled }
+//   POST /remote        { url } → set --public-url at runtime (the rp id follows, remembered)
+//                       → { ok, remote, rpId }; 400 bad_url with the reason
+//   POST /remote/off    forget it → { ok }
 import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Info, ROUTES } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import type { Handler, Reply, Router } from "../http/router.js";
+import type { Reply, Router } from "../http/router.js";
 import type { OutboxSource } from "../sources/outbox.js";
 import type { Store } from "../store/store.js";
 import { opensslAvailable, readCerts, TlsError, type TlsMaterial } from "../tls/certs.js";
 import type { ViewerRegistry } from "../ui/viewers.js";
 import { createHarnessDetector, type HarnessFs, realHarnessFs } from "./harnesses.js";
-import { type Exec, execDefault, findCli, isThisMachine } from "./local.js";
+import { type Exec, execDefault, findCli, thisMachineOnly } from "./local.js";
 import { Pairer, type SpawnFn } from "./pairer.js";
 import { type AskDaemon, askDaemonDefault, buildStatus, caTrustedOnMac, type Lookup } from "./status.js";
+import { createTailscaleProbe, type TailscaleProbe } from "./tailscale.js";
 
 export { findCli, isThisMachine, sameMachine } from "./local.js";
 
@@ -56,6 +60,11 @@ export interface SetupDeps {
   tlsDir?: string;
   /** The disk the harness probes read (`harnesses.ts`); a fake one in tests. */
   harnessFs?: HarnessFs;
+  /** `--public-url`, and the setup page's way of setting or forgetting it (App.setPublicUrl). */
+  publicUrl: () => string | undefined;
+  setPublicUrl: (url: string | undefined) => void;
+  /** The Tailscale probe (`tailscale.ts`); a fake one in tests. */
+  tailscale?: TailscaleProbe;
 }
 
 export const SETUP_ROUTES = {
@@ -64,6 +73,8 @@ export const SETUP_ROUTES = {
   tlsTrust: `${ROUTES.ui.setup}/tls/trust`,
   pair: `${ROUTES.ui.setup}/pair`,
   pairCancel: `${ROUTES.ui.setup}/pair/cancel`,
+  remote: `${ROUTES.ui.setup}/remote`,
+  remoteOff: `${ROUTES.ui.setup}/remote/off`,
 } as const;
 
 export const INSTALL_COMMAND = "npx sessionpipe install";
@@ -87,24 +98,9 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
   const pairer = new Pairer(deps.spawn);
   const harnesses = createHarnessDetector(deps.harnessFs ?? realHarnessFs(home, env, platform));
 
-  const local =
-    (h: Handler): Handler =>
-    (ctx) => {
-      let ip = ctx.remote.ip;
-      if (deps.testDoor) {
-        const over = ctx.req.headers["x-spgui-test-remote"];
-        if (typeof over === "string" && over) ip = over;
-      }
-      if (!isThisMachine(ip))
-        return {
-          status: 403,
-          json: {
-            reason: "local_only",
-            error: `Setup acts on the machine running sessionpipe-gui: open http://localhost:${deps.port()}/setup there.`,
-          },
-        };
-      return h(ctx);
-    };
+  const local = thisMachineOnly({ testDoor: deps.testDoor ?? false, port: deps.port });
+
+  const tailscale = deps.tailscale ?? createTailscaleProbe(exec, { env, platform, home, port: deps.port });
 
   router.get(
     SETUP_ROUTES.status,
@@ -133,6 +129,8 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
           askDaemon: deps.askDaemon ?? askDaemonDefault,
           opensslPresent: deps.opensslPresent ?? opensslAvailable,
           harnesses,
+          publicUrl: deps.publicUrl,
+          tailscale,
         }),
       }),
     ),
@@ -149,6 +147,30 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
       }
       const info = deps.info();
       return { status: 200, json: { ok: true, restartRequired: false, tls: info.tls, rpId: info.control.rpId } };
+    }),
+  );
+
+  router.post(
+    SETUP_ROUTES.remote,
+    local(async (ctx): Promise<Reply> => {
+      const body = await ctx.json<{ url?: unknown }>(4096);
+      if (typeof body.url !== "string" || !body.url.trim())
+        return { status: 400, json: { reason: "bad_url", message: "a url is required" } };
+      try {
+        deps.setPublicUrl(body.url);
+      } catch (e) {
+        return { status: 400, json: { reason: "bad_url", message: (e as Error).message } };
+      }
+      const info = deps.info();
+      return { status: 200, json: { ok: true, remote: info.remote, rpId: info.control.rpId } };
+    }),
+  );
+
+  router.post(
+    SETUP_ROUTES.remoteOff,
+    local((): Reply => {
+      deps.setPublicUrl(undefined);
+      return { status: 200, json: { ok: true } };
     }),
   );
 
