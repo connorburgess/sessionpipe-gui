@@ -29,8 +29,8 @@ that runs it.
 ## Install
 
 Node 20 or newer. Three ways, one package, and everything official inside it: the
-Canvas and Office views, the Spacesheep Vivid and Paper Serif skins (beside the six
-built-in skins) and the ping-a-human Telegram plugin:
+Canvas and Office views, the two skins (Spacesheep and Paper) and the ping-a-human
+Telegram plugin:
 
 ```sh
 npx github:spacesheep-dev/sessionpipe-gui      # straight from GitHub: builds once on install, then runs
@@ -43,8 +43,8 @@ repo; `npm run bundle:sync` refreshes them from a
 [sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes)
 checkout beside this one. The npm package (`npx sessionpipe-gui`) follows once published.
 
-Nothing to install afterwards: the skins are in the appearance popover, the views on the
-rail, and the plugin under Plugins on the Views page, off until you turn it on:
+Nothing to install afterwards: the skins are in the appearance popover, the views in the
+sidebar, and the plugin under Plugins on the Views page, off until you turn it on:
 
 ```sh
 sessionpipe-gui extras list                  # the catalogue, every entry marked bundled
@@ -93,7 +93,7 @@ trusted, the daemon polls, a phone connects, a message comes back `delivered`.
 4. **Your phone**: the QR code and the steps to trust the CA on iPhone or Android.
 5. **Try it**: one message to a live session; green when it comes back `delivered`.
 
-*Skip setup* keeps the board as the front page; the rail keeps a *Setup* entry until the
+*Skip setup* keeps the board as the front page; the sidebar keeps a *Setup* entry until the
 steps are green. The setup routes answer only from this machine.
 
 ### Three ways to get data in
@@ -111,12 +111,20 @@ steps are green. The setup routes answer only from this machine.
 ![The board: needs you, working, idle; done collapsed](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.png)
 
 Sessions grouped by state, in the order you would look: **needs you**, **working**,
-**stale**, **idle**, **done** (collapsed, with a count). A card is the title, where it is
-(machine, repo @ branch, model), what it is doing (the tool running now and for how long),
-and the last thing the assistant said. Subagents nest under their parent. Flags call out
+**stale**, **idle**, **done** (collapsed, with a count). A row is the title, one line under
+it (the command waiting for you, or the last thing the assistant said), where it runs
+(harness, machine, repo) and a few quiet counts: turns, tools, errors, how long ago. One
+mark says the state: a dot for needs you, a turning ring for working, a hollow ring for
+idle, a check for done. Subagents nest under their parent. Flags call out
 what is off: a slow tool, three errors in a row, the same tool on the same input three
 times, repeated compactions, a gap in the sequence. Filter by machine, harness or text;
 `⌘K` finds any session from anywhere.
+
+Every row, tab, message, machine and path has its own right-click menu with the actions
+that exist for it: open as a page or beside this one, allow or deny the prompt, show only
+its machine or harness, copy its link, id, folder or branch, forget it. `Shift+F10` or the
+context-menu key opens it from the keyboard; on a phone a long-press opens the same items
+as an action sheet.
 
 ### Session
 
@@ -154,8 +162,8 @@ around them in lanes: the browsers looking at this GUI, the accounts per harness
 machines, the repos, with hairlines for who runs where. Drag an account chip onto a
 machine to start a session there. The layout is kept by the receiver, so it is the same
 on every device. Canvas and Office ship with the GUI (their sources live in the
-[themes repo](https://github.com/spacesheep-dev/sessionpipe-gui-themes)); they sit on the
-rail under *experimental*, and `sessionpipe-gui view disable canvas` hides one.
+[themes repo](https://github.com/spacesheep-dev/sessionpipe-gui-themes)); they sit in the
+sidebar under *experimental*, and `sessionpipe-gui view disable canvas` hides one.
 
 ### Office
 
@@ -221,13 +229,14 @@ layer in front. Machines elsewhere on the tailnet push and pair through the same
 
 ![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)
 
-Appearance (system, dark, light), skin and text size are one tap from the rail and are
-kept per device. **Spacesheep** is the default skin, the colours of
-[spacesheep.dev](https://spacesheep.dev) in both schemes: it follows the appearance
-setting, which is why the pictures on this page come in a light and a dark version of the
-same palette. **Plain** is the stock tokens,
-tinted neutrals with amber as the only accent; Paper, Graphite, Ink and Sepia are single
-schemes. Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
+Appearance (System, Light, Dark), skin and text size are one click from the sidebar
+(Display) and are kept per device. Two skins ship. **Spacesheep**, the default, is cool
+neutrals with the [spacesheep.dev](https://spacesheep.dev) flame as the one accent, for
+*needs you*, in both schemes: it follows the appearance setting, which is why the pictures
+on this page come in a light and a dark version. **Paper** is warm paper and ink, light
+only. A skin installed from outside (`sessionpipe-gui skin add`) lists after them.
+
+Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
 the tier lens, notifications and sounds, the keymap, the installed views, skins and
 plugins, what is on disk, and the receiver's own numbers.
 
@@ -286,8 +295,8 @@ ES module that draws the board its own way on a page of the GUI, with a `ThemeAp
 the live state, control, storage and the keymap. A **skin** is tokens, fonts, radius,
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
 receiver process that reacts to events: notifications, suggested answers. The official
-ones ship inside the GUI: Canvas, Office, Spacesheep Vivid, Paper Serif and ping-a-human
-(`sessionpipe-gui extras list`). A bundled extension cannot be removed, only turned off
+ones ship inside the GUI: Canvas, Office and ping-a-human (`sessionpipe-gui extras
+list`); the two skins are built in, and a skin installed from outside lists beside them. A bundled extension cannot be removed, only turned off
 (`view|skin|plugin disable <id>`, or the button on the Views page); an install of the same
 id overrides it. ping-a-human starts off and runs only after `plugin enable ping-a-human`
 (or Enable on the Views page), since a plugin may reach out of the machine; its Telegram

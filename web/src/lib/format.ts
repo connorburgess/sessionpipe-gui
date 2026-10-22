@@ -11,9 +11,10 @@ export const STATE_LABEL: Record<SessionState, string> = {
   done: "done",
 };
 
-/** Group headings on the board: "Needs you · 1", "Working · 3". */
+/** Group headings on the board: "Needs you · 1", "Working · 3". The state's name, the
+ *  same word the session bar and the machines use, whatever the count. */
 export const STATE_HEADING: Record<SessionState, (n: number) => string> = {
-  needs_you: (n) => (n === 1 ? "Needs you" : "Need you"),
+  needs_you: () => "Needs you",
   working: () => "Working",
   stale: () => "Stale",
   idle: () => "Idle",
@@ -177,6 +178,16 @@ function span(from: string, to: string): string {
   const hm = (d: Date) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   if (!b || Number.isNaN(b.getTime())) return `${day(a)} ${hm(a)}`;
   return a.toDateString() === b.toDateString() ? `${day(a)} ${hm(a)} → ${hm(b)}` : `${day(a)} → ${day(b)}`;
+}
+
+/** An attention's message without the tool name it sometimes starts with ("Bash rm -rf
+ *  …"), for places that already show the tool beside it. */
+export function attentionMessage(a: { message?: string; tool?: string }): string | undefined {
+  const m = a.message;
+  if (!m || !a.tool) return m;
+  const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
+  return rest || m;
 }
 
 export function oneLine(s: string, max: number): string {
