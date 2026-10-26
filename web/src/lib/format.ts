@@ -29,8 +29,63 @@ export const STATE_HINT: Record<SessionState, string> = {
   done: "Ended, or silent for six hours, or only known from backfill.",
 };
 
-export function sessionTitle(s: Pick<SessionSummary, "title" | "cwd" | "id">): string {
-  if (s.title?.trim()) return s.title.trim();
+/** A title cut upstream ("Why does the staging deploy take 14 minutes?...") keeps its
+ *  honest mark of a cut, as the one ellipsis glyph after the last whole word; CSS cuts
+ *  the rest at the real column width. */
+export function cleanTitle(t: string): string {
+  const s = t.trim();
+  const cut = s.replace(/\s*(?:\.{3}|…)$/, "");
+  if (cut === s) return s;
+  // A cut right after a whole sentence ("…take 14 minutes?...") lost nothing it says.
+  if (/[?!.]$/.test(cut)) return cut;
+  return `${cut.replace(/[\s,;:–—-]+$/, "")}…`;
+}
+
+/** A title the summariser cut ("Before I merge the BM25 cache, review it from...") is the
+ *  start of the session's first ask. While that ask is still the prompt the summary
+ *  carries, its whole first line is the title, so CSS cuts it at the real column width
+ *  and not 45 characters in. Undefined when the ask is not here or is something else. */
+export function uncutTitle(s: Pick<SessionSummary, "title" | "lastUser" | "progress">): string | undefined {
+  const t = s.title?.trim() ?? "";
+  const stem = t.replace(/\s*(?:\.{3}|…)$/, "");
+  if (stem === t || stem.length < 8) return undefined;
+  const ask = (s.progress?.user || s.lastUser || "").trim().split("\n")[0]!.trim();
+  if (ask.length <= stem.length || !ask.startsWith(stem)) return undefined;
+  return ask.length > 240 ? `${ask.slice(0, 239).replace(/\s+\S*$/, "")}…` : ask;
+}
+
+/** The first message of each session started from this app, by session key, kept by
+ *  control/Starting.tsx useStartTitles: until the agent reports a title, a session
+ *  started here is called by what it was asked, not by its folder ("billing" ×4). */
+let startTitles: ReadonlyMap<string, string> = new Map();
+export function rememberStartTitles(m: ReadonlyMap<string, string>): void {
+  startTitles = m;
+}
+
+/** Each session's uncut title once seen, by key and cut title: the next turn's prompt
+ *  takes the first ask's place in the summary, and the title must not shrink back to the
+ *  cut one then (a row that changes its name mid-session, the board and the panel
+ *  disagreeing). The oldest go first past UNCUT_KEEP. */
+const uncutSeen = new Map<string, string>();
+const UNCUT_KEEP = 2000;
+
+function keptUncut(s: Pick<SessionSummary, "title" | "lastUser" | "progress"> & { key?: string }) {
+  const full = uncutTitle(s);
+  if (!s.key) return full;
+  const k = `${s.key}\n${s.title?.trim() ?? ""}`;
+  const seen = uncutSeen.get(k);
+  if (seen || !full) return seen;
+  if (uncutSeen.size >= UNCUT_KEEP) uncutSeen.delete(uncutSeen.keys().next().value!);
+  uncutSeen.set(k, full);
+  return full;
+}
+
+export function sessionTitle(
+  s: Pick<SessionSummary, "title" | "cwd" | "id" | "lastUser" | "progress"> & { key?: string },
+): string {
+  if (s.title?.trim()) return keptUncut(s) ?? cleanTitle(s.title);
+  const started = s.key ? startTitles.get(s.key) : undefined;
+  if (started) return started;
   if (s.cwd) return basename(s.cwd);
   return s.id.slice(0, 8);
 }
@@ -135,23 +190,28 @@ export function eventSummary(e: ProtocolEvent): string {
     }
     case "turn.transcript":
     case "turn.progress": {
-      const text = oneLine(str(d.assistant), 120);
-      return text ? `turn ${str(d.turn)} · ${text}` : `turn ${str(d.turn)}`;
+      // The reply in words; the turn's number is the event's, not the person's.
+      return oneLine(str(d.assistant), 120) || "Reply";
     }
     case "tool.started":
-      return `${str(d.tool)}${d.agent_id ? " · subagent" : ""}`;
+      return toolLabel(str(d.tool));
     case "tool.ended": {
-      const bits = [str(d.tool), d.ok === false ? "error" : "ok"];
+      // "Edit · 0.4 s"; a failure says what failed, never a bare "ok" or "error".
+      const bits = [toolLabel(str(d.tool))];
       if (num(d.ms) !== undefined) bits.push(durShort(num(d.ms)));
-      if (d.error) bits.push(oneLine(str(d.error), 80));
-      return bits.join(" ");
+      if (d.ok === false) bits.push(d.error ? oneLine(str(d.error), 80) : "failed");
+      return bits.join(" · ");
     }
     case "files.changed": {
       const paths = Array.isArray(d.paths) ? (d.paths as unknown[]).map(str) : [];
       return paths.length <= 2 ? paths.join(", ") : `${paths.slice(0, 2).join(", ")} +${paths.length - 2}`;
     }
     case "attention.needed":
-      return [ATTENTION_LABEL[str(d.kind)] ?? str(d.kind), str(d.tool), oneLine(str(d.message), 100)]
+      return [
+        ATTENTION_LABEL[str(d.kind)] ?? str(d.kind),
+        d.tool ? toolLabel(str(d.tool)) : "",
+        oneLine(str(d.message), 100),
+      ]
         .filter(Boolean)
         .join(" · ");
     case "attention.cleared":
@@ -188,6 +248,46 @@ export function attentionMessage(a: { message?: string; tool?: string }): string
   const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
   return rest || m;
+}
+
+/** Gemini CLI's and Codex's built-in tools, named the way Claude Code names its own, so
+ *  one board reads one vocabulary ("Shell", not "run_shell_command"). The raw name stays
+ *  in the tooltip and in "Copy tool name". An unknown name is left as it came. */
+const SNAKE_TOOLS: Record<string, string> = {
+  run_shell_command: "Shell",
+  shell: "Shell",
+  local_shell: "Shell",
+  exec_command: "Shell",
+  run_terminal_cmd: "Shell",
+  read_file: "Read",
+  read_many_files: "Read files",
+  write_file: "Write",
+  replace: "Edit",
+  edit_file: "Edit",
+  apply_patch: "Edit",
+  list_directory: "List",
+  list_dir: "List",
+  glob: "Glob",
+  search_file_content: "Search",
+  grep_search: "Search",
+  web_fetch: "Fetch",
+  google_web_search: "Web search",
+  web_search: "Web search",
+  save_memory: "Memory",
+  update_plan: "Plan",
+};
+
+/** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
+ *  and reads "github · search_issues"; a claude.ai connector's server drops its
+ *  `claude_ai_` prefix ("Linear · list_issues") and a plugin's its `plugin_<name>_`.
+ *  Anything else is its own name. The raw name stays in "Copy tool name". */
+export function toolLabel(name: string): string {
+  const word = SNAKE_TOOLS[name];
+  if (word) return word;
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!m) return name;
+  const server = m[1]!.replace(/^claude_ai_/, "").replace(/^plugin_[^_]+_/, "");
+  return `${server || m[1]} · ${m[2]}`;
 }
 
 export function oneLine(s: string, max: number): string {

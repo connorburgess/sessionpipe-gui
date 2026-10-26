@@ -5,33 +5,62 @@
 // (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and a
 // More tab whose sheet lists the rest (pages, installed views, Display and Settings).
 // Every sidebar entry has a right-click menu, and so does the sidebar itself (appearance,
-// skin, mode); MenuHost here is the one context-menu policy for the whole app.
+// skin, mode); MenuHost here is the one context-menu policy for the whole app. On a phone
+// it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
+// top when its tab is tapped again, and shows a dropped stream as a pill under the bar
+// that a pull down the page retries.
 import type { InstalledTheme } from "@shared/theme-api";
-import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { useAnswerableCount, useAppState } from "../data/hooks";
-import { useFocusTrap } from "../lib/focus";
+import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
+import { newSessionOpen, openNewSession } from "../control/newSessionState";
+import { useAnswerableCount, useAppState, useStore } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
+import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
+import { reducedMotion, usePresence } from "../lib/motion";
 import { Link, navigate, type Route, usePath } from "../lib/router";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
 import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
-import { getDisplaySettings as getDisplay, setSkin, setTheme } from "../lib/theme";
+import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { useNow } from "../lib/time";
 import { useSetupStatus } from "../setup/api";
 import { setupComplete } from "../setup/steps";
 import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
-import { LabelsDialog } from "./LabelsDialog";
+import type { MoreSheetProps } from "./MoreSheet";
 import { openPalette } from "./Palette";
-import { GearIcon, QuickSettings } from "./QuickSettings";
+import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { TipHost } from "./Tip";
+
+/** Whether Setup had steps to go at the last visit: the rail draws its entry from this
+ *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
+ *  device on its first visit has not set up yet, so it starts with the entry drawn. */
+const SETUP_KEY = "sessionpipe-gui.rail.setup";
+const readSetupHint = (): boolean => {
+  try {
+    return localStorage.getItem(SETUP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
+const writeSetupHint = (on: boolean): void => {
+  try {
+    localStorage.setItem(SETUP_KEY, on ? "1" : "0");
+  } catch {
+    // a private window: the entry just arrives a moment late
+  }
+};
+
+/** The phone layout: a tab bar, sheets, large titles (tokens.css switches at the same width). */
+export const PHONE_QUERY = "(max-width: 839px)";
 
 /** Whether a media query matches, live. */
-function useMedia(query: string): boolean {
+export function useMedia(query: string): boolean {
   const [on, setOn] = useState(() => window.matchMedia?.(query).matches ?? false);
   useEffect(() => {
     const mq = window.matchMedia?.(query);
@@ -308,18 +337,22 @@ function NavEntry({
   action,
   needs,
   tip,
+  here,
 }: {
   n: NavItem;
   active: boolean;
   action: string | undefined;
   needs: number;
   tip: boolean;
+  /** The page is open at exactly this entry's address: a tap again goes to its top. */
+  here: boolean;
 }) {
   const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
   const keys = action ? hintFor(action) : "";
   return (
     <Link
       to={n.to}
+      plainClick={here ? toTop : undefined}
       className={`nav-link ${active ? "nav-link--on" : ""}`}
       aria-current={active ? "page" : undefined}
       data-nav={n.key}
@@ -333,10 +366,14 @@ function NavEntry({
           {needs}
         </span>
       ) : null}
+      {/* A quiet dot, not amber: steps to go is not a thing that needs you. */}
       {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
     </Link>
   );
 }
+
+/** A tab tapped again: its page goes back to the top, as a native tab bar's does. */
+const toTop = () => window.scrollTo({ top: 0, behavior: reducedMotion() ? "auto" : "smooth" });
 
 function MoreRow({ n, active, action }: { n: NavItem; active: string; action: string | undefined }) {
   const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
@@ -363,13 +400,13 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
   const inside = items.some((n) => n.key === active);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(sheetRef, open, { onClose: () => setOpen(false) });
+  const { mounted, closing } = usePresence(open);
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
   const plugins = items.filter((n) => n.key.startsWith("t:"));
   const pages = items.filter((n) => !n.key.startsWith("t:"));
-  const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={active} action={navAction(n, views)} />;
+  // The exit copy marks no page current: the tab itself carries that once it closes.
+  const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
     <div className="more">
       <button
@@ -388,51 +425,31 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
         </svg>
         <span className="nav-label">More</span>
       </button>
-      {open && (
-        <>
-          <button type="button" className="more-scrim" aria-label="Close" onClick={() => setOpen(false)} data-dismiss />
-          <div className="more-sheet" role="dialog" aria-modal="true" aria-label="More" ref={sheetRef}>
-            <span className="more-grab" aria-hidden="true" />
-            {pages.length > 0 && <ul className="more-list">{pages.map(row)}</ul>}
-            {plugins.length > 0 && (
-              <div className="more-sect">
-                <div className="more-group">Views</div>
-                <ul className="more-list">{plugins.map(row)}</ul>
-              </div>
-            )}
-            <ul className="more-list">
-              <li>
-                <button
-                  type="button"
-                  className="more-row"
-                  onClick={() => {
-                    setOpen(false);
-                    setDisplay(true);
-                  }}
-                  aria-haspopup="dialog"
-                  data-nav="display"
-                >
-                  <span className="nav-glyph" aria-hidden="true">
-                    <GearIcon size={20} />
-                  </span>
-                  <span className="more-row-name">Display</span>
-                </button>
-              </li>
-              <li>
-                <Link to="/settings" className="more-row" data-nav="settings">
-                  <span className="nav-glyph" aria-hidden="true">
-                    <SlidersIcon size={20} />
-                  </span>
-                  <span className="more-row-name">Settings</span>
-                </Link>
-              </li>
-            </ul>
-          </div>
-        </>
+      {mounted && (
+        <MoreSheetHost
+          open={open}
+          closing={closing}
+          onClose={() => setOpen(false)}
+          onDisplay={() => {
+            setOpen(false);
+            setDisplay(true);
+          }}
+          lists={[pages.map(row), plugins.map(row)]}
+        />
       )}
       <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />
     </div>
   );
+}
+
+/** The More sheet is a phone's alone: its code is fetched when a phone is idle after load
+ *  (so the first tap opens it at once), never on a desktop. */
+const moreSheet = lazyModule(() => import("./MoreSheet"));
+if (typeof window !== "undefined" && window.matchMedia?.(PHONE_QUERY).matches)
+  whenIdle(() => void moreSheet.preload().catch(() => {}));
+function MoreSheetHost(p: MoreSheetProps) {
+  const m = moreSheet.use();
+  return m ? <m.MoreSheet {...p} /> : null;
 }
 
 /** The sidebar's two forms: the labelled one from 1200 px (1360 with the panel open). */
@@ -451,11 +468,16 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // The Setup entry, with its amber dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();
-  const showSetup = setup.local === true && !!setup.status && !setupComplete(setup.status);
+  const known = setup.local === false || !!setup.status || !!setup.error;
+  const showSetup = known ? setup.local === true && !!setup.status && !setupComplete(setup.status) : readSetupHint();
+  useEffect(() => {
+    if (known) writeSetupHint(showSetup);
+  }, [known, showSetup]);
   const simple = useSimple();
   const nav = navItems(useThemes().themes, { setup: showSetup, simple });
-  const phone = useMedia("(max-width: 839px)");
+  const phone = useMedia(PHONE_QUERY);
   useResize();
+  useThemeColor();
   // Boot: the last visit's tabs when the URL carries none.
   useEffect(() => {
     restoreSplit();
@@ -481,6 +503,13 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     );
     return () => clearTimeout(t);
   }, [path]);
+  // New session: `c` anywhere outside a text field, `?new=1`, ⌘N in the installed app.
+  useShortcut("newSession.open", () => {
+    if (newSessionOpen()) return false;
+    openNewSession();
+  });
+  useNewFromUrl(usePath());
+  useStandaloneNewKey();
   // `g 1` … `g 9`: the n-th installed view, in rail order.
   const views = nav.filter((n) => n.key.startsWith("t:"));
   for (let i = 1; i <= 9; i++) {
@@ -492,7 +521,15 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }
   const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
-    <NavEntry key={n.key} n={n} active={active === n.key} action={navAction(n, views)} needs={needs} tip={tip} />
+    <NavEntry
+      key={n.key}
+      n={n}
+      active={active === n.key}
+      action={navAction(n, views)}
+      needs={needs}
+      tip={tip}
+      here={path === n.to}
+    />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   return (
@@ -515,13 +552,16 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {announce}
       </div>
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
-        <Link to="/" className="rail-brand" title="sessionpipe gui">
-          <Mark size={20} />
-          <span className="rail-word" aria-hidden="true">
-            sessionpipe
-          </span>
-          <span className="sr-only">sessionpipe gui</span>
-        </Link>
+        <div className="rail-head">
+          <Link to="/" className="rail-brand" title="sessionpipe gui">
+            <Mark size={20} />
+            <span className="rail-word" aria-hidden="true">
+              sessionpipe
+            </span>
+            <span className="sr-only">sessionpipe gui</span>
+          </Link>
+          <ComposeButton className="rail-compose" />
+        </div>
         <div className="rail-nav">
           {nav.map((n, i) => (
             <Fragment key={n.key}>
@@ -554,6 +594,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             to="/themes"
             className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
             data-tip="Views"
+            data-tip-keys={hintFor("nav.views")}
             data-tip-side="top"
             aria-label="Views"
             aria-current={route.name === "themes" ? "page" : undefined}
@@ -593,31 +634,191 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {nav.slice(0, TABS).map((n) => entry(n, false))}
         <MoreTab items={nav.slice(TABS)} active={active} views={views} />
       </nav>
+      {phone && <PhoneConn />}
       <SessionPanel phone={phone} />
       <ShortcutHelp />
-      <LabelsDialog />
+      <LabelsHost />
+      <NewSessionHost />
       <MenuHost />
+      <TipHost />
     </div>
   );
 }
 
-export function ConnectionPill() {
+/** How long a drop must last before it is shown: a blip never flickers the footer. */
+const RECONNECT_GRACE_MS = 400;
+
+/** The stream's state as the footer says it: what to draw ("live" inside the grace) and
+ *  its words. "Reconnecting · 4 s" once a drop has lasted 400 ms, "Offline" when the
+ *  device is. */
+function useConnection(): { as: string; label: string; down: boolean } {
   const { connection, retryAt } = useAppState();
+  const down = connection === "reconnecting" || connection === "offline";
+  const [shown, setShown] = useState(!down);
+  useEffect(() => {
+    if (!down) {
+      setShown(true);
+      return;
+    }
+    setShown(false);
+    const t = window.setTimeout(() => setShown(true), RECONNECT_GRACE_MS);
+    return () => window.clearTimeout(t);
+  }, [down]);
   // The countdown ticks only while there is one.
-  const now = useNow(retryAt ? "fine" : "off");
+  const now = useNow(retryAt && shown ? "fine" : "off");
   const wait = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
+  // Inside the grace, the footer still reads as it did.
+  const as = down && !shown ? "live" : connection;
   const label =
-    connection === "live"
+    as === "live"
       ? "live"
-      : connection === "connecting"
-        ? "connecting"
-        : connection === "offline"
-          ? "offline"
-          : `retry in ${wait} s`;
+      : as === "connecting"
+        ? "Connecting…"
+        : as === "offline"
+          ? "Offline"
+          : wait > 0
+            ? `Reconnecting · ${wait} s`
+            : "Reconnecting…";
+  return { as, label, down: as === "reconnecting" || as === "offline" };
+}
+
+/** The stream, honestly: nothing to read while live (a quiet dot; the word stays for
+ *  assistive tech), its words and Retry now once it drops. The board keeps its rows
+ *  through a drop. */
+export function ConnectionPill() {
+  const { as, label, down } = useConnection();
+  const store = useStore();
   return (
-    <span className={`conn conn--${connection}`} role="status" aria-live="polite" title={`Stream: ${label}`}>
+    <span
+      className={`conn conn--${as}`}
+      role="status"
+      aria-live="polite"
+      data-tip={as === "live" ? "Live: updates arrive as they happen" : label}
+      data-tip-side="top"
+    >
       <span className="conn-dot" aria-hidden="true" />
       <span className="conn-label">{label}</span>
+      {down ? (
+        <button type="button" className="conn-retry" onClick={() => store.reconnect()}>
+          Retry now
+        </button>
+      ) : null}
     </span>
+  );
+}
+
+/** How far the page is pulled down at its top before letting go retries. */
+const PULL_RETRY_PX = 56;
+
+/** The phone has no sidebar footer: a dropped stream is a pill under the bar, the whole
+ *  pill the Retry button. A pull down the page from its top follows the finger with the
+ *  pill and, past PULL_RETRY_PX, retries on release, as a native list refreshes; while
+ *  the stream is live there is nothing to refresh and no pill. */
+function PhoneConn() {
+  const { as, label, down } = useConnection();
+  const store = useStore();
+  const ref = useRef<HTMLButtonElement>(null);
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!down || !el) return;
+    let y0: number | null = null;
+    let on = false;
+    const place = (d: number, settle: boolean) => {
+      el.style.transition = settle ? `transform ${reducedMotion() ? 0 : 200}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none";
+      el.style.transform = d ? `translateY(${d}px)` : "";
+    };
+    const start = (e: TouchEvent) => {
+      y0 = window.scrollY <= 0 && e.touches.length === 1 ? (e.touches[0]?.clientY ?? null) : null;
+    };
+    const move = (e: TouchEvent) => {
+      if (y0 === null) return;
+      const raw = (e.touches[0]?.clientY ?? y0) - y0;
+      if (raw <= 0 || window.scrollY > 0) return place(0, false);
+      // Rubber-banded: the pill gives less the further it goes.
+      const d = Math.min(96, raw * 0.5);
+      place(d, false);
+      if (on !== d >= PULL_RETRY_PX) {
+        on = d >= PULL_RETRY_PX;
+        setArmed(on);
+      }
+    };
+    const end = () => {
+      if (y0 === null) return;
+      y0 = null;
+      place(0, true);
+      if (on) store.reconnect();
+      on = false;
+      setArmed(false);
+    };
+    window.addEventListener("touchstart", start, { passive: true });
+    window.addEventListener("touchmove", move, { passive: true });
+    window.addEventListener("touchend", end, { passive: true });
+    window.addEventListener("touchcancel", end, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", start);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
+    };
+  }, [down, store]);
+  if (!down) return null;
+  return (
+    <button
+      type="button"
+      ref={ref}
+      className={`phone-conn phone-conn--${as}`}
+      onClick={() => store.reconnect()}
+      aria-label={`${label}. Retry now`}
+    >
+      <span className="conn-dot" aria-hidden="true" />
+      <span className="phone-conn-label">{armed ? "Release to retry" : label}</span>
+      {!armed && <span className="phone-conn-act">Retry</span>}
+    </button>
+  );
+}
+
+/** The status bar (and a desktop app's title bar) on the page's own ground: theme-color
+ *  follows the applied skin and scheme, not only the OS's, so a forced Dark or Paper
+ *  shows no light band at the top. Read as sRGB through a 1 px canvas, since a token may
+ *  be oklch, which not every browser takes there. */
+function useThemeColor(): void {
+  const display = useSettings();
+  useEffect(() => {
+    void display;
+    let raf = 0;
+    const sync = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const g = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+        if (!g) return;
+        g.fillStyle = getComputedStyle(document.body).backgroundColor;
+        g.fillRect(0, 0, 1, 1);
+        const [r = 0, gr = 0, b = 0] = g.getImageData(0, 0, 1, 1).data;
+        const hex = `#${[r, gr, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+        for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
+          m.removeAttribute("media");
+          if (m.getAttribute("content") !== hex) m.setAttribute("content", hex);
+        }
+      });
+    };
+    sync();
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    mq?.addEventListener("change", sync);
+    return () => {
+      cancelAnimationFrame(raf);
+      mq?.removeEventListener("change", sync);
+    };
+  }, [display]);
+}
+
+/** "Edit labels…" is a dialog: its code loads just after the first paint, not with it
+ *  (it renders nothing until asked, so there is nothing to stand in for). */
+const LabelsDialog = lazy(() => import("./LabelsDialog").then((m) => ({ default: m.LabelsDialog })));
+function LabelsHost() {
+  return (
+    <Suspense fallback={null}>
+      <LabelsDialog />
+    </Suspense>
   );
 }

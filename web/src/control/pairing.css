@@ -1,11 +1,15 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The pairing page, pending pairings and devices asking to be trusted (on /machines and
-   /phone), and the start-a-session form: the grouped form's rows (styles/settings.css),
+   /phone): the grouped form's rows (styles/settings.css),
    text fields with the focus halo, one primary button per form. The six digits are the
    one large thing anywhere; amber nowhere. */
 
 /* ---------- pairing page and add a device ---------- */
 
+/* The reading column, centred as every page's is. */
+.page.pair > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
 .pair-lead {
   max-width: 64ch;
 }
@@ -28,6 +32,7 @@
   color: var(--fg);
 }
 .pair-digits {
+  font-family: var(--font-display);
   font-size: calc(var(--text-xl) * 1.55);
   font-weight: 600;
   line-height: 1.2;
@@ -91,29 +96,36 @@
   gap: 16px;
   max-width: 480px;
 }
-.pair-field,
-.start-field {
+.pair-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
-.pair-field > label,
-.start-field > label {
+.pair-field > label {
   color: var(--fg-2);
   font-size: var(--text-sm);
   font-weight: 500;
 }
-.pair-field .field,
-.start-field .field {
+.pair-field .field {
   width: 100%;
 }
-.pair-actions,
-.start-actions {
+.pair-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+/* While the passkey works: one quiet line under the buttons, which keep their place. */
+.pair-status {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+@media (max-width: 839px) {
+  .pair-actions > .btn {
+    min-height: 44px;
+  }
 }
 /* The page's body, reused inline by the setup page. */
 .pair-body {
@@ -245,50 +257,6 @@
     flex: 1 1 0;
     min-height: 44px;
   }
-}
-
-/* ---------- start a session ---------- */
-
-.start-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 560px;
-}
-.start-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.start-row > .start-field {
-  flex: 1 1 160px;
-}
-.start-form .sel {
-  width: 100%;
-  min-width: 0;
-}
-.start-form textarea.field {
-  min-height: 64px;
-  resize: vertical;
-}
-.start-acts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-width: 560px;
-}
-.start-link {
-  font-size: var(--text-md);
-  padding-top: 8px;
-}
-.start-open {
-  color: var(--fg);
-  font-weight: 500;
-  text-decoration: underline;
-  text-decoration-color: var(--line-2);
-  text-underline-offset: 3px;
-  cursor: pointer;
 }
 
 /* A plugin's suggested answer beside the pair: who said so, and one Confirm that signs

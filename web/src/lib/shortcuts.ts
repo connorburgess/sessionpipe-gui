@@ -24,6 +24,7 @@ export type Scope =
   | "inbox"
   | "machines"
   | "palette"
+  | "compose"
   | "views";
 
 export interface Action {
@@ -319,6 +320,14 @@ export const ACTIONS: readonly Action[] = [
     keys: ["mod+k"],
     inInputs: true,
   },
+  {
+    id: "newSession.open",
+    label: "New session",
+    group: "Everywhere",
+    scope: "global",
+    keys: ["c"],
+    hint: "the compose sheet, for the board's machine; ⌘N too in the installed app, once it reaches the page",
+  },
   { id: "search.focus", label: "Search this page", group: "Everywhere", scope: "global", keys: ["/"] },
   { id: "help.toggle", label: "Keyboard shortcuts help", group: "Everywhere", scope: "global", keys: ["?"] },
   {
@@ -328,11 +337,19 @@ export const ACTIONS: readonly Action[] = [
     scope: "global",
     keys: ["esc"],
     inInputs: true,
-    hint: "leaves a text field first; then closes a popover, the panel or a confirm; then goes back",
+    hint: "leaves a text field first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
   },
   { id: "appearance.toggle", label: "Dark / light", group: "Everywhere", scope: "global", keys: ["t"] },
   { id: "colorTheme.next", label: "Next skin", group: "Everywhere", scope: "global", keys: ["shift+t"] },
   { id: "lens.cycle", label: "Cycle the tier lens", group: "Everywhere", scope: "global", keys: ["l"] },
+  {
+    id: "undo",
+    label: "Undo",
+    group: "Everywhere",
+    scope: "global",
+    keys: ["mod+z"],
+    hint: "the last Hide or label removal, while its toast is up; a text field keeps its own",
+  },
   {
     id: "toasts.focus",
     label: "Jump to the notifications",
@@ -354,6 +371,23 @@ export const ACTIONS: readonly Action[] = [
     scope: "lists",
     keys: ["mod+enter"],
   },
+  {
+    id: "list.menu",
+    label: "The item's menu",
+    group: "Lists",
+    scope: "lists",
+    keys: ["."],
+    hint: "the right-click menu, at the row",
+  },
+  { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
+  ...Array.from({ length: 9 }, (_, i) => ({
+    id: `list.jump${i + 1}`,
+    label: `Open item ${i + 1}`,
+    group: "Lists",
+    scope: "lists" as Scope,
+    keys: [`mod+${i + 1}`],
+    hint: "in the installed app; hold ⌘ to see the numbers",
+  })),
 
   // Mail's flag keys: ⌥⌘1 … ⌥⌘7 set a colour label on the item under the cursor (the
   // selection on the canvas), ⌥⌘0 clears it. The order is LABEL_COLORS.
@@ -371,6 +405,7 @@ export const ACTIONS: readonly Action[] = [
 
   { id: "inbox.allow", label: "Allow the prompt under the cursor", group: "Inbox", scope: "inbox", keys: ["a"] },
   { id: "inbox.deny", label: "Deny the prompt under the cursor", group: "Inbox", scope: "inbox", keys: ["d"] },
+  { id: "inbox.peek", label: "Peek beside the page", group: "Inbox", scope: "inbox", keys: ["space"] },
 
   { id: "session.allow", label: "Allow the open permission", group: "Session", scope: "session", keys: ["a"] },
   { id: "session.deny", label: "Deny the open permission", group: "Session", scope: "session", keys: ["d"] },
@@ -380,12 +415,13 @@ export const ACTIONS: readonly Action[] = [
     label: "Cancel the running turn",
     group: "Session",
     scope: "session",
-    keys: ["c"],
+    keys: ["shift+c"],
     hint: "asks first",
   },
   { id: "session.follow", label: "Follow the live turn", group: "Session", scope: "session", keys: ["f"] },
   { id: "session.openPage", label: "Open as a page", group: "Session", scope: "session", keys: ["o"] },
   { id: "session.older", label: "Older turns", group: "Session", scope: "session", keys: ["."] },
+  { id: "session.latest", label: "Jump to the newest", group: "Session", scope: "session", keys: ["end", "shift+g"] },
 
   { id: "panel.prev", label: "Previous tab", group: "Side panel", scope: "panel", keys: ["[", "ctrl+shift+tab"] },
   { id: "panel.next", label: "Next tab", group: "Side panel", scope: "panel", keys: ["]", "ctrl+tab"] },
@@ -439,6 +475,26 @@ export const ACTIONS: readonly Action[] = [
     inInputs: true,
   },
   { id: "palette.close", label: "Close", group: "Command palette", scope: "palette", keys: ["esc"], inInputs: true },
+
+  // The New session sheet reads these itself (control/NewSession.tsx, `matches`). ⌘⇧M and
+  // ⌘⇧A, for Machine and Agent, are the browser's (Chrome's profile menu and tab search),
+  // so Tab reaches those rows instead.
+  {
+    id: "newSession.start",
+    label: "Start the session",
+    group: "New session",
+    scope: "compose",
+    keys: ["mod+enter"],
+    inInputs: true,
+  },
+  {
+    id: "newSession.folder",
+    label: "Choose the folder",
+    group: "New session",
+    scope: "compose",
+    keys: ["mod+shift+f"],
+    inInputs: true,
+  },
 ];
 
 const byId = new Map(ACTIONS.map((a) => [a.id, a]));

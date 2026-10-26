@@ -32,13 +32,20 @@ export function AgentGlyph({ a, size = 8 }: { a: Pick<AgentRun, "state">; size?:
 }
 
 /** "Grep · 4 s", "Thinking", "Quiet for 2 m", or how long it ran: ticking only while it
- *  runs (every ten seconds once it went quiet). Errors, when it had some, as a count. */
+ *  runs (every ten seconds once it went quiet). Errors, when it had some, are the one small
+ *  red ✕ before it (the board's error mark), the count in its name and tooltip. */
 export function AgentNow({ a, className = "agent-now" }: { a: AgentRun; className?: string }) {
   const now = useNow(a.state === "running" ? "fine" : a.state === "stale" ? "coarse" : "off");
-  const errors = a.attributed && a.toolErrors > 0 ? `${a.toolErrors} error${a.toolErrors === 1 ? "" : "s"}` : "";
+  const errors = a.attributed && a.toolErrors > 0 ? `${a.toolErrors} tool error${a.toolErrors === 1 ? "" : "s"}` : "";
   return (
     <span className={`${className} num`}>
-      {errors && <span className="agent-errs">{errors} · </span>}
+      {errors && (
+        <span className="agent-errs" role="img" aria-label={errors} title={errors}>
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+            <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
+      )}
       {agentNow(a, now)}
     </span>
   );
@@ -68,7 +75,20 @@ export function useAgentsOpen(s: SessionSummary): boolean {
 
 /** One agent under its parent on the board: a 32 px row (44 on a phone) on the tree guide,
  *  outside the list's j/k order (Tab reaches it). `open` while its tab is the panel's. */
-export function AgentRow({ s, a, open = false }: { s: SessionSummary; a: AgentRun; open?: boolean }) {
+export function AgentRow({
+  s,
+  a,
+  open = false,
+  flip,
+  gone = false,
+}: {
+  s: SessionSummary;
+  a: AgentRun;
+  open?: boolean;
+  /** The tree's FLIP key (lib/motion.ts useFlip), and whether the held tree kept it after it left. */
+  flip?: string;
+  gone?: boolean;
+}) {
   const store = useStore();
   // A child session (the `parent_id` shape) is a session: its own menu, with its label.
   const child = a.session ? store.get().sessions.get(a.session) : undefined;
@@ -78,7 +98,13 @@ export function AgentRow({ s, a, open = false }: { s: SessionSummary; a: AgentRu
   });
   const to = child ? sessionPath(child.harness, child.id) : agentPath(s.harness, s.id, a.id);
   return (
-    <li {...menu} data-agent={a.id} data-open={open ? "" : undefined}>
+    <li
+      {...menu}
+      data-agent={a.id}
+      data-open={open ? "" : undefined}
+      data-flip={flip}
+      data-gone={gone ? "" : undefined}
+    >
       <Link
         to={to}
         className="kid agent-row"

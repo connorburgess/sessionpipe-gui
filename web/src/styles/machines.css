@@ -1,11 +1,28 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- machines ---------- */
-/* One grouped section per machine (the grouped form, settings.css): a header row with
-   the status glyph, the name at 600 and "online · last event 1 m" in the meta tier, then
-   Get Info rows. No box; on a phone each section is an inset group. */
+/* One grouped section per machine (the grouped form, settings.css), in a reading column
+   centred in the window as the session page's is: a header row with the name at 600 and
+   "online · last event 1 m" in the meta tier, then Get Info rows. No box; on a phone each
+   section is an inset group. */
 
 .machines {
   gap: 32px;
+}
+.machines > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
+/* One machine only: a quiet line after it, the way on in the text. */
+.machines-more {
+  margin-top: -16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+/* Why nothing can be signed on this address: one line above the machines, said once. */
+.machines-note {
+  margin-bottom: -16px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-wrap: pretty;
 }
 .machine-head {
   display: flex;
@@ -16,7 +33,8 @@
   -webkit-user-select: none;
   user-select: none;
 }
-/* Online is a filled disc, quiet a hollow ring: the glyph grammar, no green. */
+/* Only a quiet machine carries a mark, the hollow ring of the glyph grammar; online is
+   the normal case and needs none. */
 .online {
   flex: none;
   width: 10px;
@@ -24,12 +42,9 @@
   border-radius: 50%;
   border: 1.5px solid var(--fg-4);
 }
-.online--on {
-  border-color: var(--fg-2);
-  background: var(--fg-2);
-}
 .machine-name {
-  min-width: 0;
+  flex: none;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -37,8 +52,13 @@
   font-size: var(--text-md);
   font-weight: 600;
 }
+/* A machine's name never truncates; its "online · last event" gives way first. */
 .machine-last {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -68,7 +88,17 @@
   font-size: var(--text-sm);
 }
 .machine-folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
   color: var(--fg-2);
+}
+.machine-folder {
+  border-radius: var(--radius-inner);
+}
+/* A row's action never wraps ("Add a phone…" on a phone). */
+.machine-btn {
+  white-space: nowrap;
 }
 .paired {
   color: var(--fg);
@@ -78,15 +108,26 @@
 }
 .machine-ctl-row {
   max-width: 560px;
-}
-.machine-start .start-form {
-  margin-top: 4px;
+  min-width: 0;
 }
 @media (max-width: 839px) {
   .machine-head {
     padding: 0 16px 6px;
   }
+  .machines-more,
+  .machines-note {
+    padding: 0 16px;
+  }
   .machine-last {
     font-size: var(--text-xs);
+  }
+}
+
+/* A phone's bar holds one text action, as iOS does: "Add a phone…" stays; Connect is a
+   tab away under More, and two words-wide buttons would run into the centred title
+   once the large title folds into the bar. */
+@media (max-width: 839px) {
+  .machines .bar-actions .btn + .btn {
+    display: none;
   }
 }

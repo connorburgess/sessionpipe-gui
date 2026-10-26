@@ -55,6 +55,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (!optsRef.current.onClose) return;
+        // An open pop-up inside the dialog (a Select) takes its own Esc first.
+        const t = e.target as HTMLElement | null;
+        if (t?.getAttribute?.("role") === "combobox" && t.getAttribute("aria-expanded") === "true") return;
         e.preventDefault();
         e.stopPropagation();
         optsRef.current.onClose();
@@ -85,7 +88,11 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
       cancelAnimationFrame(raf);
       root.removeEventListener("keydown", onKey);
       document.removeEventListener("focusin", onFocusIn);
-      if (optsRef.current.restore !== false && before?.isConnected) before.focus({ preventScroll: true });
+      // Give focus back only while it is still ours (or nobody's): an overlay this one
+      // handed over to (More → Display) has already taken it, and keeps it.
+      const now = document.activeElement;
+      const ours = !now || now === document.body || root.contains(now);
+      if (optsRef.current.restore !== false && ours && before?.isConnected) before.focus({ preventScroll: true });
     };
   }, [active, ref]);
 }

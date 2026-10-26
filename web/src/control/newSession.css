@@ -1,0 +1,132 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* What New session leaves in the app itself: the compose glyph, and the started session
+   (control/Starting.tsx): the files a start carried, its status row, a refused start. The
+   sheet's own rules load with the sheet (newSessionSheet.css). */
+
+/* ----- the compose glyph (sidebar header, the phone's Board and Inbox bars) ----- */
+
+.compose-btn {
+  color: var(--fg-2);
+}
+/* On a desktop the sidebar has it; the bars' copy is the phone's. */
+.icon-btn.compose-btn--phone {
+  display: none;
+}
+@media (max-width: 839px) {
+  .icon-btn.compose-btn--phone {
+    display: inline-flex;
+  }
+}
+
+/* ----- the starting session (control/Starting.tsx) ----- */
+
+/* The status row's words, as each step takes over: a quick fade up into place, the same
+   on every step and none under reduced motion (base.css). Opacity and transform only. */
+.status-row .starting-state {
+  display: inline-block;
+  animation: status-step var(--dur) var(--ease-out) both;
+}
+@keyframes status-step {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.starting-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.starting-file {
+  display: inline-flex;
+  gap: 6px;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.starting-file .num {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+/* A start or a message that didn't make it: a neutral sentence after one small red ✕, the
+   command it names in its own well, then the ways on. */
+.starting-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+.sent-failed-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh);
+}
+.sent-failed-text code {
+  font-size: var(--text-sm);
+}
+.sent-x {
+  flex: none;
+  position: relative;
+  top: 1px;
+  color: var(--err);
+}
+.starting-failed .cmdwell {
+  width: min(100%, 520px);
+  margin-left: 18px;
+}
+.sent-failed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 18px;
+}
+.sent-failed-err {
+  margin: 0 0 0 18px;
+  color: var(--err);
+  font-size: var(--text-sm);
+}
+.sess-applied {
+  color: var(--fg-3);
+}
+
+/* The empty board's "Start a session on studio-mac": a text link, not a second button. */
+.board-start {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .board-start:hover {
+    color: var(--fg);
+  }
+}
+
+/* In the timeline the ✕ takes the rows' 16 px glyph column, the words the text column. */
+.turn-failed .sent-x {
+  margin: 0 3px;
+}
+.turn-failed .cmdwell,
+.turn-failed .sent-failed-actions,
+.turn-failed .sent-failed-err {
+  margin-left: 24px;
+}

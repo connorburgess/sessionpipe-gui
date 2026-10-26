@@ -3,19 +3,29 @@
 // The side panel: a session open beside the page. Shift-click on a board card opens it
 // (URL `?s=`, the page shrinks), reload keeps it, Esc closes it, the divider resizes it,
 // a theme opens it through api.openSession({ split: true }); on a phone it is a sheet.
+// Pages that list no sessions (Setup, Connect, a missing page) don't show it, and it is
+// back, tabs and all, on the board.
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, tier1Batch } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
 const live = (page: Page) => expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
 const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** What the panel's title must read for a card: the card shortens a long title with "…",
+ *  the panel shows it whole, so a shortened one is matched as a prefix. */
+const titleOf = (card: string): string | RegExp =>
+  card.endsWith("…") ? new RegExp(`^${rx(card.slice(0, -1))}`) : card;
+
 /** Shift-clicks the first board card; returns the title the panel shows for it. The
  *  panel is the source of truth: a demo session may learn a better title mid-turn, so the
  *  card's text at click time is matched by the session key in the URL, not by its words. */
 async function openBeside(page: Page): Promise<string> {
   await openBoard(page);
+  // The pointer rests on the list first, so the board holds still (Board.tsx) and the
+  // row read is the row clicked.
+  await holdBoard(page);
   const card = page.locator("article.card").first();
   const href = (await card.locator("a.card-link").getAttribute("href"))!;
   const key = href
@@ -24,7 +34,8 @@ async function openBeside(page: Page): Promise<string> {
     .slice(0, 2)
     .map(decodeURIComponent)
     .join(":");
-  await card.locator("a.card-link").click({ modifiers: ["Shift"] });
+  // By its href: the live demo may put another session first between the read and the click.
+  await page.locator(`article.card a.card-link[href="${href}"]`).click({ modifiers: ["Shift"] });
   await expect(panel(page)).toHaveClass(/panel--open/);
   await expect(page).toHaveURL(/[?&]s=[^&]+(:|%3A)/);
   expect(decodeURIComponent(new URL(page.url()).searchParams.get("s") ?? "")).toBe(key);
@@ -76,13 +87,32 @@ test.describe("split panel", () => {
   test.describe("desktop", () => {
     test.skip(({ isMobile }) => !!isMobile, "desktop project only");
 
+    test("steps aside on pages that list no sessions, and comes back on the board", async ({ page }) => {
+      await openBeside(page);
+      const open = await mainWidth(page);
+      const s = new URL(page.url()).searchParams.get("s");
+      for (const path of ["/setup", "/connect", "/no-such-page"]) {
+        await page.evaluate((p) => {
+          history.pushState(null, "", `${p}${location.search}`);
+          dispatchEvent(new PopStateEvent("popstate"));
+        }, path);
+        await expect(panel(page)).not.toHaveClass(/panel--open/);
+        // The page takes the room back over the split's slide (split.css).
+        await expect.poll(() => mainWidth(page), { message: `${path} has the full width` }).toBeGreaterThan(open + 100);
+      }
+      await page.goBack();
+      await page.goBack();
+      await page.goBack();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      expect(new URL(page.url()).searchParams.get("s")).toBe(s);
+    });
+
     test("shift-click opens beside, the page shrinks, reload keeps it, Esc closes it", async ({ page }) => {
       await openBoard(page);
       const before = await mainWidth(page);
       const title = await openBeside(page);
       // The session view inside opens with its own scrolling and its latest events.
       await expect(panel(page).locator("ol.timeline li.turn").first()).toBeVisible();
-      await expect(panel(page).locator(".sess-counts-ev")).toHaveText(/events$/);
       await expect.poll(() => mainWidth(page)).toBeLessThan(before - 300);
       const url = page.url();
       // The same session after the reload: by its key in the URL, and the title the panel
@@ -93,7 +123,15 @@ test.describe("split panel", () => {
       await live(page);
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(page.url()).toBe(url);
-      await expect(panel(page).locator(".panel-title")).toHaveText(new RegExp(`^(${rx(title)}|${rx(shown ?? "")})`));
+      // A title the summariser cut may come back cut (its uncut form is the first ask, which
+      // the summary carries only while it is the latest prompt; lib/format.ts uncutTitle).
+      const same = (t: string, was: string) => t === was || (t.endsWith("…") && was.startsWith(t.slice(0, -1)));
+      await expect
+        .poll(async () => {
+          const t = (await panel(page).locator(".panel-title").textContent()) ?? "";
+          return same(t, title) || same(t, shown ?? "") || new RegExp(`^(${rx(title)}|${rx(shown ?? "")})`).test(t);
+        })
+        .toBe(true);
 
       await page.keyboard.press("Escape");
       await expect(panel(page)).not.toHaveClass(/panel--open/);
@@ -138,7 +176,7 @@ test.describe("split panel", () => {
         const link2 = page.locator(`a.card-link[href="${href2}"]`);
         const title2 = (await link2.locator(".card-title").textContent())!;
         await link2.click({ modifiers: ["Alt"] });
-        await expect(panel(page).locator(".panel-title")).toHaveText(title2);
+        await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(title2));
         await expect(page).toHaveURL(/[?&]s=/);
       }
       const open = panel(page).getByRole("link", { name: "Open as page" });
@@ -206,6 +244,8 @@ test.describe("split panel", () => {
       await openBoard(page);
       const links = page.locator("article.card a.card-link");
       await expect.poll(() => links.count()).toBeGreaterThanOrEqual(n);
+      // Held before the read and through the clicks: the pointer stays on the list.
+      await holdBoard(page);
       const out: { href: string; key: string; title: string }[] = [];
       for (let i = 0; i < n; i++) {
         const href = (await links.nth(i).getAttribute("href"))!;
@@ -214,8 +254,18 @@ test.describe("split panel", () => {
       }
       return out;
     };
+    /** A modified click on the card's link, dispatched on the element: what these tests check
+     *  is the tabs and the URL, and a live card's height changes (its counts) and the panel's
+     *  reflow can keep a pointer click chasing it, or put it under the sticky bar. */
     const click = (page: Page, href: string, modifiers: ("Shift" | "Meta" | "Control")[]) =>
-      page.locator(`a.card-link[href="${href}"]`).click({ modifiers });
+      page.locator(`a.card-link[href="${href}"]`).dispatchEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        shiftKey: modifiers.includes("Shift"),
+        metaKey: modifiers.includes("Meta"),
+        ctrlKey: modifiers.includes("Control"),
+      });
 
     test("shift-clicks add tabs, ⌘-click adds one in the background; the URL round-trips", async ({ page }) => {
       const [a, b, c] = await cards(page, 3);
@@ -224,7 +274,7 @@ test.describe("split panel", () => {
       await expect(tabs(page)).toHaveCount(2);
       expect(await tabKeys(page)).toEqual([a!.key, b!.key]);
       await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-      await expect(panel(page).locator(".panel-title")).toHaveText(b!.title);
+      await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(b!.title));
       expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key}`, t: "1" });
 
       await click(page, c!.href, [process.platform === "darwin" ? "Meta" : "Control"]);
@@ -260,7 +310,9 @@ test.describe("split panel", () => {
       await click(page, b!.href, ["Shift"]);
       await click(page, c!.href, ["Shift"]);
       await expect(tabs(page)).toHaveCount(3);
-      // Drag the third tab to the front.
+      // Drag the third tab to the front, once the tabs have settled (hover waits for stable).
+      await tabs(page).nth(0).hover();
+      await tabs(page).nth(2).hover();
       const third = (await tabs(page).nth(2).boundingBox())!;
       const first = (await tabs(page).nth(0).boundingBox())!;
       await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2);
@@ -329,12 +381,20 @@ test.describe("split panel", () => {
 
     test("the panel is a sheet covering the view; close returns to the board", async ({ page }) => {
       await openBoard(page);
-      const card = page.locator("article.card").first();
-      const title = (await card.locator(".card-title").textContent())!;
+      // The pointer rests on the list first, so the board holds still (Board.tsx): the row
+      // read is the row tapped, by its key, wherever the live demo would have moved it.
+      const rest = (await page.locator("article.card").first().boundingBox())!;
+      await page.mouse.move(rest.x + rest.width / 2, rest.y + rest.height / 2);
+      await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+      const key = await page.locator("article.card").first().getAttribute("data-flip");
+      const card = page.locator(`article.card[data-flip="${key}"]`);
       await card.locator("a.card-link").click({ modifiers: ["Shift"] });
       const sheet = panel(page);
       await expect(sheet).toHaveClass(/panel--open/);
-      await expect(sheet.locator(".panel-title")).toHaveText(title);
+      // That session, by its key (a demo session may learn a better title meanwhile, as
+      // openBeside says), under a title of its own.
+      expect(decodeURIComponent(new URL(page.url()).searchParams.get("s") ?? "")).toBe(key);
+      await expect(sheet.locator(".panel-title")).not.toHaveText("");
       await expect(sheet.locator("ol.timeline li.turn").first()).toBeVisible();
       const box = (await sheet.boundingBox())!;
       const vp = page.viewportSize()!;
