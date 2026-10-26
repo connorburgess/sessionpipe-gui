@@ -111,7 +111,7 @@
 .nav-link--on {
   color: var(--fg);
 }
-/* The Inbox count: amber, because it is the needs-you count. */
+/* The Inbox count: orange, because it is the needs-you count. */
 .nav-badge {
   position: absolute;
   top: 3px;
@@ -128,8 +128,8 @@
   text-align: center;
 }
 
-/* The Setup entry's dot: steps to go on this machine. The quiet mark tier, not amber:
-   amber is for what needs you, and a setup step does not. */
+/* The Setup entry's dot: steps to go on this machine. The quiet mark tier, not orange:
+   orange is for what needs you, and a setup step does not. */
 .nav-dot {
   position: absolute;
   top: 7px;
@@ -159,8 +159,10 @@
   border-radius: 50%;
   background: var(--fg-4);
 }
+/* Live is the normal state, so it stays quiet: a solid neutral dot (connecting is a ring,
+   offline the error red). The brand's one bright colour is the needs-you orange. */
 .conn--live .conn-dot {
-  background: var(--ok);
+  background: var(--fg-3);
 }
 .conn-label {
   font-variant-numeric: tabular-nums;
@@ -441,11 +443,25 @@
     justify-content: space-between;
     padding: 0 10px 0 16px;
   }
+  /* The sidebar's head is the lockup, from the mark's 64-unit box, exactly as the design
+     draws it (docs/brand.md): the name's ink is 28.905 units tall and starts 9.048 past the
+     box, its centre 0.707 above the mark's, so both share the x-height's centre line. A 29 px
+     box makes it 122 px wide, just over the brand's smallest (120); the rail alone keeps
+     the mark at 28. */
   .shell--side .rail-brand {
+    --brand-box: 29px;
     justify-content: flex-start;
+    gap: 0;
+  }
+  .shell--side .rail-brand .mark {
+    width: var(--brand-box);
+    height: var(--brand-box);
   }
   .shell--side .rail-word {
-    display: inline;
+    display: inline-block;
+    height: calc(var(--brand-box) * 28.905 / 64);
+    margin-left: calc(var(--brand-box) * 9.048 / 64);
+    translate: 0 calc(var(--brand-box) * -0.707 / 64);
   }
   .shell--side .rail-nav {
     padding: 8px;
