@@ -1,6 +1,6 @@
 {
   "name": "sessionpipe-gui",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "The sessionpipe GUI: a local receiver with a live board for every coding-agent session on your machines, open from any device on your network.",
   "keywords": [
     "sessionpipe",
@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "qrcode": "^1.5.4",
-    "sessionpipe-core": "^0.7.0"
+    "sessionpipe-core": "^0.10.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
