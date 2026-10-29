@@ -22,6 +22,7 @@ import {
 } from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
+import { sessionTitle } from "../lib/format";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -105,7 +106,8 @@ export function useLaunched(key: SessionKey): SessionSummary[] {
     const list: SessionSummary[] = [];
     for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
     list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
-    const sig = list.map((s) => `${s.key}\u0000${s.title ?? ""}\u0000${s.state}`).join("\u0001");
+    // What the header renders: the title as sessionTitle derives it, and the state.
+    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}`).join("\u0001");
     if (sig !== last.current.sig) last.current = { sig, list };
     return last.current.list;
   }, [store, key]);

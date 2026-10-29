@@ -159,10 +159,13 @@ describe("readings", () => {
     expect(s.launchedBy).toBe(launcher);
     expect(s.parentId ?? null).toBeNull();
   });
-  it("drops a launched_by that is not a session key", () => {
-    const launched = new Session("launched-2");
-    store.ingest([launched.ev("session.started", {}, { session: { launched_by: "not a key" } })], "http");
+  it("keeps a launched_by only in the receiver's own key shape, trimmed", () => {
+    const bad = new Session("launched-2");
+    store.ingest([bad.ev("session.started", {}, { session: { launched_by: "Claude Code:abc" } })], "http");
     expect(store.session(sessionKey("claude-code", "launched-2"))?.launchedBy).toBeUndefined();
+    const padded = new Session("launched-3");
+    store.ingest([padded.ev("session.started", {}, { session: { launched_by: " codex:thread-9 " } })], "http");
+    expect(store.session(sessionKey("claude-code", "launched-3"))?.launchedBy).toBe("codex:thread-9");
   });
 
   it("keeps progress until its transcript or the turn's end; snippets are cut", () => {

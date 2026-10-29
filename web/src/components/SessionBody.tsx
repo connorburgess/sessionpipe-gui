@@ -79,7 +79,7 @@ import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { clock, dur, ms, useNow } from "../lib/time";
+import { ago, clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
   type EventItem,
@@ -870,7 +870,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       ? { path: sessionPath(launcherSummary.harness, launcherSummary.id), title: sessionTitle(launcherSummary) }
       : { path: null, title: launcherKey }
     : undefined;
-  const launched = launchedRuns.map((l) => ({ path: sessionPath(l.harness, l.id), title: sessionTitle(l) }));
+  const launched = launchedRuns.map((l) => ({
+    path: sessionPath(l.harness, l.id),
+    title: sessionTitle(l),
+    at: l.startedAt,
+  }));
 
   // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
   // a message, Stop), how the view shows and what it is (Follow, the lens, its own
@@ -1108,7 +1112,7 @@ function SessionMeta({
   /** The session that launched this one (`session.launched_by`); no path when this receiver never saw it. */
   launcher?: { path: string | null; title: string };
   /** Sessions this one launched. */
-  launched?: { path: string; title: string }[];
+  launched?: { path: string; title: string; at: string }[];
   chat: boolean;
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
@@ -1166,7 +1170,20 @@ function SessionMeta({
               className="sess-launched"
               label={`${launched.length} launched sessions`}
               title={() => `Launched ${launched.length} sessions`}
-              build={() => launched.map((l) => ({ label: l.title, run: () => navigate(l.path) }))}
+              build={() => {
+                // Newest first, each with when it started (a script's runs share a title); the
+                // twelve newest, then a line for the rest.
+                const now = Date.now();
+                const shown = launched.slice(0, 12);
+                return [
+                  ...shown.map((l) => ({ label: `${l.title} · ${ago(l.at, now)}`, run: () => navigate(l.path) })),
+                  launched.length > shown.length && {
+                    label: `${launched.length - shown.length} more, older`,
+                    run: () => {},
+                    disabled: "The newest twelve are listed",
+                  },
+                ];
+              }}
             >
               {launched.length} sessions
             </MoreButton>
