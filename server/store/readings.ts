@@ -27,34 +27,7 @@ import { detach, PREVIEW_CHARS } from "./slim.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
 /** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
- *  `^[a-z][a-z0-9-]{0,39}// SPDX-License-Identifier: Apache-2.0
-// The store's readings (ARCHITECTURE.md "The store's readings"): a pure reducer from
-// protocol events to a SessionSummary, and the state machine over it. Nothing here
-// touches a file or a timer; store.ts drives it.
-import {
-  AGENTS_MAX,
-  type AgentRun,
-  type Attention,
-  type AttentionKind,
-  COMPACTING_WINDOW_MS,
-  DONE_AFTER_MS,
-  type EventSource,
-  GAP_AFTER_MS,
-  type ProtocolEvent,
-  type SessionFlag,
-  type SessionState,
-  type SessionSummary,
-  SLOW_TOOL_MS,
-  SNIPPET_CHARS,
-  STALE_AFTER_MS,
-  sessionKey,
-  type Tier,
-  type TurnStats,
-} from "../../shared/api.js";
-import { changedPaths } from "./paths.js";
-import { detach, PREVIEW_CHARS } from "./slim.js";
-
-, a session id up to 128 of `[A-Za-z0-9._:-]`. */
+ *  `^[a-z][a-z0-9-]{0,39}$`, a session id up to 128 of `[A-Za-z0-9._:-]`. */
 const LAUNCHER_KEY_RE = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
 const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation", "idle", "error"]);
 
