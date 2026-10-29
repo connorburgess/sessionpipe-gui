@@ -245,8 +245,9 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (typeof b.attended === "boolean") s.attended = b.attended;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
+  // `<harness>:<id>` (CONTROL.md); anything else is not a session key and is dropped.
   const launcher = str(b.launched_by);
-  if (launcher) s.launchedBy = launcher;
+  if (launcher && /^[a-z][a-z0-9-]*:\S+$/.test(launcher)) s.launchedBy = launcher;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;

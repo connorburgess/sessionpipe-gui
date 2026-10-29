@@ -159,6 +159,11 @@ describe("readings", () => {
     expect(s.launchedBy).toBe(launcher);
     expect(s.parentId ?? null).toBeNull();
   });
+  it("drops a launched_by that is not a session key", () => {
+    const launched = new Session("launched-2");
+    store.ingest([launched.ev("session.started", {}, { session: { launched_by: "not a key" } })], "http");
+    expect(store.session(sessionKey("claude-code", "launched-2"))?.launchedBy).toBeUndefined();
+  });
 
   it("keeps progress until its transcript or the turn's end; snippets are cut", () => {
     const s = new Session();

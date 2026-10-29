@@ -241,7 +241,7 @@ and opens beside its parent as a tab of its own.
 
 A run a script started for a session is not a subagent. When the sender says so
 (`session.launched_by`), the run's header links the session it ran for, and that session's
-header links each run it started.
+header links the run it started, or lists several in a menu.
 
 ### Review
 

@@ -55,7 +55,7 @@ import {
   useStartOf,
 } from "../control/Starting";
 import { isFinal } from "../control/words";
-import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { useLaunched, useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
@@ -590,6 +590,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const originalSummary = useSession(original);
 
   const s = live ?? summary;
+  // The launcher and the runs it launched are subscriptions: a launcher's open page shows a
+  // run that starts later, and a run's page finds a launcher that reports later.
+  const launcherKey = s?.launchedBy && s.launchedBy !== key ? s.launchedBy : "";
+  const launcherSummary = useSession(launcherKey);
+  const launchedRuns = useLaunched(key);
   const sRef = useRef(s);
   sRef.current = s;
   useEffect(() => {
@@ -859,16 +864,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         title: originalSummary ? sessionTitle(originalSummary) : "another session",
       }
     : undefined;
-  const launcherSummary = s?.launchedBy ? store.get().sessions.get(s.launchedBy) : undefined;
-  const launcher = s?.launchedBy
-    ? {
-        path: launcherSummary ? sessionPath(launcherSummary.harness, launcherSummary.id) : null,
-        title: launcherSummary ? sessionTitle(launcherSummary) : "a session not on this receiver",
-      }
+  // A launcher this receiver never saw is named by its key, so it can be looked up elsewhere.
+  const launcher = launcherKey
+    ? launcherSummary
+      ? { path: sessionPath(launcherSummary.harness, launcherSummary.id), title: sessionTitle(launcherSummary) }
+      : { path: null, title: launcherKey }
     : undefined;
-  const launched = s
-    ? launchedFromStore(store, key).map((l) => ({ path: sessionPath(l.harness, l.id), title: sessionTitle(l) }))
-    : [];
+  const launched = launchedRuns.map((l) => ({ path: sessionPath(l.harness, l.id), title: sessionTitle(l) }));
 
   // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
   // a message, Stop), how the view shows and what it is (Follow, the lens, its own
@@ -1129,6 +1131,7 @@ function SessionMeta({
   ]
     .filter(Boolean)
     .join(" · ");
+  const first = launched?.[0];
   return (
     <span className="sess-where" title={more} data-events={total}>
       {s.machine && <span className="sess-machine">{s.machine}</span>}
@@ -1140,25 +1143,36 @@ function SessionMeta({
         place && <span className="sess-repo">{place}</span>
       )}
       {launcher && (
-        <span className="sess-copy">
+        <span className="sess-copy sess-launch">
           Launched by{" "}
           {launcher.path ? (
             <Link to={launcher.path} title={launcher.title}>
               {launcher.title}
             </Link>
           ) : (
-            launcher.title
+            <span title={launcher.title}>{launcher.title}</span>
           )}
         </span>
       )}
-      {launched?.map((l) => (
-        <span key={l.path} className="sess-copy">
+      {launched && first && (
+        <span className="sess-copy sess-launch">
           Launched{" "}
-          <Link to={l.path} title={l.title}>
-            {l.title}
-          </Link>
+          {launched.length === 1 ? (
+            <Link to={first.path} title={first.title}>
+              {first.title}
+            </Link>
+          ) : (
+            <MoreButton
+              className="sess-launched"
+              label={`${launched.length} launched sessions`}
+              title={() => `Launched ${launched.length} sessions`}
+              build={() => launched.map((l) => ({ label: l.title, run: () => navigate(l.path) }))}
+            >
+              {launched.length} sessions
+            </MoreButton>
+          )}
         </span>
-      ))}
+      )}
     </span>
   );
 }
@@ -1199,12 +1213,6 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
   const out: SessionSummary[] = [];
   const { harness, id } = { harness: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1) };
   for (const s of store.get().sessions.values()) if (s.harness === harness && s.parentId === id) out.push(s);
-  return out;
-}
-
-function launchedFromStore(store: ReturnType<typeof useStore>, key: string): SessionSummary[] {
-  const out: SessionSummary[] = [];
-  for (const s of store.get().sessions.values()) if (s.launchedBy === key) out.push(s);
   return out;
 }
 
