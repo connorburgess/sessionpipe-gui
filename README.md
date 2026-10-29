@@ -158,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.5.0 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.6.0 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -238,6 +238,21 @@ on every device.
 A parent row says how many subagents are running and opens a tree of what each is doing. In
 the session, each agent sits under the turn that started it, with its tools and its result,
 and opens beside its parent as a tab of its own.
+
+A run a script started for a session is not a subagent. When the sender says so
+(`session.launched_by`), the run's header links the session it ran for, and that session's
+header links the run it started, or lists several in a menu.
+
+### Agents that ask each other
+
+A session can hand a task to another agent on its machine and get the answer back
+(`sessionpipe ask codex "review this diff"`), and from a session's page you can ask another
+agent and have its answer brought back into that session as a message. Either way the ask
+is one row in the chat where it happened, the asked session says who it is for, and the
+board nests it under the one that asked. **Workflows** chain steps across agents and
+machines (implement, then review; two opinions, then a comparison), every step a signed
+command, every run resumable from any device that can sign. Details and the commands:
+[docs/orchestration.md](docs/orchestration.md).
 
 ### Review
 
