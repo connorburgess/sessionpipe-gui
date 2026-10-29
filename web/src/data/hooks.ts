@@ -107,7 +107,8 @@ export function useLaunched(key: SessionKey): SessionSummary[] {
     for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
     list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
     // What the header renders: the title as sessionTitle derives it, and the state.
-    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}`).join("\u0001");
+    // ...and the start, which the menu's "ago" and the order read.
+    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}\u0000${s.startedAt}`).join("\u0001");
     if (sig !== last.current.sig) last.current = { sig, list };
     return last.current.list;
   }, [store, key]);

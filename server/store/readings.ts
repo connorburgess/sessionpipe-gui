@@ -22,11 +22,40 @@ import {
   type Tier,
   type TurnStats,
 } from "../../shared/api.js";
-import { HARNESS_RE, SESSION_ID_RE } from "../demo/validate.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
+/** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
+ *  `^[a-z][a-z0-9-]{0,39}// SPDX-License-Identifier: Apache-2.0
+// The store's readings (ARCHITECTURE.md "The store's readings"): a pure reducer from
+// protocol events to a SessionSummary, and the state machine over it. Nothing here
+// touches a file or a timer; store.ts drives it.
+import {
+  AGENTS_MAX,
+  type AgentRun,
+  type Attention,
+  type AttentionKind,
+  COMPACTING_WINDOW_MS,
+  DONE_AFTER_MS,
+  type EventSource,
+  GAP_AFTER_MS,
+  type ProtocolEvent,
+  type SessionFlag,
+  type SessionState,
+  type SessionSummary,
+  SLOW_TOOL_MS,
+  SNIPPET_CHARS,
+  STALE_AFTER_MS,
+  sessionKey,
+  type Tier,
+  type TurnStats,
+} from "../../shared/api.js";
+import { changedPaths } from "./paths.js";
+import { detach, PREVIEW_CHARS } from "./slim.js";
+
+, a session id up to 128 of `[A-Za-z0-9._:-]`. */
+const LAUNCHER_KEY_RE = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
 const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation", "idle", "error"]);
 
 /** Events a worker derives from files or clocks rather than a harness hook. Only a
@@ -246,14 +275,9 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (typeof b.attended === "boolean") s.attended = b.attended;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
-  // `<harness>:<id>` (CONTROL.md), by the rules the receiver holds every session to; anything
-  // else is dropped.
+  // A launcher is a session key (CONTROL.md); anything else is dropped.
   const launcher = str(b.launched_by)?.trim();
-  if (launcher) {
-    const i = launcher.indexOf(":");
-    if (i > 0 && HARNESS_RE.test(launcher.slice(0, i)) && SESSION_ID_RE.test(launcher.slice(i + 1)))
-      s.launchedBy = launcher;
-  }
+  if (launcher && LAUNCHER_KEY_RE.test(launcher)) s.launchedBy = launcher;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;
