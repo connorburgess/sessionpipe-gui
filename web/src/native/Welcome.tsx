@@ -31,6 +31,8 @@ const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function Welcome({ info }: { info: ShellInfo }) {
   const phone = info.platform === "ios" || info.platform === "android";
+  // What this device is, in the welcome's words: a Windows or Linux PC is no Mac.
+  const here = info.platform === "macos" ? "Mac" : "computer";
   const [start, setStart] = useState<StartState>({ kind: "idle" });
   const [connecting, setConnecting] = useState(phone);
   const [address, setAddress] = useState("");
@@ -85,7 +87,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
             {!phone && (
               <li className="form-row" data-welcome="start">
                 <span className="form-row-text">
-                  <span className="form-label">This Mac</span>
+                  <span className="form-label">This {here}</span>
                   <span className="form-caption" aria-live="polite">
                     {start.kind === "starting"
                       ? start.message
@@ -93,7 +95,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
                         ? `It didn't start: ${start.message}`
                         : start.kind === "needsNode"
                           ? "sessionpipe needs Node 20 or later. Install it from nodejs.org, then run:"
-                          : "Runs sessionpipe in the background, so this Mac's sessions show up here."}
+                          : `Runs sessionpipe in the background, so this ${here}'s sessions show up here.`}
                   </span>
                 </span>
                 <button
@@ -169,7 +171,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
               <span className="form-row-text">
                 <span className="form-label">Just looking</span>
                 <span className="form-caption">
-                  A board of made-up sessions. Nothing leaves this {phone ? "phone" : "Mac"}.
+                  A board of made-up sessions. Nothing leaves this {phone ? "phone" : here}.
                 </span>
               </span>
               <button type="button" className="btn" onClick={() => location.assign("/?mock=1")}>
