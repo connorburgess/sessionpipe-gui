@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`npx github:spacesheep-dev/sessionpipe-gui` works on Windows.** Its one-time build
+  spawned a bare `npm`, which is `npm.cmd` there and can't start without a shell, so the
+  command exited 1 with no message. The build now runs npm through npm's own entry under the
+  same node, and says why if npm can't be started.
+
 ## [0.6.1] - 2026-10-30
 
 ### Added
