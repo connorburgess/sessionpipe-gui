@@ -72,6 +72,8 @@ jobs:
 
       # The web UI the app bundles: the same build the npm package ships.
       - run: npm ci
+        env:
+          SPGUI_SKIP_PREPARE: "1"
       - run: npm run build
       - run: npm ci
         working-directory: apps/desktop
