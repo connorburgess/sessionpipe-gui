@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // The first-run sheet (NATIVE-SPEC §3.9): once, over the board, asking for nothing up
-// front. Three switches, all off; each takes effect when turned on (notification
-// permission is asked only then), and Done closes it for good.
+// front. On the Mac, three switches, all off; each takes effect when turned on
+// (notification permission is asked only then), and Done closes it for good. On the
+// phone it is the last screen of the onboarding: "You're in", the one step left
+// (the computer approves this iPhone once, so it can answer prompts), where that is in
+// the computer's own labels, Ask <computer> to approve and Later. Notifications are
+// offered where they belong (Settings › App, the inbox's banner), not here.
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toggle } from "../components/bits";
+import { navigate } from "../lib/router";
 import { type AppSettings, loadSettings, patchSettings, requestNotify, setHotkey, settings, useCell } from "./appState";
 import { invoke } from "./bridge";
-import { DEFAULT_HOTKEY, FIRST_RUN_KEY, firstRunDue, hotkeyLabel, notifyToggle } from "./logic";
-import { features } from "./shell";
+import { DEFAULT_HOTKEY, FIRST_RUN_KEY, firstRunDue, hotkeyLabel, notifyToggle, settingsApp } from "./logic";
+import { type Phone, WORDS } from "./onboarding";
+import { features, platform, shellInfo } from "./shell";
 import "./native.css";
 
 const seenHere = (): boolean => {
@@ -34,13 +40,86 @@ export async function maybeShowFirstRun(): Promise<void> {
     root.unmount();
     host.remove();
   };
+  const p = platform();
+  const phone: Phone | null = p === "ios" || p === "android" ? p : null;
   root.render(
-    <StrictMode>
-      <FirstRun onDone={done} />
-    </StrictMode>,
+    <StrictMode>{phone ? <Connected phone={phone} onDone={done} /> : <FirstRun onDone={done} />}</StrictMode>,
   );
 }
 
+/** The notifications switch: permission is asked when it is turned on, never before. */
+function NotifyRow({ label, where, onNote }: { label: string; where: string; onNote: (n: string | null) => void }) {
+  const s = useCell(settings);
+  const notifications = s?.notifications;
+  return (
+    <li className="first-run-row">
+      <span className="first-run-label">{label}</span>
+      <Toggle
+        label={label}
+        on={!!notifications?.enabled}
+        disabled={!s}
+        onChange={async (on) => {
+          const r = await notifyToggle(on, requestNotify, where);
+          onNote(r.note);
+          if (notifications)
+            void patchSettings({ notifications: { ...notifications, enabled: r.enabled } }).catch(() => {});
+        }}
+      />
+    </li>
+  );
+}
+
+/** The phone's: the board is up behind it, and one step is left before it can send. */
+export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void }) {
+  const f = features();
+  const computer = shellInfo()?.receiver?.name || "your computer";
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  // /add-device?ask=1 files the device request itself: "Ask studio-mac to approve" is one tap.
+  const ask = () => {
+    onDone();
+    navigate("/add-device?ask=1");
+  };
+  const signer = f.has("signer");
+  return (
+    <>
+      <div className="menu-scrim menu-scrim--dialog first-run-scrim" aria-hidden="true" />
+      <div
+        className="confirm first-run first-run--phone"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="first-run-title"
+        aria-describedby="first-run-body"
+        ref={ref}
+        tabIndex={-1}
+        data-first-run="phone"
+      >
+        <span className="menu-grab" aria-hidden="true" />
+        <h2 className="confirm-title" id="first-run-title">
+          {WORDS.connected.title}
+        </h2>
+        <p className="confirm-body" id="first-run-body">
+          {signer ? WORDS.connected.body(phone, computer) : WORDS.connected.bodyNoSigner}
+        </p>
+        {signer && <p className="first-run-where">{WORDS.connected.where(computer)}</p>}
+        <div className="confirm-actions">
+          <button type="button" className="btn btn--ghost onb-quiet" data-later onClick={onDone}>
+            {signer ? WORDS.connected.later : WORDS.connected.done}
+          </button>
+          {signer && (
+            <button type="button" className="btn btn--primary onb-primary" data-ask onClick={ask}>
+              {WORDS.connected.ask(computer)}
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** The Mac's. */
 export function FirstRun({ onDone }: { onDone: () => void }) {
   const s = useCell(settings);
   const f = features();
@@ -50,7 +129,6 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     ref.current?.querySelector<HTMLElement>("[data-done]")?.focus({ preventScroll: true });
   }, []);
   const set = (p: Partial<AppSettings>) => void patchSettings(p).catch(() => {});
-  const notifications = s?.notifications;
   return (
     <>
       <div className="menu-scrim menu-scrim--dialog first-run-scrim" aria-hidden="true" />
@@ -76,19 +154,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         </p>
         <ul className="first-run-list">
           {f.has("notifications") && (
-            <li className="first-run-row">
-              <span className="first-run-label">Notify me when a session needs me</span>
-              <Toggle
-                label="Notify me when a session needs me"
-                on={!!notifications?.enabled}
-                disabled={!s}
-                onChange={async (on) => {
-                  const r = await notifyToggle(on, requestNotify);
-                  setNote(r.note);
-                  if (notifications) set({ notifications: { ...notifications, enabled: r.enabled } });
-                }}
-              />
-            </li>
+            <NotifyRow label="Notify me when a session needs me" where={settingsApp(platform())} onNote={setNote} />
           )}
           {f.has("autostart") && (
             <li className="first-run-row">
