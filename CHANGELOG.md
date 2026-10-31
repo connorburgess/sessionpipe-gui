@@ -6,6 +6,23 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The phone's first run.** With no computer connected yet, the iPhone and Android
+  apps open on the lockup and three ways in: scan the code under Connect on your
+  computer (a full-screen viewfinder; the camera is asked for only then), enter its
+  address, or try the demo. A code the app can't use, a refused camera, a computer out
+  of reach and the TLS code's trust page (open it in Safari, come back, Connect) each
+  get one plain screen. Once the board is up, one sheet says the step left: the
+  computer approves this iPhone once, where that is in the computer's own labels, "Ask
+  <computer> to approve" (which files the request) and Later.
+
+### Changed
+
+- The phone's Settings › App no longer shows the Mac's rows (the Dock badge, keeping
+  the app running with the window closed) or names System Settings; the device key's
+  rows and the device request say "this iPhone" / "this phone".
+
 ### Fixed
 
 - **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
@@ -14,6 +31,63 @@ All notable changes to `sessionpipe-gui`. The format follows
   longer taken for the one that dropped. The hand-run Desktop workflow also passes on
   `windows-latest` again: its `npm ci` skips the prepare build, as desktop-release does, and
   four tests that assumed macOS or Unix don't any more.
+- The phone app at tablet width (an iPad): the rail's head and the page bar start under
+  the status bar, and the compose glyph no longer pushes the mark off the rail's edge.
+
+## [0.6.2] - 2026-10-30
+
+### Added
+
+- **Pull down to refresh** on the phone's list pages (Board, Inbox, Search, Feed, Review,
+  Machines), as a native list does: a ring draws in the tint as you pull, a tick as it
+  arms, and the stream reopens for a fresh snapshot. While the stream is down the same
+  pull is the retry.
+- **The phone's tint.** The sessionpipe orange on the selected tab, the back chevron, a
+  sheet's Cancel and Start, a switch that is on, the text-size slider, the caret and
+  links. Needs you keeps its own orange; everything else stays graphite. Skins may set
+  `--tint` and `--tint-fg`.
+- **The phone app feels native.** Taps and outcomes play the phone's haptics; the status
+  and navigation bars follow a forced Light or Dark (or a one-scheme skin); the edge swipe
+  goes back on iPhone and the back button goes back on Android instead of closing the
+  app; the session's message bar rises above the keyboard on iPhone.
+- **Push and pop.** Opening a session from a list slides it in as a native push and Back
+  slides it out, the tab bar staying put; the back button names the page it returns to.
+
+### Changed
+
+- The phone's tab bar and bars are translucent material, as iOS's are, with the page
+  blurring under them (solid under Reduce Transparency).
+- Rows highlight under the finger and release as native cells do; an empty Inbox or Feed
+  centres on the screen.
+- **The phone names the device it runs on:** "Approve this iPhone", "Face ID signs what
+  you send" (on Android "this phone" and "your fingerprint") everywhere it said "this
+  Mac" and "Touch ID".
+- On the phone an Inbox row, and anything that opens a session "beside", opens the
+  session's own page, pushed with Inbox behind Back, instead of the desktop's panel as a
+  sheet; the panel is never restored on the phone at launch.
+- A dropped stream on the phone is said under the large title ("Reconnecting · 3 s ·
+  Retry") instead of a pill over it; the pill stays only on pages without one.
+- With a permission pending on a machine the phone isn't paired with, the session's dock is
+  the Allow and Deny card alone with one hint, and a command moves to the next line whole
+  with its question mark.
+- In the phone app the Inbox's notification banner and bell read the app's own permission
+  ("Notifications are off · Turn on", or "Open Settings" once refused), and the empty
+  Inbox no longer talks about "this page" or "your phone".
+
+### Fixed
+
+- Notification banners on the phone fit the screen on every title length and sit under
+  the status bar; a long one ends in an ellipsis instead of running off the edge.
+- **Every scrollbar on a desktop is the app's own**: a thin grey thumb on no track, the
+  window's and the popovers' included (the Mac app showed the OS's), and the Display
+  popover can no longer scroll sideways.
+- **The Add account sheet is New session's dialog**: 640 px under the title bar over a
+  scrim that dims the whole window, Cancel and Sign in in its footer (in the top bar on a
+  phone), the command and the sign-in as grouped rows. It had taken the Usage page's
+  reading measure and left the sidebar undimmed.
+- **"Sign in to Claude…" on a machine whose pool is off turns the pool on first**, then
+  opens the sign-in, and says so, instead of being refused with "the pool is off on that
+  machine".
 
 ## [0.6.1] - 2026-10-30
 
@@ -526,7 +600,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...v0.5.0

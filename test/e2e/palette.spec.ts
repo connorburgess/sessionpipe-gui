@@ -4,8 +4,49 @@
 // and Enter opens it, shift+Enter opens it beside, `>` keeps only actions, `#<view>` jumps
 // to an installed view, Esc closes it and gives focus back.
 import { expect, type Page, test } from "@playwright/test";
-import { BACKFILL_TITLES } from "../../server/demo/content.js";
+import {
+  ANTIGRAVITY_TURNS,
+  ASK_TURN,
+  BACKFILL_TITLES,
+  BACKGROUND_TURNS,
+  CLAUDE_TURNS,
+  CODEX_ASKED_TURN,
+  CODEX_TURNS,
+  CURSOR_TURNS,
+  GEMINI_TURNS,
+  HANDOFF_PARENT_TURN,
+  PARALLEL_TURN,
+  RESUME_TURN,
+  SCHEDULED_TURNS,
+  SILENT_TURN,
+  UNATTENDED_TURN,
+} from "../../server/demo/content.js";
 import { openBoard, openPage } from "./helpers.js";
+
+/** Every title a demo session can learn mid-run (the scripts', nested ones included) and
+ *  the backfilled ones: a session not on the board yet may still be in the palette, so the
+ *  word typed must pick out one title among all of them, not only the board's. */
+const DEMO_TITLES: string[] = [
+  ...BACKFILL_TITLES.map((t) => t.text),
+  ...[
+    ...JSON.stringify([
+      CLAUDE_TURNS,
+      CODEX_TURNS,
+      GEMINI_TURNS,
+      ANTIGRAVITY_TURNS,
+      CURSOR_TURNS,
+      BACKGROUND_TURNS,
+      SCHEDULED_TURNS,
+      RESUME_TURN,
+      SILENT_TURN,
+      PARALLEL_TURN,
+      UNATTENDED_TURN,
+      CODEX_ASKED_TURN,
+      ASK_TURN,
+      HANDOFF_PARENT_TURN,
+    ]).matchAll(/"title":\{"text":"((?:[^"\\]|\\.)*)"/g),
+  ].map((m) => JSON.parse(`"${m[1]}"`) as string),
+];
 
 /** The card shows a long title up to its first sentence or an ellipsis; the palette and the
  *  session page may show more, so a title is matched as the start. */
@@ -23,6 +64,27 @@ async function open(page: Page) {
  *  by a better one mid-test) whose title is a phrase with a word worth typing (3+ words, one of
  *  7+ letters, found in no other card's title: one session, not a repo, a machine or a near
  *  namesake), else the first card; its title, and that word. */
+/** The palette's own entries (pages, views, actions): a session's word must not read as one. */
+const PAGE_WORDS = [
+  "board",
+  "inbox",
+  "search",
+  "feed",
+  "review",
+  "machines",
+  "connect",
+  "setup",
+  "workflow",
+  "usage",
+  "settings",
+  "shortcut",
+  "views",
+  "display",
+  "session",
+  "canvas",
+  "office",
+];
+
 async function firstCard(page: Page): Promise<{ title: string; href: string; fragment: string }> {
   const longest = (t: string) =>
     t
@@ -30,14 +92,16 @@ async function firstCard(page: Page): Promise<{ title: string; href: string; fra
       .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
       .sort((a, b) => b.length - a.length)[0] ?? "";
   const settled = page.locator("section.group--idle, section.group--stale").locator("article.card a.card-link");
-  // Every title on the board, and the demo's backfilled sessions (the palette lists them; the
-  // board doesn't show them), so the word typed picks out one session, not two.
-  const all = [
-    ...(await page.locator("article.card .card-title").allTextContents()),
-    ...BACKFILL_TITLES.map((t) => t.text),
-  ].map((t) => t.toLowerCase());
+  // Every title on the board and every title the demo can give a session (DEMO_TITLES), so
+  // the word typed picks out one session, not two.
+  const all = [...(await page.locator("article.card .card-title").allTextContents()), ...DEMO_TITLES].map((t) =>
+    t.toLowerCase(),
+  );
+  // A word that names a page or an action ("workflow" → Workflows) ranks that entry above
+  // every session, so such a word never picks the card either.
   const unique = (t: string) => {
     const w = longest(t).toLowerCase();
+    if (PAGE_WORDS.some((pw) => pw.includes(w) || w.includes(pw))) return false;
     return all.filter((x) => x.includes(w)).length === 1;
   };
   let link = page.locator("article.card a.card-link").first();
