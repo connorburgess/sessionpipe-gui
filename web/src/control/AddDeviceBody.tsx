@@ -5,15 +5,15 @@
 // person compares them and approves, which sends a signed `key.add` carrying this key.
 // The machine verifies it like any command, adds the key and acks `delivered`; this page
 // polls until then. Nothing here is trusted on its own word.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActionButton } from "../components/bits";
 import { BackButton, PageBar } from "../components/PageBar";
-import { back, Link } from "../lib/router";
+import { back, Link, useSearchParam } from "../lib/router";
 import { ms, useNow } from "../lib/time";
 import { controlApi, httpsHere, httpsPath, lastInfo } from "./api";
 import { useRpId } from "./hooks";
 import { sentence } from "./PendingDevices";
-import { canSign, SETUP_LABEL, signerKind, signHint } from "./signer";
+import { canSign, deviceWords, setupLabel, signerKind, signHint } from "./signer";
 import { NAME_MAX, useDeviceRequest } from "./useDeviceRequest";
 import { guessDeviceName } from "./webauthn";
 import { refusalWords } from "./words";
@@ -23,9 +23,19 @@ export function AddDevicePage() {
   const rp = useRpId();
   const secure = canSign(rp);
   const device = signerKind() === "device";
+  const w = deviceWords();
   const now = useNow();
   const { phase, error, known, ask } = useDeviceRequest(rp);
-  const [name, setName] = useState(device ? "Mac app" : guessDeviceName());
+  const [name, setName] = useState(device ? w.app : guessDeviceName());
+  // `?ask=1` (the phone's connected sheet, "Ask now"): file the request as soon as the app
+  // can sign, once, instead of waiting for a second tap here.
+  const auto = useSearchParam("ask") === "1" && device;
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!auto || asked.current || !secure || !rp || phase.k !== "idle") return;
+    asked.current = true;
+    void ask(name);
+  }, [auto, secure, rp, phase.k, ask, name]);
   const [paired, setPaired] = useState<number | null>(null);
   const httpsHref = secure || device ? null : httpsHere();
 
@@ -51,12 +61,12 @@ export function AddDevicePage() {
   return (
     <div className="page page--doc page--grouped pair add-device">
       <PageBar
-        title={device ? SETUP_LABEL : "Add this device"}
+        title={device ? setupLabel() : "Add this device"}
         back={<BackButton onClick={() => back("/machines")} label="Machines" />}
       />
       <p className="caption pair-lead">
         {device
-          ? "To start and answer sessions from this Mac, the machine has to trust it. You approve that once; after that, Touch ID signs what you send. The key never leaves this Mac's Secure Enclave."
+          ? `To start and answer sessions from ${w.this}, the machine has to trust it. You approve that once; after that, ${w.auth} signs what you send. The key never leaves ${w.its} Secure Enclave.`
           : "This device makes its own passkey, and one the machine already trusts vouches for it: the same six digits on both, one tap to approve."}
       </p>
 
@@ -179,7 +189,7 @@ export function AddDevicePage() {
               pendingLabel="Asking…"
             >
               {device
-                ? "Add this Mac"
+                ? `Add ${w.this}`
                 : known.length
                   ? `Add this device with its passkey “${known[0]?.name ?? "here"}”`
                   : "Add this device"}
@@ -202,9 +212,10 @@ export function AddDevicePage() {
 }
 
 /** The app's two ways to be approved: in the browser that holds the passkey the machine
- *  trusts, or from the machine's terminal, where pairing again adds this Mac's key with one
- *  Touch ID here (CONTROL.md §2: "adding another passkey is the same pairing"). */
+ *  trusts, or from the machine's terminal, where pairing again adds this device's key with
+ *  one Touch ID (Face ID) here (CONTROL.md §2: "adding another passkey is the same pairing"). */
 function ApproveRoutes() {
+  const w = deviceWords();
   const browser = httpsPath("/machines");
   const local = lastInfo()?.urls.local ?? "http://localhost:7373";
   return (
@@ -227,7 +238,7 @@ function ApproveRoutes() {
         </li>
         <li>
           Or, in a terminal on the machine, run <code>sessionpipe control pair {local}</code> and approve the pairing in
-          this app with Touch ID. On another computer, use the address it paired with (
+          this app with {w.auth}. On another computer, use the address it paired with (
           <code>sessionpipe control keys</code> lists it).
         </li>
       </ol>
