@@ -37,6 +37,12 @@ describe("parseShell", () => {
   it("knows the Android app", () => {
     expect(parseShell({ v: 1, platform: "android" })?.platform).toBe("android");
   });
+  it("knows the phones' haptics", () => {
+    expect(parseShell({ v: 1, platform: "ios", features: ["haptics", "rumble"] })?.features).toEqual(["haptics"]);
+  });
+  it("knows the phones' scanner", () => {
+    expect(parseShell({ v: 1, platform: "android", features: ["scanner", "camera"] })?.features).toEqual(["scanner"]);
+  });
   it("tolerates missing optional fields", () => {
     expect(parseShell({ v: 1, platform: "ios" })).toEqual({
       v: 1,
