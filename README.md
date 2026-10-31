@@ -13,19 +13,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_universal.dmg"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos.svg" alt="Download for macOS: Apple silicon and Intel" width="272" height="56">
   </picture></a>
   &nbsp;
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.deb"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux.svg" alt="Download for Linux: .deb, x86-64" width="272" height="56">
   </picture></a>
 </p>
 
 <p align="center">
-  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
 </p>
 
 <p align="center">
@@ -143,7 +143,7 @@ To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.
 tarball:
 
 ```sh
-npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe-gui-0.6.2.tgz
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe-gui-0.7.0.tgz
 ```
 
 Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
@@ -158,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.6.2 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.7.0 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -205,6 +205,16 @@ one line, a composer at the bottom. Advanced mode shows the full timeline with e
 call's input, output and duration, and a tier lens that shows the session as a lower-tier
 receiver would have got it. Send the next message, attach up to six images, stop a turn, or
 answer the prompt in place.
+
+**Files** (the folder on the bar, `⇧F`) opens the files the session read and changed
+beside the timeline, from its own events, as the repo's tree. A file opens on its changes
+against the text the agent last read, or the whole text as it stands, every version the
+agent made one step away. Click a line number to comment on it, as in a code review, or
+suggest the lines it should become; the comments go to the session as one message, or
+into the composer, and the list then says which files changed since your review. A
+second tab lists the tools that failed, each a jump to its row; where the session runs on
+this machine, a file opens in your editor. Everything works from the keyboard: ↓ ↑ over
+files and lines, Enter to open or comment, n and p between changes, Esc to step back.
 
 ### New session
 
@@ -286,7 +296,8 @@ home screen and it opens like an app. Details: [docs/remote.md](docs/remote.md).
 
 ### Keyboard, ⌘K and the look
 
-`⌘K` finds any session, page or action, and searches text across sessions. `c` starts a
+`⌘K` finds any session, page or action, and searches text across sessions; `/` then a
+path goes to a file any session changed, in its Files drawer. `c` starts a
 session, `j` `k` move, `Enter` opens, `Shift+Enter` opens beside, `a` and `d` allow or deny,
 `g` then a letter jumps between pages. `?` lists every binding in force; `/shortcuts`
 rebinds them, with vim and emacs presets.
@@ -301,8 +312,8 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.6.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_universal.dmg), signed and notarized |
-| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.AppImage), for any distribution |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg), signed and notarized |
+| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage), for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the

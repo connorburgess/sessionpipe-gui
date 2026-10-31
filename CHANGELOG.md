@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
+  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
+  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
+  "This Mac". A Mac still reads exactly as before.
+
+## [0.7.0] - 2026-10-31
+
 ### Added
 
 - **The phone's first run.** With no computer connected yet, the iPhone and Android
@@ -16,6 +25,44 @@ All notable changes to `sessionpipe-gui`. The format follows
   get one plain screen. Once the board is up, one sheet says the step left: the
   computer approves this iPhone once, where that is in the computer's own labels, "Ask
   <computer> to approve" (which files the request) and Later.
+- **Files beside a session.** A Files button on the session's bar (and the panel's head,
+  `⇧F`, the "⋯" menu) opens a drawer of every file the session read or changed, from the
+  events it already sent: the receiver's index of the whole session
+  (`GET /api/ui/sessions/:harness/:id/files`, the same reading the Review page makes) and
+  the live events since; nothing is asked of the machine. The list is the repo's tree, by
+  folder, each file with what happened to it and when; a filter narrows it; a file can be
+  marked viewed.
+- **A file's changes, its text, and every version.** A file opens on its **Changes**: the
+  lines taken out and put in against the text the agent last read, the rest folded past
+  three lines of context and opened in place; **Text** is the whole file as it stands,
+  rebuilt from its last Read or Write with the Edits after it applied in order and the
+  lines they wrote marked (hover one for the edit that wrote it). Every Read or Write the
+  agent made is a version, one step away. Edits the text cannot hold (a patch, a page of a
+  big file, a notebook cell) read as hunks. The page's `?file=<path>` opens the drawer on
+  one file; "Copy link to this file" writes it.
+- **Comment on a line to ask for a change.** Click a line number (shift-click, or ⇧↓, for
+  a range) and say what should change, or **suggest a replacement** for the lines; a
+  comment can be on the whole file. The comments gather at the drawer's foot and go to the
+  session as one review message (`path:line`, the lines quoted in a fence tagged by the
+  file's language, "Replace with:" for a suggestion, a per-item reply asked for), the same
+  signed `prompt` the composer sends, or into the composer to finish by hand. While the
+  agent is mid-turn the button says the review is read when the turn ends. Afterwards the
+  list says which files changed since your review.
+- **Problems.** The drawer's second tab lists every tool that failed and every error the
+  session raised, each a jump to its row in the timeline.
+- **Open in editor.** Where the session runs on this machine, a file opens in VS Code,
+  Cursor, Zed or Windsurf (the drawer's "⋯" chooses), at the commented line.
+- **The drawer from the keyboard.** `⇧F` opens it with focus in the filter; ↓ ↑ (j k) move
+  over the files and the lines, Enter opens a file or the comment on a line, n and p go to
+  the next and previous change, Esc steps back (the comment, the file, the drawer) wherever
+  focus is. Focus follows each step and returns where it was on close; over the timeline
+  (the panel, a narrow page) what is under the drawer is inert meanwhile; a status line
+  says what happened for a screen reader; forced colours draw the changes as borders.
+- **Go to file from ⌘K.** `/` then a path finds any file changed in the last thirty days,
+  across every session and machine (the Review page's reading); a query that reads as a
+  path brings the files in beside the sessions. Enter opens the newest session that touched
+  it, on that file; a file several sessions touched asks which (›); ⇧↵ opens it beside.
+  On a session's page, "Files of this session" toggles its drawer.
 
 ### Changed
 
@@ -25,10 +72,6 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
-  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
-  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
-  "This Mac". A Mac still reads exactly as before.
 - The phone app at tablet width (an iPad): the rail's head and the page bar start under
   the status bar, and the compose glyph no longer pushes the mark off the rail's edge.
 
@@ -598,7 +641,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...v0.6.0
