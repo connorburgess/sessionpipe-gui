@@ -8,12 +8,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
-  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
-  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
-  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
-  `windows-latest` again: its `npm ci` skips the prepare build, as desktop-release does, and
-  four tests that assumed macOS or Unix don't any more.
+- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
+  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
+  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
+  "This Mac". A Mac still reads exactly as before.
 
 ## [0.7.4] - 2026-11-03
 
