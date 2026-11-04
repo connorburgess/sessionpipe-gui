@@ -1009,7 +1009,9 @@ mod tests {
                 "--dry-run"
             ]
         );
-        assert!(inv.path.starts_with("/n:/c:"));
+        // node's and the CLI's folders first, in the platform's PATH form.
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        assert!(inv.path.starts_with(&format!("/n{sep}/c{sep}")));
         let npx = Tools {
             cli: None,
             node: Some("/n/node".into()),
