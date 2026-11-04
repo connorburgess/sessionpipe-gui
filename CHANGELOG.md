@@ -8,10 +8,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
-  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
-  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
-  "This Mac". A Mac still reads exactly as before.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
 
 ## [0.7.4] - 2026-11-03
 
