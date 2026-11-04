@@ -8,12 +8,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
-  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
-  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
-  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
-  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
-  off a Mac.
+- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
+  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
+  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
+  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
+  `windows-latest` again: its `npm ci` skips the prepare build, as desktop-release does, and
+  four tests that assumed macOS or Unix don't any more.
 
 ## [0.7.4] - 2026-11-03
 
