@@ -6,14 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- **`sessionpipe-gui service install` on Windows.** The receiver runs in the background as a
-  scheduled task that starts at your logon (`\sessionpipe\dev.spacesheep.sessionpipe-gui`
-  in Task Scheduler), with no console window and no administrator rights; `uninstall`,
-  `status`, `--dry-run` and the in-place upgrade work as on macOS and Linux, and the output
-  goes to `<state>/service.log`. Until now it said "a background service on Windows is not
-  here yet".
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; starts them with no console window; and finds the
+  receiver's run.json under USERPROFILE.
 
 ## [0.7.4] - 2026-11-03
 
