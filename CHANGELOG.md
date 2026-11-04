@@ -8,11 +8,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **A Windows file is listed once.** A full path from Claude Code on Windows
-  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
-  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
-  Review page and the changed-files count no longer give one file a row for each
-  spelling of its full path.
+- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
+  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
+  package or a git URL runs npm's own script under the GUI's node instead of failing with
+  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
+  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
 
 ## [0.7.4] - 2026-11-03
 
