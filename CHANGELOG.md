@@ -6,17 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
-  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
-  link name an address the other device can reach.
-- **A virtual adapter no longer comes first.** Windows' "vEthernet (…)" switches (WSL 2,
-  Hyper-V), VirtualBox and VMware host adapters, and Linux's libvirt, LXD, Incus, LXC,
-  Multipass and Podman bridges sort after the real interfaces, whatever their case, so the
-  phone's QR code, Connect and the `sink add` command name an address the other device can
-  reach. No address is dropped: a Hyper-V external switch keeps the host's LAN address on
-  "vEthernet (External…)", after any real-named interface.
+- **`sessionpipe-gui service install` on Windows.** The receiver runs in the background as a
+  scheduled task that starts at your logon (`\sessionpipe\dev.spacesheep.sessionpipe-gui`
+  in Task Scheduler), with no console window and no administrator rights; `uninstall`,
+  `status`, `--dry-run` and the in-place upgrade work as on macOS and Linux, and the output
+  goes to `<state>/service.log`. Until now it said "a background service on Windows is not
+  here yet".
 
 ## [0.7.4] - 2026-11-03
 
