@@ -8,11 +8,9 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
-  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
-  package or a git URL runs npm's own script under the GUI's node instead of failing with
-  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
-  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
 
 ## [0.7.4] - 2026-11-03
 
