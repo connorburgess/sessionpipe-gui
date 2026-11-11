@@ -238,6 +238,14 @@ pub fn windows_path_dirs(path: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The same folders as the words a child's PATH is joined from.
+fn windows_child_dirs(path: &str) -> Vec<String> {
+    windows_path_dirs(path)
+        .into_iter()
+        .map(|d| d.to_string_lossy().into_owned())
+        .collect()
+}
+
 /// A child of the app runs with no console window (a GUI app's console child gets a new one).
 #[cfg(windows)]
 fn no_window(c: &mut Command) -> &mut Command {
@@ -316,9 +324,10 @@ fn child_path(t: &Tools) -> String {
         .filter_map(|p| p.parent().map(|d| d.to_string_lossy().into_owned()))
         .collect();
     if cfg!(windows) {
-        // The rest of the app's own PATH: the installer runs schtasks and taskkill.
+        // The rest of the app's own PATH (the installer runs schtasks and taskkill): its
+        // absolute folders, as the search above takes them.
         let path = std::env::var("PATH").unwrap_or_default();
-        dirs.extend(path.split(';').filter(|d| !d.is_empty()).map(String::from));
+        dirs.extend(windows_child_dirs(&path));
     } else {
         dirs.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from));
     }
@@ -1150,6 +1159,11 @@ mod tests {
                 PathBuf::from(r"\\server\share\node"),
                 PathBuf::from("d:/node/"),
             ]
+        );
+        // The PATH handed to the installer is joined from the same folders.
+        assert_eq!(
+            windows_child_dirs(r#".;"C:\Program Files\nodejs";bin;C:\Windows\System32"#),
+            [r"C:\Program Files\nodejs", r"C:\Windows\System32"]
         );
         // Quotes and spaces around an entry come off before it is judged.
         assert_eq!(

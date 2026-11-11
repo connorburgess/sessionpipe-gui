@@ -64,12 +64,14 @@ exit 0
 }
 
 /** A fake schtasks: logs "schtasks <argv>"; /Create keeps the XML (read from UTF-16), /Query
- *  prints it (/XML) or a CSV row with the status, /Run and /End flip the status (/End of a
+ *  prints it as the real one does to a pipe (/XML with every non-ASCII byte a "?"; else a
+ *  CSV row with the status in German), /Run and /End flip the status (/End of a
  *  task that isn't running fails, as the real one does), /Delete forgets it; $FAKE_FAIL
  *  names a verb (/Create, /Run …) that exits 1. A fake taskkill that only logs. And a fake
- *  powershell that answers windows.ts's two scripts: the task's state and definition from
- *  what the fake schtasks keeps, and a process's command line from the file proc.<pid>
- *  (no file: no such process); $FAKE_FAIL=powershell makes it fail. */
+ *  powershell that answers windows.ts's two scripts: the task's state, and its definition
+ *  written as Out-File does (UTF-8 with a byte-order mark) from what the fake schtasks
+ *  keeps; and a process's command line from the file proc.<pid> (no file: no such process).
+ *  $FAKE_FAIL=powershell makes it fail, $FAKE_FAIL=process only the process question. */
 function fakeSchtasks(): string {
   const p = path.join(dir, "schtasks");
   writeFileSync(
@@ -81,7 +83,7 @@ t="${dir}/task.xml"; st="${dir}/task.status"
 case "$1" in
   /Create) iconv -f UTF-16 -t UTF-8 "$5" > "$t"; echo Ready > "$st";;
   /Query) [ -f "$t" ] || { echo "ERROR: The system cannot find the file specified." >&2; exit 1; }
-    if [ "$4" = "/XML" ]; then cat "$t"; else printf '"HOST","%s","N/A","%s"\\r\\n' "$3" "$(cat "$st")"; fi;;
+    if [ "$4" = "/XML" ]; then LC_ALL=C sed 's/[^ -~]/?/g' "$t"; else printf '"HOST","%s","N/A","%s"\\r\\n' "$3" "$([ "$(cat "$st")" = Running ] && echo Wird_ausgefuehrt || echo Bereit)"; fi;;
   /Run) echo Running > "$st";;
   /End) [ "$(cat "$st" 2>/dev/null)" = Running ] || { echo "ERROR: The task is not running." >&2; exit 1; }; echo Ready > "$st";;
   /Delete) rm -f "$t" "$st";;
@@ -106,12 +108,14 @@ function fakePowershell(): string {
     `#!/bin/sh
 [ "$FAKE_FAIL" = powershell ] && { echo "powershell: this system has scripts turned off." >&2; exit 1; }
 t="${dir}/task.xml"; st="${dir}/task.status"
+file=$(printf '%s' "$4" | sed -n "s/.*-LiteralPath '\\([^']*\\)'.*/\\1/p")
 case "$4" in
   *Get-ScheduledTask*) [ -f "$t" ] || { echo none; exit 0; }
-    if [ "$(cat "$st" 2>/dev/null)" = Running ]; then echo 4; else echo 3; fi
-    base64 < "$t" | tr -d '\\n'; echo;;
-  *Win32_Process*) pid=$(printf '%s' "$4" | sed -n 's/.*ProcessId=\\([0-9]*\\).*/\\1/p')
-    [ -f "${dir}/proc.$pid" ] && { base64 < "${dir}/proc.$pid" | tr -d '\\n'; echo; };;
+    { printf '\\357\\273\\277'; cat "$t"; printf '\\r\\n'; } > "$file"
+    if [ "$(cat "$st" 2>/dev/null)" = Running ]; then echo 4; else echo 3; fi;;
+  *Win32_Process*) [ "$FAKE_FAIL" = process ] && { echo "Get-CimInstance : Access denied" >&2; exit 1; }
+    pid=$(printf '%s' "$4" | sed -n 's/.*ProcessId=\\([0-9]*\\).*/\\1/p')
+    [ -f "${dir}/proc.$pid" ] && { printf '\\357\\273\\277'; cat "${dir}/proc.$pid"; printf '\\r\\n'; } > "$file";;
 esac
 exit 0
 `,
@@ -682,18 +686,22 @@ describe("the Windows scheduled task", () => {
     for (const w of ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "%TEMP%", ""]) expect(unsafeWord(["x", w])).toBe(w);
   });
 
-  it("reads the task's state as a number and its definition as UTF-8, whatever the console's code page and language", () => {
-    const state = "C:\\Users\\Zoë 日本\\sp state";
-    const text = taskXml({ ...spec, argv: [...spec.argv.slice(0, 5), state, "--quiet"] });
-    const answer = (n: number) => `${n}\r\n${Buffer.from(text, "utf8").toString("base64")}\r\n`;
-    expect(parseTaskQuery(answer(TASK_RUNNING))).toEqual({ state: 4, xml: text });
-    expect(taskArgv(parseTaskQuery(answer(3))!.xml)[5]).toBe(state);
+  it("asks for the task's state as a number and its definition in a file, with no pattern and no .NET call in the script", () => {
+    expect(parseTaskQuery("4\r\n")).toBe(TASK_RUNNING);
+    expect(parseTaskQuery("3\r\n")).toBe(3);
     expect(parseTaskQuery("none\r\n")).toBeNull();
     expect(() => parseTaskQuery("")).toThrow("unexpected answer: nothing");
     expect(() => parseTaskQuery("Running\r\n")).toThrow("unexpected answer: Running");
-    // The label goes into the script in single quotes, a quote in it doubled.
-    expect(taskQueryScript("dev.o'x")).toContain("-TaskPath '\\sessionpipe\\' -TaskName 'dev.o''x'");
-    expect(processQueryScript(4242)).toContain("-Filter 'ProcessId=4242'");
+    // The label and the file go in single quotes, a quote in them doubled; the name is
+    // compared, not matched, so a * in a label is no pattern.
+    const script = taskQueryScript("dev.o'x*", "C:\\Users\\Zoë's\\answer.txt");
+    expect(script).toContain("Where-Object{$_.TaskName -eq 'dev.o''x*'}");
+    expect(script).toContain("-LiteralPath 'C:\\Users\\Zoë''s\\answer.txt'");
+    expect(script).not.toContain("-TaskName");
+    const process = processQueryScript(4242, "C:\\t\\answer.txt");
+    expect(process).toContain("-Filter 'ProcessId=4242'");
+    // Constrained language mode refuses method calls on .NET types.
+    for (const text of [script, process]) expect(text).not.toMatch(/\]::/);
   });
 
   it("knows the receiver by its command line: the task's cli on the task's state dir", () => {
@@ -701,7 +709,7 @@ describe("the Windows scheduled task", () => {
     const line = `"${node}" "${cli}" --port 7828 --state "${state}" --quiet`;
     expect(isReceiverCommandLine(line, cli, state)).toBe(true);
     // Windows paths compare whatever the case.
-    expect(isReceiverCommandLine(line.toUpperCase().replace("--STATE", "--state"), cli, state)).toBe(true);
+    expect(isReceiverCommandLine(line.toUpperCase(), cli, state)).toBe(true);
     // Another program that got the pid; the same cli on another state dir; the cli's indexer child.
     expect(isReceiverCommandLine("C:\\Windows\\System32\\notepad.exe", cli, state)).toBe(false);
     expect(isReceiverCommandLine(line.replace("sp state", "other state"), cli, state)).toBe(false);
@@ -838,8 +846,13 @@ describe("service on Windows", () => {
     writeRunFile(state, { ...stale, pid: 4242 });
     proc(4242, "C:\\Windows\\System32\\notepad.exe");
     writeFileSync(log, "");
+    out = [];
+    errs = [];
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
+    // pid 4242 isn't alive here, so nothing was left running and nothing is said about it.
+    expect(out.at(-1)).toContain("stopped, and it won't start at login");
+    expect(errs).toEqual([]);
     // And --dry-run shows the same: no taskkill line for a pid that isn't the receiver.
     await runService({ verb: "install", port: 7829, state }, e);
     out = [];
@@ -862,6 +875,36 @@ describe("service on Windows", () => {
     writeFileSync(log, "");
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(calls()).toContain("taskkill /PID 4243 /T /F");
+  });
+
+  it("says so when a live pid in run.json can't be told to be the receiver, and doesn't call it stopped", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    const run = { port: 7829, pid: process.pid, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" };
+    const said = `pid ${process.pid} (${path.join(state, "run.json").replace(home, "~")}) is running, and its command line doesn't show it to be this service's receiver: left alone.`;
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeRunFile(state, run);
+    // Its command line can't be read (the process question fails): not killed, and said.
+    failVerb = "process";
+    writeFileSync(log, "");
+    errs = [];
+    expect(await runService({ verb: "install", port: 7830, state }, e)).toBe(0);
+    expect(calls().some((c) => c.startsWith("taskkill"))).toBe(false);
+    expect(errs[0]).toContain(said);
+    // It is another program (or a receiver of another task): the same, on uninstall.
+    failVerb = "";
+    proc(process.pid, "C:\\Windows\\System32\\notepad.exe");
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.join("\n")).toContain(said);
+    out = [];
+    errs = [];
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls().some((c) => c.startsWith("taskkill"))).toBe(false);
+    expect(out.at(-1)).toBe(`removed ${SERVICE_LABEL}: it won't start at login`);
+    expect(errs[0]).toContain(said);
+    expect(existsSync(path.join(state, "run.json"))).toBe(true);
   });
 
   it("says so and touches nothing when Task Scheduler can't be read", async () => {
