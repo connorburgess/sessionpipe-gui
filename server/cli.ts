@@ -9,7 +9,15 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setEnabled, setTlsPreference } from "./config.js";
+import {
+  ConfigError,
+  defaultStateDir,
+  packageVersion,
+  readGuiConfig,
+  setDisabled,
+  setEnabled,
+  setTlsPreference,
+} from "./config.js";
 import { findExtra, formatCatalog, installableExtras } from "./extensions/catalog.js";
 import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
@@ -119,7 +127,8 @@ search (every session's prompts, replies and tool calls; works offline, no brows
                                              bring the search index up to date (asks the
                                              running GUI when there is one)
 
-service (the receiver in the background: started at login, restarted if it stops):
+service (the receiver in the background: started at login; on macOS and Linux also
+         restarted if it stops):
 
   sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui),
                                              a systemd --user unit (Linux) or a scheduled
@@ -360,7 +369,8 @@ async function banner(app: App): Promise<string> {
     const qr = await QRCode.toString(phoneUrl, { type: "terminal", small: true });
     for (const l of qr.split("\n")) lines.push(`  ${l}`);
   }
-  lines.push("  from another machine:");
+  // No LAN URL (a loopback --host, or no network): the sink command reaches this machine only.
+  lines.push(info.urls.lan.length ? "  from another machine:" : "  from this machine:");
   lines.push(`    ${info.sinkCommand}`);
   if (info.remote) {
     lines.push("  from a machine anywhere (through the proxy):");
@@ -399,11 +409,7 @@ async function extensionCommand(parsed: Args): Promise<void> {
   const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
   const bundled = bundledDirs(parsed.bundledDir);
   const disabled = () => readGuiConfig(stateDir).disabled ?? [];
-  const pluginOpts = () => ({
-    bundledDir: bundled.plugin,
-    disabled,
-    enabled: () => readGuiConfig(stateDir).enabled ?? [],
-  });
+  const pluginOpts = () => ({ bundledDir: bundled.plugin, lists: () => readGuiConfig(stateDir) });
   const skinOpts = () => ({ bundledDir: bundled.skin, disabled });
   const viewOpts = () => ({ bundledDir: bundled.view, disabled });
   const ops =
@@ -766,4 +772,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-void main();
+main().catch((e: unknown) => {
+  // A config.json that cannot be read stops every command the same way, before it writes
+  // anything: the message says what the file holds and what to do.
+  if (e instanceof ConfigError) fail(e.message);
+  throw e;
+});

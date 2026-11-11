@@ -6,7 +6,6 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
-import * as core from "sessionpipe-core/control";
 import {
   type Assertion,
   b64url,
@@ -44,6 +43,12 @@ export interface UiRouteDeps {
   base: string;
   /** Device keys are taken (devicekeys.ts); off, a device key or signature is a 400. */
   device: boolean;
+  /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
+   *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
+  remoteSend?: (
+    m: MachineRow,
+    body: Record<string, unknown>,
+  ) => Promise<{ status: number; json: Record<string, unknown> }>;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -87,11 +92,17 @@ const keyShape = (device: boolean) => (device ? "key: {id, alg, spki[, type, sto
 const proofShape = (device: boolean) =>
   device ? "proof: {cred, ad, cd, sig} or {cred, sig}" : "proof: {cred, ad, cd, sig}";
 
+/** The harness name of the machine's own pseudo-sessions: `sessionpipe:keys`, which a
+ *  `key.add` names, and `sessionpipe:pool` (POOL_SESSION). Neither is a coding session. */
+const OWN_HARNESS = "sessionpipe:";
+
 /** The second look at a handoff (CONTROL.md §3.1 `reply_to`, DESIGN §2.3), before
  *  precheck.ts sees the command: `reply_to` rides only on a `prompt` or a `start`, names a
- *  `<harness>:<id>` on the same machine, and goes only to a machine whose hello said
- *  `handoff` (a daemon that predates it would refuse the whole command `bad_fields`, or
- *  worse, ignore the relay). Null when there is nothing to refuse. */
+ *  `<harness>:<id>` on the same machine, a coding session and never the machine's own key
+ *  store or pool (an answer is a message for a model; the verifier takes any well-formed
+ *  ref there), and goes only to a machine whose hello said `handoff` (a daemon that
+ *  predates it would refuse the whole command `bad_fields`, or worse, ignore the relay).
+ *  Null when there is nothing to refuse. */
 export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: boolean }): Refusal | null {
   if (!Object.hasOwn(cmd, "reply_to")) return null;
   if (cmd.kind !== "prompt" && cmd.kind !== "start")
@@ -99,33 +110,11 @@ export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: 
   if (typeof cmd.reply_to !== "string" || !SESSION_REF.test(cmd.reply_to))
     return { code: "bad_fields", why: "reply_to is a session, <harness>:<id>" };
   if (cmd.reply_to === cmd.session) return { code: "bad_fields", why: "reply_to is another session, not this one" };
+  if (cmd.reply_to.startsWith(OWN_HARNESS))
+    return { code: "bad_fields", why: "reply_to is a coding session, not the machine's own keys or pool" };
   if (!facts.handoff)
     return { code: "handoff", why: "this machine did not say it takes handoffs; the answer would not come back" };
   return null;
-}
-
-/** Does this receiver's own sessionpipe-core take `reply_to` on a prompt? Its verifier runs
- *  on every command before the second look, and a core from before `ask` (0.10.0) refuses
- *  the field `bad_fields` there, so until the core is bumped no handoff is queued through
- *  this receiver, whatever the machine's hello says. Feature detection, as tilde.ts does:
- *  the core's own parser is asked. */
-export function coreTakesReplyTo(c: Pick<typeof core, "parseCommand" | "COMMAND_TYPE"> = core): boolean {
-  const cmd = {
-    v: 1,
-    t: c.COMMAND_TYPE,
-    machine: `m_${"a".repeat(22)}`,
-    kind: "prompt",
-    session: "claude-code:00000000-0000-4000-8000-000000000000",
-    text: "x",
-    reply_to: "codex:00000000-0000-4000-8000-000000000001",
-    nonce: "A".repeat(22),
-    iat: 1_700_000_000,
-  };
-  try {
-    return c.parseCommand(JSON.stringify(cmd)).ok === true;
-  } catch {
-    return false;
-  }
 }
 
 /** The command without `reply_to`, for the closed field lists that predate it. */
@@ -261,9 +250,8 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
   if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
   const opts = { machine: m.id, rpId: d.rpId(), trusted: m.keys, now: Date.now(), maxAgeMs: RECEIVER_MAX_AGE_MS };
-  // A `pool` command (DESIGN §2.3) is verified by pool.ts: the same checks on the core's
-  // own primitives, since this core's parseCommand closes the kind set before it looks
-  // at a signature. Everything else is the core's word.
+  // A `pool` command (CONTROL.md §6 `pool`) goes through pool.ts: the core's verdict, held
+  // to the fresh confirm some of its actions take. Everything else is the core's word alone.
   const verdict = looksLikePool(signed.cmd) ? await verifyPoolCommand(signed, opts) : await verifyCommand(signed, opts);
   if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
   // The second look: what this machine's hello advertised (precheck.ts). The same
@@ -279,6 +267,56 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
     cmd: verdict.cmd as unknown as ControlCommand,
     opts: { ...(ttl ? { expiresInMs: ttl } : {}), ...(typeof body.from === "string" ? { from: body.from } : {}) },
   };
+}
+
+/** A send for a machine paired on spacesheep: not verified here (its keys are ids only,
+ *  its rp id is spacesheep's), carried to spacesheep's jobs route, which verifies it
+ *  against the machine's keys and queues it; the row here follows the job's status.
+ *  spacesheep's refusals come back in the shape the page already reads (422 + code). */
+async function forwardSend(
+  state: ControlState,
+  m: MachineRow,
+  body: Record<string, unknown>,
+  remoteSend: UiRouteDeps["remoteSend"],
+): Promise<Reply> {
+  if (!remoteSend) throw new HttpError(503, { reason: "no_relay", error: "Not connected to spacesheep any more." });
+  if (typeof body.cmd !== "string")
+    throw new HttpError(400, { reason: "bad_request", error: "cmd is the signed command string." });
+  let cmd: ControlCommand;
+  try {
+    cmd = JSON.parse(body.cmd) as ControlCommand;
+  } catch {
+    throw new HttpError(400, { reason: "bad_request", error: "cmd is not JSON." });
+  }
+  const signed: SignedCommand = { cmd: body.cmd };
+  if (typeof body.csig === "string") signed.csig = body.csig;
+  if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
+  if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
+  const r = await remoteSend(m, {
+    cmd: signed.cmd,
+    csig: signed.csig ?? null,
+    grant: signed.grant ?? null,
+    confirm: signed.confirm ?? null,
+  });
+  if (r.status === 202) {
+    const job = Number(r.json.job);
+    const row = state.enqueueRemote(
+      m,
+      signed,
+      cmd,
+      { via: "ui", ...(typeof body.from === "string" ? { from: body.from } : {}) },
+      job,
+    );
+    return { status: 201, json: toActivity(row) };
+  }
+  const code = String(r.json.code ?? "");
+  const error = String(r.json.error ?? "spacesheep did not take it");
+  // The second look there wants a fresh tap: the same word the page knows from a machine.
+  if (r.status === 409 && code === "confirm") throw new HttpError(422, { reason: error, code: "confirm_required" });
+  if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
+  if (r.status === 400 && (code === "bad" || code === "unlock"))
+    throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
+  throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
 
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
@@ -453,7 +491,13 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   router.post(
     `${base}/send`,
     guarded(async (ctx): Promise<Reply> => {
-      const verified = await verifySend({ state, rpId }, await ctx.json<unknown>(SEND_BODY_MAX));
+      const raw = await ctx.json<unknown>(SEND_BODY_MAX);
+      const target =
+        raw && typeof raw === "object"
+          ? state.machine(String((raw as { machineId?: unknown }).machineId ?? ""))
+          : undefined;
+      if (target?.remote) return forwardSend(state, target, raw as Record<string, unknown>, d.remoteSend);
+      const verified = await verifySend({ state, rpId }, raw);
       return { status: 201, json: queueSend(state, verified) };
     }),
   );
