@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **On Windows, "Start sessionpipe" looks for Node only in full paths.** After PATH it tries
+  the folders `ProgramFiles`, `APPDATA`, `NVM_SYMLINK`, `LOCALAPPDATA` and `USERPROFILE`
+  name. A value there that is not a full path (`nvm`, `.`, an unexpanded
+  `%NVM_HOME%\nodejs`) was looked up from the folder the app was started in, so a
+  `node.exe` lying in that folder could be the one it ran. Such a value is now left out, as
+  a `.` on PATH already is (#101).
+
 ## [0.8.0] - 2026-11-11
 
 ### Added
