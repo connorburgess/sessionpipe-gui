@@ -104,8 +104,51 @@ export function taskArgv(text: string): string[] {
   return command ? [command.replace(/^"|"$/g, ""), ...words(args)] : [];
 }
 
-/** `schtasks /Query /TN <name> /FO CSV /NH /V`: the fourth column is the task's status. */
-export function parseSchtasksQuery(out: string): { running: boolean } {
-  const cols = [...(out.trim().split(/\r?\n/)[0] ?? "").matchAll(/"([^"]*)"/g)].map((m) => m[1]);
-  return { running: cols[3] === "Running" };
+// Reading the task back goes through PowerShell, not `schtasks /Query`: schtasks answers in
+// the console's code page (a state dir under a non-ASCII folder comes back with "?" in it)
+// and in the system's language (the status column says "Running" only in English). Both
+// scripts print ASCII only: a number, and text as base64 of its UTF-8.
+
+const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+const utf8Base64 = (expr: string): string => `[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(${expr}))`;
+const fromBase64 = (s: string): string => Buffer.from(s, "base64").toString("utf8");
+
+/** Task Scheduler's TASK_STATE_RUNNING: a number, the same in every language. */
+export const TASK_RUNNING = 4;
+
+/** `powershell -Command <this>` prints "none" when no task has the label; else the task's
+ *  state as a number, then its definition (what `schtasks /Query /XML` shows). */
+export function taskQueryScript(label: string): string {
+  const at = `-TaskPath '\\sessionpipe\\' -TaskName ${psQuote(label)}`;
+  return [
+    "$ErrorActionPreference='Stop'",
+    `$t=Get-ScheduledTask ${at} -ErrorAction SilentlyContinue`,
+    "if(-not $t){'none';exit 0}",
+    "[int]$t.State",
+    utf8Base64(`[string](Export-ScheduledTask ${at})`),
+  ].join(";");
+}
+
+/** What taskQueryScript printed; null when no task has the label. */
+export function parseTaskQuery(out: string): { state: number; xml: string } | null {
+  const [state, xml] = out.trim().split(/\s+/);
+  if (state === "none") return null;
+  if (!/^\d+$/.test(state ?? "") || !xml) throw new Error(`unexpected answer: ${out.trim().slice(0, 80) || "nothing"}`);
+  return { state: Number(state), xml: fromBase64(xml) };
+}
+
+/** `powershell -Command <this>` prints the command line of the process with that pid;
+ *  nothing when there is no such process, or its command line can't be read. */
+export function processQueryScript(pid: number): string {
+  return `$p=Get-CimInstance Win32_Process -Filter 'ProcessId=${Math.trunc(pid)}';if($p -and $p.CommandLine){${utf8Base64("[string]$p.CommandLine")}}`;
+}
+export const parseProcessQuery = (out: string): string => fromBase64(out.trim());
+
+/** Is this command line the receiver a task of ours started: the same cli, on the same
+ *  state dir? Windows reuses pids, so the pid in a run.json left by a killed receiver can be
+ *  any program's by now. Paths compare as Windows compares them, whatever the case. */
+export function isReceiverCommandLine(line: string, cli: string, state: string): boolean {
+  const w = words(line).map((x) => x.toLowerCase());
+  const i = w.indexOf("--state");
+  return cli !== "" && w.includes(cli.toLowerCase()) && i >= 0 && w[i + 1] === state.toLowerCase();
 }

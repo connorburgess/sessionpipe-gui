@@ -19,7 +19,18 @@ import {
 } from "./index.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitPath } from "./systemd.js";
-import { parseSchtasksQuery, taskArguments, taskArgv, taskName, taskXml, unsafeWord } from "./windows.js";
+import {
+  isReceiverCommandLine,
+  parseTaskQuery,
+  processQueryScript,
+  TASK_RUNNING,
+  taskArguments,
+  taskArgv,
+  taskName,
+  taskQueryScript,
+  taskXml,
+  unsafeWord,
+} from "./windows.js";
 
 let dir: string;
 let home: string;
@@ -55,7 +66,10 @@ exit 0
 /** A fake schtasks: logs "schtasks <argv>"; /Create keeps the XML (read from UTF-16), /Query
  *  prints it (/XML) or a CSV row with the status, /Run and /End flip the status (/End of a
  *  task that isn't running fails, as the real one does), /Delete forgets it; $FAKE_FAIL
- *  names a verb (/Create, /Run …) that exits 1. And a fake taskkill that only logs. */
+ *  names a verb (/Create, /Run …) that exits 1. A fake taskkill that only logs. And a fake
+ *  powershell that answers windows.ts's two scripts: the task's state and definition from
+ *  what the fake schtasks keeps, and a process's command line from the file proc.<pid>
+ *  (no file: no such process); $FAKE_FAIL=powershell makes it fail. */
 function fakeSchtasks(): string {
   const p = path.join(dir, "schtasks");
   writeFileSync(
@@ -85,6 +99,27 @@ function fakeTaskkill(): string {
   return p;
 }
 
+function fakePowershell(): string {
+  const p = path.join(dir, "powershell");
+  writeFileSync(
+    p,
+    `#!/bin/sh
+[ "$FAKE_FAIL" = powershell ] && { echo "powershell: this system has scripts turned off." >&2; exit 1; }
+t="${dir}/task.xml"; st="${dir}/task.status"
+case "$4" in
+  *Get-ScheduledTask*) [ -f "$t" ] || { echo none; exit 0; }
+    if [ "$(cat "$st" 2>/dev/null)" = Running ]; then echo 4; else echo 3; fi
+    base64 < "$t" | tr -d '\\n'; echo;;
+  *Win32_Process*) pid=$(printf '%s' "$4" | sed -n 's/.*ProcessId=\\([0-9]*\\).*/\\1/p')
+    [ -f "${dir}/proc.$pid" ] && { base64 < "${dir}/proc.$pid" | tr -d '\\n'; echo; };;
+esac
+exit 0
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
 type Version = string | undefined;
 /** `probe` and `running` answer from their lists in turn, repeating the last answer. */
 function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, running: Version | Version[] = undefined) {
@@ -99,6 +134,7 @@ function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, runn
     systemctl: fakeTool("systemctl"),
     schtasks: fakeSchtasks(),
     taskkill: fakeTaskkill(),
+    powershell: fakePowershell(),
     user: "CONNOR-PC\\connor",
     node: "/opt/homebrew/Cellar/node/23.6.1/bin/node",
     cli: "/opt/homebrew/lib/node_modules/sessionpipe-gui/dist/cli.js",
@@ -646,11 +682,32 @@ describe("the Windows scheduled task", () => {
     for (const w of ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "%TEMP%", ""]) expect(unsafeWord(["x", w])).toBe(w);
   });
 
-  it("reads schtasks /Query's status column", () => {
-    expect(parseSchtasksQuery('"HOST","\\sessionpipe\\x","N/A","Running","Interactive only"\r\n')).toEqual({
-      running: true,
-    });
-    expect(parseSchtasksQuery('"HOST","\\sessionpipe\\x","N/A","Ready"')).toEqual({ running: false });
+  it("reads the task's state as a number and its definition as UTF-8, whatever the console's code page and language", () => {
+    const state = "C:\\Users\\Zoë 日本\\sp state";
+    const text = taskXml({ ...spec, argv: [...spec.argv.slice(0, 5), state, "--quiet"] });
+    const answer = (n: number) => `${n}\r\n${Buffer.from(text, "utf8").toString("base64")}\r\n`;
+    expect(parseTaskQuery(answer(TASK_RUNNING))).toEqual({ state: 4, xml: text });
+    expect(taskArgv(parseTaskQuery(answer(3))!.xml)[5]).toBe(state);
+    expect(parseTaskQuery("none\r\n")).toBeNull();
+    expect(() => parseTaskQuery("")).toThrow("unexpected answer: nothing");
+    expect(() => parseTaskQuery("Running\r\n")).toThrow("unexpected answer: Running");
+    // The label goes into the script in single quotes, a quote in it doubled.
+    expect(taskQueryScript("dev.o'x")).toContain("-TaskPath '\\sessionpipe\\' -TaskName 'dev.o''x'");
+    expect(processQueryScript(4242)).toContain("-Filter 'ProcessId=4242'");
+  });
+
+  it("knows the receiver by its command line: the task's cli on the task's state dir", () => {
+    const [node, cli, , , , state] = spec.argv as [string, string, string, string, string, string];
+    const line = `"${node}" "${cli}" --port 7828 --state "${state}" --quiet`;
+    expect(isReceiverCommandLine(line, cli, state)).toBe(true);
+    // Windows paths compare whatever the case.
+    expect(isReceiverCommandLine(line.toUpperCase().replace("--STATE", "--state"), cli, state)).toBe(true);
+    // Another program that got the pid; the same cli on another state dir; the cli's indexer child.
+    expect(isReceiverCommandLine("C:\\Windows\\System32\\notepad.exe", cli, state)).toBe(false);
+    expect(isReceiverCommandLine(line.replace("sp state", "other state"), cli, state)).toBe(false);
+    expect(isReceiverCommandLine(`"${node}" "${cli}" index --ipc`, cli, state)).toBe(false);
+    expect(isReceiverCommandLine("", cli, state)).toBe(false);
+    expect(isReceiverCommandLine(line, "", state)).toBe(false);
   });
 });
 
@@ -671,6 +728,10 @@ describe("service on Windows", () => {
       running,
     );
   const name = taskName(SERVICE_LABEL);
+  /** What the fake powershell says the process with that pid is. */
+  const proc = (pid: number, line: string) => writeFileSync(path.join(dir, `proc.${pid}`), line);
+  const receiverLine = (e: ServiceEnv, state: string, port = 7829) =>
+    `"${e.node}" ${e.cli} --port ${port} --state ${state} --quiet`;
 
   it("creates the task from a UTF-16 definition, runs it, and leaves no file behind", async () => {
     const e = win();
@@ -705,6 +766,7 @@ describe("service on Windows", () => {
       url: "http://127.0.0.1:7829",
       startedAt: "now",
     });
+    proc(process.pid, receiverLine(e, state));
     out = [];
     expect(await runService({ verb: "status" }, e)).toBe(0);
     expect(out[0]).toBe(`service   ${SERVICE_LABEL} (Task Scheduler) · running · 0.6.0`);
@@ -718,6 +780,8 @@ describe("service on Windows", () => {
       `schtasks /Delete /TN ${name} /F`,
     ]);
     expect(out.at(-1)).toContain("won't start at login");
+    // The killed receiver never removed its run.json; uninstall did.
+    expect(existsSync(path.join(state, "run.json"))).toBe(false);
     expect(await runService({ verb: "status" }, e)).toBe(3);
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(out.at(-1)).toContain("nothing to do");
@@ -737,6 +801,7 @@ describe("service on Windows", () => {
     const old = win({ cli: "C:\\old\\node_modules\\sessionpipe-gui\\dist\\cli.js" });
     await runService({ verb: "install", port: 7829, state }, old);
     writeRunFile(state, { port: 7829, pid: 777, version: "0.5.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(777, receiverLine(old, state));
     writeFileSync(log, "");
     out = [];
     expect(await runService({ verb: "install" }, win({}, "gui", ["0.5.0", "0.6.0"]))).toBe(0);
@@ -748,6 +813,71 @@ describe("service on Windows", () => {
     ]);
     expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
     expect(taskArgv(readFileSync(path.join(dir, "task.xml"), "utf8"))[1]).toContain("AppData");
+  });
+
+  it("leaves the pid in run.json alone when it is another program's by now, or nobody's", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    const stale = { port: 7829, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" };
+    const stops = () => calls().filter((c) => c.startsWith("taskkill") || c.includes("/End"));
+    for (const line of [
+      "C:\\Windows\\System32\\notepad.exe C:\\notes.txt", // the pid was reused
+      receiverLine(e, path.join(dir, "another state")), // another receiver, not this task's
+      undefined, // no such process
+    ]) {
+      writeRunFile(state, { ...stale, pid: 4242 });
+      rmSync(path.join(dir, "proc.4242"), { force: true });
+      if (line) proc(4242, line);
+      writeFileSync(log, "");
+      expect(await runService({ verb: "install", port: 7830, state }, e)).toBe(0);
+      expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
+      expect(JSON.parse(readFileSync(path.join(state, "run.json"), "utf8")).pid).toBe(4242);
+      await runService({ verb: "install", port: 7829, state }, e);
+    }
+    writeRunFile(state, { ...stale, pid: 4242 });
+    proc(4242, "C:\\Windows\\System32\\notepad.exe");
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
+    // And --dry-run shows the same: no taskkill line for a pid that isn't the receiver.
+    await runService({ verb: "install", port: 7829, state }, e);
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.join("\n")).not.toContain("taskkill");
+  });
+
+  it('keeps a state dir under a non-ASCII folder: install again is "already running", and the receiver there is the one stopped', async () => {
+    const state = path.join(dir, "Zoë 日本", "sp state");
+    const e = win({}, [null, "gui"], "0.6.0");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    out = [];
+    expect(await runService({ verb: "install" }, e)).toBe(0);
+    expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
+    out = [];
+    expect(await runService({ verb: "status" }, e)).toBe(0);
+    expect(out).toContain(`state     ${state.replace(home, "~")}`);
+    writeRunFile(state, { port: 7829, pid: 4243, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(4243, receiverLine(e, `"${state}"`));
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls()).toContain("taskkill /PID 4243 /T /F");
+  });
+
+  it("says so and touches nothing when Task Scheduler can't be read", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(log, "");
+    failVerb = "powershell";
+    for (const verb of ["install", "uninstall", "status"] as const) {
+      errs = [];
+      expect(await runService({ verb }, e)).toBe(1);
+      expect(errs[0]).toContain("can't read Task Scheduler through");
+      expect(errs[0]).toContain("scripts turned off");
+    }
+    expect(readFileSync(log, "utf8")).toBe("");
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(true);
   });
 
   it("refuses a task under our name that runs something else", async () => {
