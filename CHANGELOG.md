@@ -139,6 +139,18 @@ All notable changes to `sessionpipe-gui`. The format follows
   package or a git URL runs npm's own script under the GUI's node instead of failing with
   "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
   refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; and starts them with no console window. Only absolute
+  folders of PATH are searched, so a `.` there never runs a `node.exe` from the folder the
+  app was started in. The receiver itself does not start from the button yet: until
+  `sessionpipe-gui service install` has a Windows service (#100), the welcome stops at that
+  command's own words, "It didn't start: a background service on Windows is not here yet:
+  run `sessionpipe-gui` in a terminal, or add it to Startup apps yourself", with Try again.
+  With a receiver started that way, the app, opened again, finds it on this computer (it
+  looked for it only under HOME, which Windows doesn't set, and showed the welcome instead).
 
 ## [0.7.5] - 2026-11-06
 
