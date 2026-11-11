@@ -214,11 +214,26 @@ pub fn windows_prefixes(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
     v
 }
 
-/// The folders on a PATH string, as Windows writes it (`;`, entries may be quoted).
+/// A Windows path that names one folder whatever the working directory and its drive are:
+/// a drive and a root (`C:\x`, `C:/x`), or two separators first (a UNC share, `\\?\`,
+/// `\\.\`). Not `.`, `bin`, `C:x` (that drive's own working directory) or `\x` (the
+/// working directory's drive). Read from the text, so it answers the same on every platform.
+fn windows_absolute(p: &str) -> bool {
+    let sep = |b: &u8| matches!(b, b'\\' | b'/');
+    match p.as_bytes() {
+        [a, b, ..] if sep(a) && sep(b) => true,
+        [drive, b':', root, ..] => drive.is_ascii_alphabetic() && sep(root),
+        _ => false,
+    }
+}
+
+/// The folders on a PATH string, as Windows writes it (`;`, entries may be quoted): the
+/// absolute ones only, as `parse_command_v` keeps absolute paths only, so a `.` or a `bin`
+/// on PATH never runs a node.exe from the folder the app happened to be started in.
 pub fn windows_path_dirs(path: &str) -> Vec<PathBuf> {
     path.split(';')
         .map(|d| d.trim().trim_matches('"'))
-        .filter(|d| !d.is_empty())
+        .filter(|d| windows_absolute(d))
         .map(PathBuf::from)
         .collect()
 }
@@ -1120,6 +1135,50 @@ mod tests {
                 PathBuf::from(r"C:\b")
             ]
         );
+    }
+
+    #[test]
+    fn keeps_only_the_absolute_folders_of_a_windows_path() {
+        // `.`, a relative `bin`, an empty entry, a drive with no root and a root with no
+        // drive all depend on where the app was started: none is searched.
+        assert_eq!(
+            windows_path_dirs(
+                r"C:\tools\node;.;bin;;.\node_modules\.bin;..;C:rel;\rooted;\\server\share\node;d:/node/"
+            ),
+            [
+                PathBuf::from(r"C:\tools\node"),
+                PathBuf::from(r"\\server\share\node"),
+                PathBuf::from("d:/node/"),
+            ]
+        );
+        // Quotes and spaces around an entry come off before it is judged.
+        assert_eq!(
+            windows_path_dirs(r#" "." ; "C:\Program Files\nodejs\" ;"bin""#),
+            [PathBuf::from(r"C:\Program Files\nodejs\")]
+        );
+        for (p, absolute) in [
+            (r"C:\", true),
+            (r"C:\Program Files\nodejs", true),
+            ("c:/nodejs", true),
+            (r"\\server\share", true),
+            (r"\\?\C:\nodejs", true),
+            (r"\\.\C:\nodejs", true),
+            ("", false),
+            (".", false),
+            ("..", false),
+            ("bin", false),
+            (r".\bin", false),
+            ("C:", false),
+            ("C:nodejs", false),
+            (r"\nodejs", false),
+            ("/nodejs", false),
+            (r"1:\nodejs", false),
+        ] {
+            assert_eq!(windows_absolute(p), absolute, "{p:?}");
+            // Windows' own answer is the same one.
+            #[cfg(windows)]
+            assert_eq!(Path::new(p).is_absolute(), absolute, "{p:?} (std)");
+        }
     }
 
     #[test]
