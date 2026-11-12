@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **On Windows, "Start sessionpipe" looks for Node only in full paths.** After PATH it tries
+  the folders `ProgramFiles`, `APPDATA`, `NVM_SYMLINK`, `LOCALAPPDATA` and `USERPROFILE`
+  name. A value there that is not a full path (`nvm`, `.`, an unexpanded
+  `%NVM_HOME%\nodejs`) was looked up from the folder the app was started in, so a
+  `node.exe` lying in that folder could be the one it ran. Such a value is now left out, as
+  a `.` on PATH already is (#101).
+
+## [0.8.0] - 2026-11-11
+
 ### Added
 
 - The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
@@ -199,6 +210,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   background service on Windows is not here yet…". With a receiver started in a terminal,
   the app, opened again, finds it on this computer (it looked for it only under HOME,
   which Windows doesn't set, and showed the welcome instead).
+- **The Windows app's updater reads update archives with `zip` 9.5.1** (it was 4.6.1), which
+  has the fixes for an archive whose two headers disagree writing files outside the update
+  folder (GHSA-m665-v7pm-7grj, CVE-2026-115905), a symlink target that aborts extraction or
+  exhausts memory (GHSA-q7v9-x93c-xqv3, CVE-2026-115909), and an AES entry passing its HMAC
+  check when the file ends early (GHSA-8hxf-qr8p-62x4, CVE-2026-115906). It comes with
+  `tauri-plugin-updater` 2.14.1, whose own code is unchanged. The macOS and Linux apps never
+  read update archives with `zip`.
 
 ## [0.7.5] - 2026-11-06
 
@@ -911,7 +929,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...v0.7.3
